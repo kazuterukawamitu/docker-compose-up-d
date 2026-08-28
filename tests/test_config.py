@@ -10,9 +10,12 @@ def test_load_settings_defaults_to_dry_run(tmp_path, monkeypatch) -> None:
     monkeypatch.delenv("DRY_RUN", raising=False)
     monkeypatch.delenv("BITBANK_API_KEY", raising=False)
     monkeypatch.delenv("BITBANK_API_SECRET", raising=False)
+    monkeypatch.delenv("WIKI_CROSS_RULES", raising=False)
     settings = load_settings(tmp_path / "missing.env")
     assert settings.dry_run is True
     assert settings.pair == "btc_jpy"
+    assert settings.wiki_cross_rules is False
+    assert settings.no_trade_timeout_seconds == 900
 
 
 def test_live_without_keys_fails(tmp_path, monkeypatch) -> None:

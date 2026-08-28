@@ -14,6 +14,7 @@ from bitbank_bot.exceptions import BotError, ExchangeError, RiskBlocked
 from bitbank_bot.exchange.bitbank_rest import BitbankRest
 from bitbank_bot.exchange.bitbank_ws import BitbankPublicWS
 from bitbank_bot.instance_lock import InstanceLock
+from bitbank_bot.logging_setup import log_event
 from bitbank_bot.market.cache import MarketCache
 from bitbank_bot.models import BotStats, Snapshot, Ticker
 from bitbank_bot.orders.manager import OrderManager
@@ -21,6 +22,7 @@ from bitbank_bot.orders.sizing import plan_size
 from bitbank_bot.orders.states import apply_fill, load_position, save_position
 from bitbank_bot.risk.manager import RiskManager
 from bitbank_bot.strategy.ma_rules import MaRuleStrategy
+from bitbank_bot.watchdog import diagnose, from_stats
 
 log = logging.getLogger(__name__)
 JST = ZoneInfo("Asia/Tokyo")
@@ -96,11 +98,13 @@ class TradingBot:
             self.cache.circuit_mode = await self.rest.fetch_circuit_break(self.settings.pair)
         except ExchangeError:
             log.exception("circuit_break_info unavailable")
+        self.stats.last_market_data_ms = _now_ms()
         log.info("bootstrapped %s candles last=%s", len(candles), ticker.last)
 
     async def cycle(self) -> None:
         assert self.rest is not None
         self._roll_day()
+        snapshot: Snapshot | None = None
         try:
             min_bars = max(self.settings.ema_slow + self.settings.slope_lookback + 5, 60)
             if len(self.cache.candles) < min_bars:
@@ -121,6 +125,7 @@ class TradingBot:
                 self.cache.circuit_mode = await self.rest.fetch_circuit_break(self.settings.pair)
             except ExchangeError:
                 log.exception("circuit_break_info refresh failed")
+            self.stats.last_market_data_ms = _now_ms()
             jpy_free, btc_free = await self._balances()
             snapshot = self._snapshot(jpy_free, btc_free)
             signal = self.strategy.evaluate(
@@ -128,26 +133,45 @@ class TradingBot:
                 self.position,
                 live_price=snapshot.ticker.last,
             )
+            self.stats.strategy_evaluations += 1
             self.stats.last_signal = signal
             self.stats.signals_seen += 1
-            log.info("signal %s rule=%s reason=%s", signal.action, signal.rule_id, signal.reason)
+            if signal.action == "BUY":
+                self.stats.buy_signals += 1
+            elif signal.action == "SELL":
+                self.stats.sell_signals += 1
+            log_event(
+                "SIGNAL",
+                action=signal.action,
+                rule=signal.rule_id,
+                reason=signal.reason,
+                last=snapshot.ticker.last,
+                dry_run=self.settings.dry_run,
+            )
             if signal.action == "HOLD":
-                render_status(self.settings, snapshot, self.stats, self.position)
                 return
             decision = self.risk.check(signal, snapshot, self.stats.daily_realized_pnl, self.stats.realized_pnl)
             if not decision.allowed:
                 self.stats.last_block_reason = decision.reason
-                log.warning("risk blocked %s: %s", signal.action, decision.reason)
-                render_status(self.settings, snapshot, self.stats, self.position)
+                log_event("RISK", result="BLOCKED", action=signal.action, reason=decision.reason)
                 return
             plan = plan_size(self.settings, signal, snapshot)
             if plan.planned <= 0:
                 self.stats.last_block_reason = plan.blocked
-                log.warning("size blocked: %s", plan.blocked)
-                render_status(self.settings, snapshot, self.stats, self.position)
+                log_event("ORDER_REQUEST", result="BLOCKED", reason=plan.blocked, action=signal.action)
                 return
+            self.stats.order_attempts += 1
+            side = "buy" if signal.action == "BUY" else "sell"
+            log_event(
+                "ORDER_REQUEST",
+                side=side,
+                amount=plan.planned,
+                price=plan.price,
+                dry_run=self.settings.dry_run,
+                rule=signal.rule_id,
+            )
             record = await self.orders.submit(
-                "buy" if signal.action == "BUY" else "sell",
+                side,
                 plan,
                 signal.reason,
                 snapshot.ticker.last,
@@ -183,10 +207,9 @@ class TradingBot:
                 self.risk.record_success()
             else:
                 log.info("no fill yet status=%s executed=%s", record.status, record.executed_amount)
-            render_status(self.settings, snapshot, self.stats, self.position)
         except RiskBlocked as exc:
             self.stats.last_block_reason = str(exc)
-            log.warning("risk: %s", exc)
+            log_event("RISK", result="BLOCKED", reason=str(exc))
         except BotError as exc:
             self.stats.last_error = str(exc)
             self.risk.record_failure(exc)
@@ -195,6 +218,44 @@ class TradingBot:
             self.stats.last_error = str(exc)
             self.risk.record_failure(exc)
             log.exception("unexpected error in cycle")
+        finally:
+            self._heartbeat_and_watch(snapshot)
+            if snapshot is not None:
+                render_status(self.settings, snapshot, self.stats, self.position)
+
+    def _heartbeat_and_watch(self, snapshot: Snapshot | None) -> None:
+        now = _now_ms()
+        hb_ms = max(1, int(self.settings.heartbeat_seconds * 1000))
+        due = self.stats.last_heartbeat_ms <= 0 or now - self.stats.last_heartbeat_ms >= hb_ms
+        ws_ok = snapshot.ws_ok if snapshot is not None else self.cache.ws_connected
+        status, reason = diagnose(
+            from_stats(
+                self.stats,
+                now_ms=now,
+                timeout_ms=self.settings.no_trade_timeout_seconds * 1000,
+                stale_ms=self.settings.stale_ms,
+                ws_ok=ws_ok,
+            )
+        )
+        previous = self.stats.last_watch_status
+        self.stats.last_watch_status = status
+        if due:
+            self.stats.last_heartbeat_ms = now
+            last = snapshot.ticker.last if snapshot is not None else self.cache.last_price()
+            log_event(
+                "HEARTBEAT",
+                ws="OK" if ws_ok else "DOWN",
+                market="OK" if self.stats.last_market_data_ms else "NONE",
+                last=last,
+                strategy=self.stats.strategy_evaluations,
+                buy=self.stats.buy_signals,
+                sell=self.stats.sell_signals,
+                order=self.stats.order_attempts,
+                status=status,
+                uptime_s=max(0, now - self.stats.started_ms) // 1000,
+            )
+        if status in {"FAIL", "LONG_WAIT"} and (due or status != previous):
+            log_event("WATCHDOG", status=status, reason=reason)
 
     async def _balances(self) -> tuple[Decimal, Decimal]:
         if self.settings.dry_run or self.rest is None or not self.settings.api_key:

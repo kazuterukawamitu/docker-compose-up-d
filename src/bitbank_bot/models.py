@@ -108,6 +108,13 @@ class BotStats:
     last_signal: Signal | None = None
     last_block_reason: str = ""
     last_error: str = ""
+    last_market_data_ms: int = 0
+    last_heartbeat_ms: int = 0
+    strategy_evaluations: int = 0
+    buy_signals: int = 0
+    sell_signals: int = 0
+    order_attempts: int = 0
+    last_watch_status: str = ""
     extra: dict[str, str] = field(default_factory=dict)
 
     @property

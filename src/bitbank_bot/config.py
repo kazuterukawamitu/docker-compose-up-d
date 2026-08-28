@@ -99,6 +99,9 @@ class Settings:
     min_hold_bars: int
     query_rps: float
     update_rps: float
+    wiki_cross_rules: bool
+    heartbeat_seconds: float
+    no_trade_timeout_seconds: int
 
     @property
     def display_pair(self) -> str:
@@ -166,6 +169,9 @@ def load_settings(env_file: str | Path | None = ".env") -> Settings:
         min_hold_bars=_int("MIN_HOLD_BARS", 1),
         query_rps=float(_env("QUERY_RPS", "8") or "8"),
         update_rps=float(_env("UPDATE_RPS", "4") or "4"),
+        wiki_cross_rules=_bool("WIKI_CROSS_RULES", False),
+        heartbeat_seconds=float(_env("HEARTBEAT_SECONDS", "10") or "10"),
+        no_trade_timeout_seconds=_int("NO_TRADE_TIMEOUT_SECONDS", 900),
     )
     if settings.pair != "btc_jpy":
         raise ConfigError("This bot is scoped to Bitbank btc_jpy only")

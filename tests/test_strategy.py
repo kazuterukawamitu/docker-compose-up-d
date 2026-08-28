@@ -148,3 +148,50 @@ def test_same_bar_does_not_repeat_entry() -> None:
     strat.evaluate(candles, Position())
     second = strat.evaluate(candles, Position())
     assert second.action == "HOLD"
+
+
+def test_wiki_golden_cross_off_by_default() -> None:
+    strat = _strat()
+    strat.memory.last_close = Decimal("100")
+    strat.memory.last_ma = Decimal("100")
+    strat.memory.last_fast = Decimal("90")
+    signal = strat._signal_for(
+        _bar(close=Decimal("100"), ma=Decimal("100"), slope="up", golden_cross_event=True, ema_fast=Decimal("101"), ema_slow=Decimal("99")),
+        Position(),
+    )
+    assert signal.rule_id != "wiki_golden_cross"
+
+
+def test_wiki_golden_cross_buy_when_enabled() -> None:
+    strat = MaRuleStrategy(make_settings(wiki_cross_rules=True))
+    strat.memory.last_close = Decimal("100")
+    strat.memory.last_ma = Decimal("100")
+    strat.memory.last_fast = Decimal("90")
+    signal = strat._signal_for(
+        _bar(close=Decimal("100"), ma=Decimal("100"), slope="up", golden_cross_event=True, ema_fast=Decimal("101"), ema_slow=Decimal("99")),
+        Position(),
+    )
+    assert signal.action == "BUY"
+    assert signal.rule_id == "wiki_golden_cross"
+    assert signal.take_profit_pct == Decimal("0.03")
+
+
+def test_wiki_death_cross_sell_when_enabled() -> None:
+    strat = MaRuleStrategy(make_settings(wiki_cross_rules=True))
+    strat.memory.last_close = Decimal("100")
+    strat.memory.last_ma = Decimal("100")
+    strat.memory.last_fast = Decimal("101")
+    position = Position(amount=Decimal("0.001"), entry_price=Decimal("100"), take_profit_pct=Decimal("0.50"), bars_held=2)
+    signal = strat._signal_for(
+        _bar(
+            close=Decimal("100"),
+            ma=Decimal("100"),
+            slope="flat",
+            death_cross_event=True,
+            ema_fast=Decimal("99"),
+            ema_slow=Decimal("100"),
+        ),
+        position,
+    )
+    assert signal.action == "SELL"
+    assert signal.rule_id == "wiki_death_cross"

@@ -21,6 +21,34 @@ async def test_dry_run_simulates_fill_without_client() -> None:
 
 
 @pytest.mark.asyncio
+async def test_dry_run_never_calls_create_order() -> None:
+    settings = make_settings(dry_run=True)
+
+    class Spy:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def create_order(self, pair, side, order_type, amount, price):
+            self.calls += 1
+            raise AssertionError("dry-run must not POST /user/spot/order")
+
+        async def get_order(self, pair, order_id):
+            raise AssertionError("dry-run must not poll orders")
+
+        async def active_orders(self, pair):
+            raise AssertionError("dry-run must not list active orders")
+
+    spy = Spy()
+    manager = OrderManager(settings, spy)
+    plan = SizePlan(target=Decimal("0.0001"), planned=Decimal("0.0001"), price=Decimal("10000000"))
+    record = await manager.submit("buy", plan, "test", Decimal("10000000"))
+    assert record.dry_run is True
+    assert record.status == "DRY_FILLED"
+    assert spy.calls == 0
+    assert record.order_id is None
+
+
+@pytest.mark.asyncio
 async def test_duplicate_in_flight_is_blocked() -> None:
     settings = make_settings()
     manager = OrderManager(settings, client=None)

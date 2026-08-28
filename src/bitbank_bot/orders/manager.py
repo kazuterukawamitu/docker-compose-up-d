@@ -6,6 +6,7 @@ from typing import Protocol
 
 from bitbank_bot.config import Settings
 from bitbank_bot.exchange.bitbank_rest import order_from_exchange
+from bitbank_bot.logging_setup import log_event
 from bitbank_bot.models import OrderRecord
 from bitbank_bot.orders.sizing import SizePlan
 
@@ -62,12 +63,24 @@ class OrderManager:
                     executed_amount=plan.planned,
                     remaining_amount=Decimal("0"),
                 )
-                log.info(
-                    "DRY_RUN simulated fill side=%s amount=%s price=%s reason=%s",
-                    side,
-                    plan.planned,
-                    fill_price,
-                    reason,
+                log_event(
+                    "ORDER_STATUS",
+                    status=record.status,
+                    side=side,
+                    amount=plan.planned,
+                    price=fill_price,
+                    executed=plan.planned,
+                    remaining=0,
+                    dry_run=True,
+                    order_id="none",
+                )
+                log_event(
+                    "FILL",
+                    side=side,
+                    executed=plan.planned,
+                    average_price=fill_price,
+                    status=record.status,
+                    dry_run=True,
                 )
                 self.last_order = record
                 return record
@@ -100,14 +113,25 @@ class OrderManager:
                     target=plan.target,
                     planned=plan.planned,
                 )
+            log_event(
+                "ORDER_STATUS",
+                status=record.status,
+                side=side,
+                amount=plan.planned,
+                executed=record.executed_amount,
+                remaining=record.remaining_amount,
+                order_id=record.order_id if record.order_id is not None else "none",
+                dry_run=False,
+            )
             if record.executed_amount > 0:
-                log.info(
-                    "FILL side=%s executed=%s avg=%s status=%s order_id=%s",
-                    side,
-                    record.executed_amount,
-                    record.average_price,
-                    record.status,
-                    record.order_id,
+                log_event(
+                    "FILL",
+                    side=side,
+                    executed=record.executed_amount,
+                    average_price=record.average_price,
+                    status=record.status,
+                    order_id=record.order_id,
+                    dry_run=False,
                 )
             else:
                 log.info(
@@ -124,7 +148,7 @@ class OrderManager:
 
 
 def _blocked(side: str, plan: SizePlan, reason: str) -> OrderRecord:
-    log.warning("order blocked side=%s reason=%s", side, reason)
+    log_event("ORDER_STATUS", status="BLOCKED", side=side, reason=reason, amount=plan.planned)
     return OrderRecord(
         client_tag="blocked",
         order_id=None,

@@ -88,3 +88,9 @@ def setup_logging(log_dir: Path, level: str = "INFO") -> None:
     jsonl.addFilter(filt)
     logging.getLogger("bitbank_bot.events").addHandler(jsonl)
     logging.getLogger("bitbank_bot.events").propagate = True
+
+
+def log_event(tag: str, **fields: object) -> None:
+    """Emit a structured [TAG] line. Never pass secrets as field values."""
+    parts = [f"{key}={value}" for key, value in fields.items() if value is not None]
+    logging.getLogger("bitbank_bot.events").info("[%s] %s", tag, " ".join(parts))

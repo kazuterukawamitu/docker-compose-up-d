@@ -41,6 +41,9 @@ def make_settings(tmp_path: Path | None = None, **overrides: object) -> Settings
         min_hold_bars=1,
         query_rps=8.0,
         update_rps=4.0,
+        wiki_cross_rules=False,
+        heartbeat_seconds=10.0,
+        no_trade_timeout_seconds=900,
     )
     values.update(overrides)
     return Settings(**values)  # type: ignore[arg-type]

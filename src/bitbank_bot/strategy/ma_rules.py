@@ -208,6 +208,15 @@ class MaRuleStrategy:
                     reason="MAより4%以上下に下降後、MA未到達で再上昇し再び下落",
                     target_kind="flatten",
                 )
+            if self.settings.wiki_cross_rules:
+                short_falling = mem.last_fast is None or bar.ema_fast <= mem.last_fast
+                if bar.death_cross_event and short_falling:
+                    return Signal(
+                        action="SELL",
+                        rule_id="wiki_death_cross",
+                        reason="短期MAが下向きに長期MAを下抜け",
+                        target_kind="flatten",
+                    )
 
         if position.is_open:
             return HOLD
@@ -250,6 +259,16 @@ class MaRuleStrategy:
                 take_profit_pct=Decimal("0.05"),
                 target_kind=self.settings.order_size_mode,
             )
+        if self.settings.wiki_cross_rules:
+            short_rising = mem.last_fast is None or bar.ema_fast >= mem.last_fast
+            if bar.golden_cross_event and short_rising:
+                return Signal(
+                    action="BUY",
+                    rule_id="wiki_golden_cross",
+                    reason="短期MAが上向きに長期MAを下から上抜け",
+                    take_profit_pct=Decimal("0.03"),
+                    target_kind=self.settings.order_size_mode,
+                )
         return HOLD
 
 

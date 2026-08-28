@@ -49,6 +49,7 @@ def render_status(settings: Settings, snapshot: Snapshot, stats: BotStats, posit
             "block": stats.last_block_reason,
             "ws": str(snapshot.ws_ok),
             "circuit": snapshot.circuit_mode,
+            "watchdog": stats.last_watch_status or "n/a",
             "uptime_s": str(uptime),
         }
         for key, value in rows.items():
