@@ -1,0 +1,15 @@
+services:
+  bitbank-bot:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    environment:
+      DRY_RUN: ${DRY_RUN:-true}
+      TZ: Asia/Tokyo
+    volumes:
+      - ../logs:/app/logs
+      - ../state:/app/state
+    command: ["python", "-m", "bitbank_bot"]
