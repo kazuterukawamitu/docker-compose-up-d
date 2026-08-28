@@ -19,12 +19,12 @@ _UUIDISH = re.compile(
 
 class SecretFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
-        record.msg = _redact(str(record.msg))
-        if record.args:
-            if isinstance(record.args, dict):
-                record.args = {k: _redact(str(v)) for k, v in record.args.items()}
-            else:
-                record.args = tuple(_redact(str(a)) for a in record.args)
+        try:
+            rendered = record.getMessage()
+        except Exception:
+            rendered = str(record.msg)
+        record.msg = _redact(rendered)
+        record.args = ()
         return True
 
 

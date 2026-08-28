@@ -23,7 +23,6 @@ from bitbank_bot.strategy.plugins import build_strategies
 log = logging.getLogger("bitbank_bot.trader")
 
 DRY_JPY = Decimal("1000000")
-DRY_BTC = Decimal("0")
 
 
 class Trader:
