@@ -24,6 +24,11 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument("--env-file", default=None, help="Path to .env")
     p.add_argument("--once", action="store_true", help="One evaluate cycle then exit")
     p.add_argument("--synthetic", action="store_true", help="Use dummy candles (no hang)")
+    p.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Force DRY_RUN (log ORDER_INTENT only; never call create_order)",
+    )
     p.add_argument("--check-config", action="store_true", help="Validate config and exit")
     p.add_argument("--preflight", action="store_true", help="Run preflight only")
     p.add_argument("--backtest", metavar="CSV", nargs="?", const="", help="Replay CSV candles")
@@ -39,6 +44,9 @@ def main(argv: list[str] | None = None) -> int:
     except ConfigError as exc:
         print(f"CONFIG ERROR: {exc}", file=sys.stderr)
         return 2
+    if args.dry_run:
+        cfg.dry_run = True
+        cfg.live_trading = False
     if args.dashboard:
         cfg.dashboard = True
     setup_logging(cfg.log_dir, cfg.log_level, secrets=[cfg.api_secret, cfg.api_key])
@@ -102,7 +110,11 @@ def main(argv: list[str] | None = None) -> int:
             return 3
     try:
         if args.once or args.synthetic:
-            return engine.run_once(synthetic=args.synthetic, skip_preflight=args.synthetic)
+            rc = engine.run_once(synthetic=args.synthetic, skip_preflight=args.synthetic)
+            if rc == 0 and args.once:
+                sys.stdout.write("\a")
+                sys.stdout.flush()
+            return rc
         install_signal_handlers(engine)
         return engine.run_forever()
     finally:

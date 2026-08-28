@@ -1,7 +1,9 @@
 from bitbank_bot.indicators import (
+    IncrementalSMA,
     Trend,
     crossed_down,
     crossed_up,
+    crossover_price_bp,
     ema,
     interpolate_crossover,
     is_golden_cross,
@@ -33,6 +35,7 @@ def test_ema_seeds_from_sma() -> None:
 def test_crossover_interpolation() -> None:
     price = interpolate_crossover(D("90"), D("100"), D("110"), D("100"))
     assert price == D("100")
+    assert crossover_price_bp(price) == D("1")
 
 
 def test_crossover_interpolation_out_of_range() -> None:
@@ -56,3 +59,11 @@ def test_ma_trend_threshold() -> None:
     assert ma_trend(D("102"), D("100"), th) == Trend.UP
     assert ma_trend(D("98"), D("100"), th) == Trend.DOWN
     assert ma_trend(D("100.5"), D("100"), th) == Trend.FLAT
+
+
+def test_incremental_sma_matches_batch() -> None:
+    values = [D("1"), D("2"), D("3"), D("4"), D("5")]
+    batch = sma(values, 3)
+    inc = IncrementalSMA(3)
+    out = [inc.update(v) for v in values]
+    assert out == batch

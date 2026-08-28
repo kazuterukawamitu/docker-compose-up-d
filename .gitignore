@@ -20,6 +20,8 @@ logs/*
 !logs/.gitkeep
 *.log
 data/*.json
+data/*.lock
+data/KILL
 *.pid
 .DS_Store
 *.pem

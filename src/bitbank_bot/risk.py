@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
+from pathlib import Path
 
 from bitbank_bot.config import Config
 from bitbank_bot.logging_setup import slog
@@ -37,6 +38,7 @@ class RiskManager:
         self.max_position_btc = cfg.max_position_btc
         self.max_order_btc = cfg.max_order_btc
         self.max_daily_loss_jpy = cfg.max_daily_loss_jpy
+        self.daily_pnl_floor = cfg.daily_pnl_floor
         self.daily_pnl = D(daily_pnl)
         self.daily_pnl_date = daily_pnl_date or jst_today().isoformat()
         self._killed = cfg.kill_switch if killed is None else bool(killed)
@@ -47,12 +49,23 @@ class RiskManager:
             self.daily_pnl = ZERO
             self.daily_pnl_date = today
 
+    def _daily_loss_halt(self) -> bool:
+        if self.daily_pnl_floor > ZERO and self.daily_pnl <= -self.daily_pnl_floor:
+            return True
+        if self.max_daily_loss_jpy > ZERO and self.daily_pnl <= -self.max_daily_loss_jpy:
+            return True
+        return False
+
     @property
     def killed(self) -> bool:
         self._roll_day()
         if self._killed:
             return True
-        if self.max_daily_loss_jpy > ZERO and self.daily_pnl <= -self.max_daily_loss_jpy:
+        if Path(self.cfg.kill_switch_path).exists():
+            self._killed = True
+            slog("RISK", "kill file present", path=self.cfg.kill_switch_path)
+            return True
+        if self._daily_loss_halt():
             return True
         return False
 
@@ -64,8 +77,14 @@ class RiskManager:
         self._roll_day()
         self.daily_pnl += D(pnl_jpy)
         slog("RISK", "realized pnl", pnl=str(pnl_jpy), daily_pnl=str(self.daily_pnl))
-        if self.max_daily_loss_jpy > ZERO and self.daily_pnl <= -self.max_daily_loss_jpy:
-            self.trip("max_daily_loss")
+        if self._daily_loss_halt():
+            self.trip("daily_pnl_floor" if self.daily_pnl <= -self.daily_pnl_floor else "max_daily_loss")
+
+    def check_stale(self, age_sec: float) -> RiskDecision:
+        limit = float(self.cfg.stale_ws_sec)
+        if age_sec > limit:
+            return RiskDecision(False, ZERO, "stale_data", False)
+        return RiskDecision(True, ZERO, "ok", False)
 
     def check_buy(self, current_btc: Decimal, requested_btc: Decimal) -> RiskDecision:
         if self.killed:

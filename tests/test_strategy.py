@@ -19,6 +19,8 @@ def test_buy1_ma_leaves_downtrend_and_price_crosses_up() -> None:
     assert sig.kind == "BUY1"
     assert sig.side == "buy"
     assert sig.tp_pct == D("0.03")
+    assert sig.crossover_price_bp == D("1")
+    assert sig.reason
 
 
 def test_buy2_golden_cross_vs_not() -> None:
@@ -139,3 +141,10 @@ def test_no_buy_when_in_position() -> None:
         position(entry_candle_index=1),
     )
     assert sig.kind != "BUY1"
+
+
+def test_hold_always_has_reason() -> None:
+    s = Strategy(cfg())
+    sig = s.evaluate(snap(), None)
+    assert sig.kind == "HOLD"
+    assert sig.reason

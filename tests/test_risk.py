@@ -29,3 +29,27 @@ def test_max_daily_loss_trips_kill() -> None:
     assert risk.killed
     decision = risk.check_buy(D("0"), D("0.1"))
     assert not decision.allowed
+
+
+def test_daily_pnl_floor_default_150(tmp_path) -> None:
+    c = cfg(
+        daily_pnl_floor=D("150"),
+        max_daily_loss_jpy=D("0"),
+        kill_switch=False,
+        kill_switch_path=str(tmp_path / "KILL"),
+    )
+    risk = RiskManager(c)
+    assert not risk.killed
+    risk.record_realized_pnl(D("-150"))
+    assert risk.killed
+
+
+def test_kill_file_trips(tmp_path) -> None:
+    kill = tmp_path / "KILL"
+    kill.write_text("stop\n")
+    c = cfg(kill_switch=False, kill_switch_path=str(kill))
+    risk = RiskManager(c)
+    assert risk.killed
+    decision = risk.check_buy(D("0"), D("0.1"))
+    assert not decision.allowed
+    assert decision.reason == "kill_switch"

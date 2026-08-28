@@ -21,7 +21,8 @@ SHORT_CANDLE_TYPES = frozenset({"1min", "5min", "15min", "30min", "1hour"})
 LONG_CANDLE_TYPES = frozenset(
     {"4hour", "8hour", "12hour", "1day", "1week", "1month"}
 )
-CANDLE_TYPES = SHORT_CANDLE_TYPES | LONG_CANDLE_TYPES
+DERIVED_CANDLE_TYPES = frozenset({"10min", "2day", "2week"})
+CANDLE_TYPES = SHORT_CANDLE_TYPES | LONG_CANDLE_TYPES | DERIVED_CANDLE_TYPES
 
 
 class ConfigError(ValueError):
@@ -92,6 +93,10 @@ class Config:
     max_daily_loss_jpy: Decimal = D("100000")
     daily_pnl_floor: Decimal = D("150")
     kill_switch: bool = False
+    kill_switch_path: str = "data/KILL"
+    post_only: bool = False
+    dry_run_free_jpy: Decimal = D("100000")
+    dry_run_free_btc: Decimal = D("0")
     http_timeout_sec: float = 15.0
     max_retries: int = 5
     access_time_window_ms: int = 5000
@@ -216,9 +221,13 @@ def load_config(
         order_type=order_type,
         max_position_btc=_dec(env, "MAX_POSITION_BTC", "1"),
         max_order_btc=_dec(env, "MAX_ORDER_BTC", "10"),
-        max_daily_loss_jpy=_dec(env, "MAX_DAILY_LOSS_JPY", "100000"),
+        max_daily_loss_jpy=_dec(env, "MAX_DAILY_LOSS_JPY", "0"),
         daily_pnl_floor=_dec(env, "DAILY_PNL_FLOOR", "150"),
         kill_switch=_bool(env, "KILL_SWITCH", False),
+        kill_switch_path=_env(env, "KILL_SWITCH_PATH", "data/KILL") or "data/KILL",
+        post_only=_bool(env, "POST_ONLY", False),
+        dry_run_free_jpy=_dec(env, "DRY_RUN_FREE_JPY", "100000"),
+        dry_run_free_btc=_dec(env, "DRY_RUN_FREE_BTC", "0"),
         http_timeout_sec=float(_env(env, "HTTP_TIMEOUT_SEC", "15") or "15"),
         max_retries=_int(env, "MAX_RETRIES", 5),
         access_time_window_ms=window,
@@ -235,7 +244,9 @@ def load_config(
         log_dir=_env(env, "LOG_DIR", "logs") or "logs",
         state_path=_env(env, "STATE_PATH", "data/state.json") or "data/state.json",
         lock_path=_env(env, "LOCK_PATH", "data/bot.lock") or "data/bot.lock",
-        candle_lookback_days=_int(env, "CANDLE_LOOKBACK_DAYS", 14),
+        candle_lookback_days=_int(
+            env, "CANDLE_LOOKBACK_DAYS", _int(env, "HISTORY_DAYS", 14)
+        ),
     )
     if live_trading and not cfg.has_keys:
         raise ConfigError("LIVE_TRADING requires BITBANK_API_KEY and BITBANK_API_SECRET")

@@ -13,6 +13,14 @@ from bitbank_bot.money import D, ZERO, quantize_price
 from bitbank_bot.strategy import Signal
 
 
+def _fill_status(raw_status: str, executed: Decimal, ordered: Decimal) -> str:
+    if executed <= ZERO:
+        return "UNFILLED"
+    if ordered > ZERO and executed < ordered:
+        return "PARTIALLY_FILLED"
+    return "FULLY_FILLED"
+
+
 class OrderClient(Protocol):
     def get_active_orders(self, pair: str) -> list[dict[str, Any]]: ...
 
@@ -134,12 +142,15 @@ class OrderExecutor:
             side=plan.side,
             order_type=self.cfg.order_type,
             price=price_str,
+            post_only=self.cfg.post_only if self.cfg.order_type == "limit" else None,
         )
         order_id = str(raw.get("order_id") or "")
         status = str(raw.get("status") or "")
         slog("ORDER_ACCEPTED", "order accepted", order_id=order_id, status=status)
         executed = D(raw.get("executed_amount") or 0)
         avg = D(raw.get("average_price") or 0)
+        amount_ordered = D(raw.get("start_amount") or plan.amount)
+        status = _fill_status(status, executed, amount_ordered)
         slog(
             "ORDER_STATUS",
             "order status",

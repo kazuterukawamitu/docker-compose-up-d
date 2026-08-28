@@ -14,7 +14,7 @@ from typing import Any
 from bitbank_bot.amounts import AmountPlan, plan_buy, plan_sell
 from bitbank_bot.config import Config
 from bitbank_bot.logging_setup import slog
-from bitbank_bot.market_data import Candle, fetch_candles, synthetic_candles
+from bitbank_bot.market_data import Candle, CandleCache, fetch_candles, synthetic_candles
 from bitbank_bot.money import D, ZERO
 from bitbank_bot.orders import OrderExecutor, OrderResult
 from bitbank_bot.preflight import preflight
@@ -114,6 +114,7 @@ class Engine:
         self.client = client
         self._stop = False
         self.ws: BitbankWebsocket | None = None
+        self.cache = CandleCache(cfg.ma_period)
 
     def request_stop(self, *_args: object) -> None:
         slog("BOOT", "shutdown requested")
@@ -140,7 +141,7 @@ class Engine:
             btc = rest.free_amount("btc")
             slog("ASSET", "free_amount", jpy=str(jpy), btc=str(btc))
             return jpy, btc
-        return D("1000000"), D("0")
+        return self.cfg.dry_run_free_jpy, self.cfg.dry_run_free_btc
 
     def _maybe_ws(self) -> None:
         if not self.cfg.enable_websocket or self.ws is not None:
@@ -184,7 +185,7 @@ class Engine:
             return signal
         if self.ws is not None and self.cfg.enable_websocket and self.ws.is_stale():
             slog("WEBSOCKET", "stale data; skipping orders")
-            return signal
+            return Signal.hold("stale_websocket")
         if signal.side in {"buy", "sell"}:
             self._execute(signal, last.close, last.index, last.timestamp_ms, state)
         state.last_candle_ts = last.timestamp_ms
@@ -286,6 +287,8 @@ class Engine:
                 slog("ERROR", "preflight failed", reason=result.reason)
                 return 2
         candles = synthetic_candles() if synthetic else fetch_candles(rest, self.cfg)
+        if not synthetic:
+            candles = self.cache.merge(candles)
         if synthetic:
             slog("MARKET", "using synthetic candles", count=len(candles))
         state = load_state(self.cfg.state_path, self.cfg)
@@ -307,7 +310,9 @@ class Engine:
         timeout = float(self.cfg.no_trade_timeout_seconds)
         while not self._stop:
             try:
-                candles = fetch_candles(rest, self.cfg)
+                latest_only = bool(self.cache.candles)
+                incoming = fetch_candles(rest, self.cfg, latest_only=latest_only)
+                candles = self.cache.merge(incoming)
                 signal = self.process_candles(candles, state, execute=True)
                 last_ok = time.monotonic()
                 last = str(candles[-1].close) if candles else "-"

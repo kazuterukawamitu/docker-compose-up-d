@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import deque
 from decimal import Decimal
 from enum import Enum
 from typing import Sequence
@@ -56,6 +57,41 @@ def moving_average(values: Sequence[Decimal], period: int, kind: str = "sma") ->
     if kind == "ema":
         return ema(values, period)
     return sma(values, period)
+
+
+class IncrementalSMA:
+    """Update SMA with each new close; do not rebuild the whole window unless reset."""
+
+    def __init__(self, period: int) -> None:
+        if period < 1:
+            raise ValueError("period must be >= 1")
+        self.period = period
+        self._window: deque[Decimal] = deque()
+        self._total = ZERO
+        self.value: Decimal | None = None
+
+    def update(self, price: Decimal) -> Decimal | None:
+        price = D(price)
+        self._window.append(price)
+        self._total += price
+        if len(self._window) > self.period:
+            self._total -= self._window.popleft()
+        if len(self._window) == self.period:
+            self.value = self._total / D(self.period)
+        else:
+            self.value = None
+        return self.value
+
+    def reset(self) -> None:
+        self._window.clear()
+        self._total = ZERO
+        self.value = None
+
+
+def crossover_price_bp(cross_price: Decimal | None) -> Decimal | None:
+    if cross_price is None:
+        return None
+    return D(cross_price) * D("0.01")
 
 
 def ma_trend(ma: Decimal, prev_ma: Decimal, threshold: Decimal) -> Trend:

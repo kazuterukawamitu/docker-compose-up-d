@@ -69,6 +69,7 @@ def test_dry_run_never_calls_create_order() -> None:
     assert client.create_calls == []
     assert result.dry_run
     assert result.ok
+    assert result.status == "FULLY_FILLED"
 
 
 def test_duplicate_active_order_blocks() -> None:
@@ -86,3 +87,4 @@ def test_live_path_would_call_create_order() -> None:
     assert len(client.create_calls) == 1
     assert result.executed_amount == D("0")
     assert result.reason == "accepted_unfilled"
+    assert result.status == "UNFILLED"

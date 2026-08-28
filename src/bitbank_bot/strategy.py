@@ -11,12 +11,13 @@ from bitbank_bot.indicators import (
     Trend,
     crossed_down,
     crossed_up,
+    crossover_price_bp,
     interpolate_crossover,
     is_golden_cross,
     ma_trend,
     moving_average,
 )
-from bitbank_bot.money import D, ONE, pct_offset
+from bitbank_bot.money import ONE, pct_offset
 
 
 @dataclass
@@ -37,6 +38,7 @@ class MarketSnapshot:
     crossed_down: bool
     golden_cross: bool
     cross_price: Decimal | None
+    crossover_price_bp: Decimal | None = None
 
 
 @dataclass
@@ -59,9 +61,13 @@ class Signal:
     golden_cross: bool = False
     cross_price: Decimal | None = None
     peak_price: Decimal | None = None
+    origin_price: Decimal | None = None
+    crossover_price_bp: Decimal | None = None
 
     @staticmethod
     def hold(reason: str = "no setup") -> "Signal":
+        if not reason:
+            raise ValueError("WAIT/HOLD requires an explicit reason")
         return Signal(kind="HOLD", side=None, tp_pct=None, reason=reason)
 
 
@@ -70,11 +76,14 @@ class Buy3Machine:
         self.extend_pct = extend_pct
         self.phase = "idle"
         self.peak: Decimal | None = None
+        self.trough: Decimal | None = None
         self.prev_close: Decimal | None = None
+        self.origin: Decimal | None = None
 
     def reset(self) -> None:
         self.phase = "idle"
         self.peak = None
+        self.trough = None
 
     def update(self, close: Decimal, ma: Decimal) -> bool:
         fired = False
@@ -92,9 +101,13 @@ class Buy3Machine:
                 self.peak = close
             elif self.prev_close is not None and close < self.prev_close:
                 self.phase = "pullback"
+                self.trough = close
         elif self.phase == "pullback":
+            if self.trough is None or close < self.trough:
+                self.trough = close
             if self.prev_close is not None and close > self.prev_close:
                 fired = True
+                self.origin = self.trough
                 self.reset()
         self.prev_close = close
         return fired
@@ -105,21 +118,29 @@ class Buy4Machine:
         self.dip_pct = dip_pct
         self.phase = "idle"
         self.prev_close: Decimal | None = None
+        self.origin: Decimal | None = None
+        self.low: Decimal | None = None
 
     def update(self, close: Decimal, ma: Decimal, trend: Trend) -> bool:
         fired = False
         if trend != Trend.DOWN:
             self.phase = "idle"
+            self.low = None
             self.prev_close = close
             return False
         floor = ma * (ONE - self.dip_pct)
         if self.phase == "idle":
             if close <= floor:
                 self.phase = "dipped"
+                self.low = close
         elif self.phase == "dipped":
+            if self.low is None or close < self.low:
+                self.low = close
             if self.prev_close is not None and close > self.prev_close:
                 fired = True
+                self.origin = self.low
                 self.phase = "idle"
+                self.low = None
         self.prev_close = close
         return fired
 
@@ -129,6 +150,7 @@ class Sell1Machine:
         self.extend_pct = extend_pct
         self.phase = "idle"
         self.prev_close: Decimal | None = None
+        self.pivot_high: Decimal | None = None
 
     def update(self, close: Decimal, ma: Decimal) -> bool:
         fired = False
@@ -136,12 +158,16 @@ class Sell1Machine:
         if self.phase == "idle":
             if close >= ceiling:
                 self.phase = "extended"
+                self.pivot_high = close
         elif self.phase == "extended":
+            if self.pivot_high is None or close > self.pivot_high:
+                self.pivot_high = close
             if self.prev_close is not None and close < self.prev_close:
                 fired = True
                 self.phase = "idle"
             elif close < ma:
                 self.phase = "idle"
+                self.pivot_high = None
         self.prev_close = close
         return fired
 
@@ -236,11 +262,15 @@ class Strategy:
             tp = self._tp_signal(snap, position)
             if tp.kind != "HOLD":
                 return tp
+            return Signal.hold("in_position_no_sell_or_tp")
+        if position is not None and same_entry:
+            return Signal.hold("same_entry_candle_no_sell")
         if position is None:
             buy = self._buy_signal(snap)
             if buy.kind != "HOLD":
                 return buy
-        return Signal.hold()
+            return Signal.hold("no_buy_setup")
+        return Signal.hold("no_setup")
 
     def _tp_signal(self, snap: MarketSnapshot, position: Position) -> Signal:
         target = pct_offset(position.average_price, position.tp_pct)
@@ -258,13 +288,21 @@ class Strategy:
 
     def _sell_signal(self, snap: MarketSnapshot) -> Signal:
         if self._sell1:
-            return Signal("SELL1", "sell", None, "price >=4% above MA then turned down")
+            return Signal(
+                "SELL1",
+                "sell",
+                None,
+                "price >=4% above MA then turned down",
+                peak_price=self.sell1.pivot_high,
+            )
         if self._sell2:
             return Signal(
                 "SELL2",
                 "sell",
                 None,
                 "price fell, crossed MA down, continued falling",
+                cross_price=snap.cross_price,
+                crossover_price_bp=snap.crossover_price_bp or crossover_price_bp(snap.cross_price),
             )
         if snap.ma_trend == Trend.DOWN and snap.crossed_up:
             return Signal(
@@ -273,6 +311,7 @@ class Strategy:
                 None,
                 "MA downtrend and price crossed MA upward",
                 cross_price=snap.cross_price,
+                crossover_price_bp=snap.crossover_price_bp or crossover_price_bp(snap.cross_price),
             )
         if self._sell4:
             return Signal(
@@ -296,6 +335,7 @@ class Strategy:
                 self.cfg.buy1_tp,
                 "MA left downtrend and price crossed above MA",
                 cross_price=snap.cross_price,
+                crossover_price_bp=snap.crossover_price_bp or crossover_price_bp(snap.cross_price),
             )
         if snap.ma_trend == Trend.UP and snap.crossed_down:
             tp = self.cfg.buy2_golden_tp if snap.golden_cross else self.cfg.buy2_tp
@@ -306,15 +346,23 @@ class Strategy:
                 "MA uptrend and price crossed below MA",
                 golden_cross=snap.golden_cross,
                 cross_price=snap.cross_price,
+                crossover_price_bp=snap.crossover_price_bp or crossover_price_bp(snap.cross_price),
             )
         if self._buy3:
-            return Signal("BUY3", "buy", self.cfg.buy3_tp, "pullback then bounce above MA")
+            return Signal(
+                "BUY3",
+                "buy",
+                self.cfg.buy3_tp,
+                "pullback then bounce above MA",
+                origin_price=self.buy3.origin,
+            )
         if self._buy4:
             return Signal(
                 "BUY4",
                 "buy",
                 self.cfg.buy4_tp,
                 "downtrend MA, price >=5% below, then rising",
+                origin_price=self.buy4.origin,
             )
         return Signal.hold()
 
@@ -368,6 +416,7 @@ def build_snapshots(
                 crossed_down=down,
                 golden_cross=is_golden_cross(s_prev, l_prev, s_ma, l_ma),
                 cross_price=cross_price,
+                crossover_price_bp=crossover_price_bp(cross_price),
             )
         )
         prev_trend = trend

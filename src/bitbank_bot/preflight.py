@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from bitbank_bot.config import Config
 from bitbank_bot.logging_setup import slog
+from bitbank_bot.money import D
 from bitbank_bot.rest_client import RestClient
 
 
@@ -37,6 +38,16 @@ def preflight(cfg: Config, client: RestClient, require_public: bool = True) -> P
             slog("PUBLIC_API", "spot status", status=status, min_amount=row.get("min_amount"))
             if status == "HALT":
                 return PreflightResult(False, "market_halt", last, status)
+            if row.get("min_amount"):
+                exch_min = D(row["min_amount"])
+                if exch_min > cfg.min_amount_btc:
+                    slog("RISK", "honoring exchange min_amount", min_amount=str(exch_min))
+                    cfg.min_amount_btc = exch_min
+            if row.get("limit_max_amount"):
+                exch_max = D(row["limit_max_amount"])
+                if exch_max < cfg.max_order_btc:
+                    slog("RISK", "honoring exchange max_amount", max_amount=str(exch_max))
+                    cfg.max_order_btc = exch_max
     except Exception as exc:
         slog("ERROR", "spot status skipped", error=type(exc).__name__)
     if cfg.has_keys:
