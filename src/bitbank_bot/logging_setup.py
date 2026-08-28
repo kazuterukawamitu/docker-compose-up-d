@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 _HEX64 = re.compile(r"(?i)(signature[\"':=\s]+)[0-9a-f]{64}")
-_SECRET_KEYS = ("api_secret", "access-signature", "bitbank_api_secret", "hmac")
+_SECRET_KEYS = ("BITBANK_API_SECRET", "ACCESS-SIGNATURE", "ACCESS-KEY")
 
 
 class StageFilter(logging.Filter):
