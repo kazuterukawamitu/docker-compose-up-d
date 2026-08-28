@@ -5,11 +5,11 @@ from tests.conftest import make_settings
 
 def _inp(**kwargs: object) -> WatchInput:
     base: dict[str, object] = dict(
-        now_ms=1_000_000,
+        now_ms=100_000,
         started_ms=0,
         timeout_ms=900_000,
         stale_ms=15_000,
-        last_market_data_ms=999_000,
+        last_market_data_ms=99_000,
         strategy_evaluations=10,
         buy_signals=0,
         sell_signals=0,
@@ -20,6 +20,8 @@ def _inp(**kwargs: object) -> WatchInput:
         ws_ok=True,
     )
     base.update(kwargs)
+    if "last_market_data_ms" not in kwargs:
+        base["last_market_data_ms"] = int(base["now_ms"]) - 1_000  # type: ignore[arg-type]
     return WatchInput(**base)  # type: ignore[arg-type]
 
 
