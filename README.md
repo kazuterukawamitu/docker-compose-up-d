@@ -36,13 +36,44 @@ Defaults used to make those rules executable:
 
 ## Setup
 
+These files live **inside the git repository**. If iTerm shows `~` as the current directory, `requirements.txt` and `bitbank_bot` will not exist there. Clone first, then `cd` into the repo (or call `start.sh` by its full path).
+
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env
-# edit .env locally — never commit it
+git clone https://github.com/kazuterukawamitu/docker-compose-up-d.git
+cd docker-compose-up-d
+# until this branch is merged:
+git checkout cursor/bitbank-btc-jpy-bot-fbe5
 ```
+
+Python **3.12+** is required. macOS CommandLineTools (`/usr/bin/python3`, pip 21.x) is often 3.9 and cannot run this bot. Install a current interpreter, then use the launcher:
+
+```bash
+brew install python@3.12
+chmod +x start.sh
+./start.sh --preflight
+./start.sh
+```
+
+`start.sh` creates `.venv`, installs dependencies with `python -m pip` (not the missing `pip` command), copies `.env.example` → `.env` if needed, and starts the bot. You can also run it from home:
+
+```bash
+~/docker-compose-up-d/start.sh --preflight
+~/docker-compose-up-d/start.sh
+```
+
+Manual equivalent after `cd` into the repo:
+
+```bash
+python3.12 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+python -m pip install -e .
+cp .env.example .env
+python run.py --preflight
+python run.py
+```
+
+Do not run `pip3 install -r requirements.txt` from `~`. Do not use system `pip`; that command is often missing. Use `python -m pip` inside `.venv`.
 
 Required for **live** trading only:
 
@@ -53,10 +84,21 @@ Keys are read from the environment / `.env`. They are never logged.
 
 ### iTerm / local start
 
+Preferred:
+
 ```bash
-export PYTHONPATH=src
-python3 -m bitbank_bot --preflight
-python3 -m bitbank_bot
+cd docker-compose-up-d
+./start.sh --preflight
+./start.sh
+```
+
+Equivalent after the venv is installed:
+
+```bash
+cd docker-compose-up-d
+source .venv/bin/activate
+python run.py --preflight
+python run.py
 ```
 
 Single evaluation cycle (useful in CI):
@@ -94,8 +136,8 @@ See `deploy/bitbank-bot.service`. Point `WorkingDirectory` at an install that co
 ## Tests
 
 ```bash
-PYTHONPATH=src python3 -m pytest tests -m "not network"
-PYTHONPATH=src python3 -m pytest tests/test_public_api.py -m network
+python -m pytest tests -m "not network"
+python -m pytest tests/test_public_api.py -m network
 ```
 
 Public tests hit `https://public.bitbank.cc` only. They never place orders.
