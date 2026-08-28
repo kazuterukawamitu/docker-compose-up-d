@@ -80,6 +80,28 @@ def fetch_candles(client: RestClient, cfg: Config) -> list[Candle]:
     return candles
 
 
+def aggregate_candles(candles: list[Candle], bucket_ms: int) -> list[Candle]:
+    """Build 10min from 5min, 2day from 1day, 2week from 1week."""
+    buckets: dict[int, list[Candle]] = {}
+    for candle in candles:
+        key = candle.timestamp_ms - (candle.timestamp_ms % bucket_ms)
+        buckets.setdefault(key, []).append(candle)
+    out: list[Candle] = []
+    for key in sorted(buckets):
+        chunk = buckets[key]
+        out.append(
+            Candle(
+                open=chunk[0].open,
+                high=max(c.high for c in chunk),
+                low=min(c.low for c in chunk),
+                close=chunk[-1].close,
+                volume=sum((c.volume for c in chunk), D("0")),
+                timestamp_ms=key,
+            )
+        )
+    return out
+
+
 def synthetic_candles(count: int = 120, start: Decimal = D("10000000")) -> list[Candle]:
     candles: list[Candle] = []
     price = start

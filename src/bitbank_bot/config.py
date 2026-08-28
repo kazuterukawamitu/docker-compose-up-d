@@ -65,7 +65,7 @@ class Config:
     dry_run: bool = True
     live_trading: bool = False
     simulate_fill: bool = True
-    candle_type: str = "15min"
+    candle_type: str = "1hour"
     ma_period: int = 25
     short_ma_period: int = 25
     long_ma_period: int = 75
@@ -82,14 +82,15 @@ class Config:
     sell4_dip: Decimal = D("0.04")
     max_balance_usage: Decimal = D("0.95")
     sell_safety_factor: Decimal = D("0.999")
-    fee_buffer: Decimal = D("0")
+    fee_buffer: Decimal = D("0.0015")
     min_amount_btc: Decimal = D("0.0001")
     amount_precision: Decimal = D("0.0001")
     price_tick: Decimal = D("1")
-    order_type: str = "market"
+    order_type: str = "limit"
     max_position_btc: Decimal = D("1")
     max_order_btc: Decimal = D("10")
     max_daily_loss_jpy: Decimal = D("100000")
+    daily_pnl_floor: Decimal = D("150")
     kill_switch: bool = False
     http_timeout_sec: float = 15.0
     max_retries: int = 5
@@ -98,6 +99,7 @@ class Config:
     update_rps: int = 6
     stale_ws_sec: float = 30.0
     poll_sec: float = 15.0
+    no_trade_timeout_seconds: int = 900
     enable_websocket: bool = True
     dashboard: bool = False
     log_level: str = "INFO"
@@ -158,7 +160,7 @@ def load_config(
             "DRY_RUN=false requires LIVE_TRADING=true (dual confirmation)."
         )
 
-    candle_type = _env(env, "CANDLE_TYPE", "15min") or "15min"
+    candle_type = _env(env, "CANDLE_TYPE", "1hour") or "1hour"
     if candle_type not in CANDLE_TYPES:
         raise ConfigError(f"unsupported CANDLE_TYPE={candle_type}")
 
@@ -166,11 +168,13 @@ def load_config(
     if ma_kind not in {"sma", "ema"}:
         raise ConfigError("MA_KIND must be sma or ema")
 
-    order_type = (_env(env, "ORDER_TYPE", "market") or "market").lower()
+    order_type = (
+        _env(env, "ORDER_TYPE") or _env(env, "BITBANK_ORDER_TYPE") or "limit"
+    ).lower()
     if order_type not in {"market", "limit"}:
         raise ConfigError("ORDER_TYPE must be market or limit")
 
-    window = _int(env, "ACCESS_TIME_WINDOW_MS", 5000)
+    window = _int(env, "ACCESS_TIME_WINDOW_MS", _int(env, "ACCESS_TIME_WINDOW", 5000))
     if window < 1 or window > 60000:
         raise ConfigError("ACCESS_TIME_WINDOW_MS must be 1..60000")
 
@@ -190,8 +194,8 @@ def load_config(
         simulate_fill=_bool(env, "DRY_RUN_SIMULATE_FILL", True),
         candle_type=candle_type,
         ma_period=_int(env, "MA_PERIOD", 25),
-        short_ma_period=_int(env, "SHORT_MA_PERIOD", 25),
-        long_ma_period=_int(env, "LONG_MA_PERIOD", 75),
+        short_ma_period=_int(env, "SHORT_MA_PERIOD", _int(env, "MA_SHORT_PERIOD", 25)),
+        long_ma_period=_int(env, "LONG_MA_PERIOD", _int(env, "MA_LONG_PERIOD", 75)),
         ma_kind=ma_kind,
         ma_slope_threshold=_dec(env, "MA_SLOPE_THRESHOLD", "0.0002"),
         buy1_tp=_dec(env, "BUY1_TP", "0.03"),
@@ -205,7 +209,7 @@ def load_config(
         sell4_dip=_dec(env, "SELL4_DIP", "0.04"),
         max_balance_usage=usage,
         sell_safety_factor=_dec(env, "SELL_SAFETY_FACTOR", "0.999"),
-        fee_buffer=_dec(env, "FEE_BUFFER", "0"),
+        fee_buffer=_dec(env, "FEE_BUFFER", "0.0015"),
         min_amount_btc=_dec(env, "MIN_AMOUNT_BTC", "0.0001"),
         amount_precision=_dec(env, "AMOUNT_PRECISION", "0.0001"),
         price_tick=_dec(env, "PRICE_TICK", "1"),
@@ -213,14 +217,18 @@ def load_config(
         max_position_btc=_dec(env, "MAX_POSITION_BTC", "1"),
         max_order_btc=_dec(env, "MAX_ORDER_BTC", "10"),
         max_daily_loss_jpy=_dec(env, "MAX_DAILY_LOSS_JPY", "100000"),
+        daily_pnl_floor=_dec(env, "DAILY_PNL_FLOOR", "150"),
         kill_switch=_bool(env, "KILL_SWITCH", False),
         http_timeout_sec=float(_env(env, "HTTP_TIMEOUT_SEC", "15") or "15"),
         max_retries=_int(env, "MAX_RETRIES", 5),
         access_time_window_ms=window,
         query_rps=_int(env, "QUERY_RPS", 10),
         update_rps=_int(env, "UPDATE_RPS", 6),
-        stale_ws_sec=float(_env(env, "STALE_WS_SEC", "30") or "30"),
-        poll_sec=float(_env(env, "POLL_SEC", "15") or "15"),
+        stale_ws_sec=float(
+            _env(env, "STALE_WS_SEC") or _env(env, "STALE_DATA_SECONDS") or "30"
+        ),
+        poll_sec=float(_env(env, "POLL_SEC") or _env(env, "LOOP_SECONDS") or "15"),
+        no_trade_timeout_seconds=_int(env, "NO_TRADE_TIMEOUT_SECONDS", 900),
         enable_websocket=_bool(env, "ENABLE_WEBSOCKET", True),
         dashboard=_bool(env, "DASHBOARD", False),
         log_level=(_env(env, "LOG_LEVEL", "INFO") or "INFO").upper(),

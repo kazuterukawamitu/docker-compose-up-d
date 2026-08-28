@@ -303,10 +303,13 @@ class Engine:
         if self.cfg.enable_websocket:
             self._maybe_ws()
         state = load_state(self.cfg.state_path, self.cfg)
+        last_ok = time.monotonic()
+        timeout = float(self.cfg.no_trade_timeout_seconds)
         while not self._stop:
             try:
                 candles = fetch_candles(rest, self.cfg)
                 signal = self.process_candles(candles, state, execute=True)
+                last_ok = time.monotonic()
                 last = str(candles[-1].close) if candles else "-"
                 slog(
                     "HEARTBEAT",
@@ -317,9 +320,19 @@ class Engine:
                     uptime_sec=int(time.monotonic() - state.started_at),
                     utc=datetime.now(timezone.utc).isoformat(),
                 )
+                if time.monotonic() - state.started_at >= timeout and signal.kind == "HOLD":
+                    slog(
+                        "WATCHDOG",
+                        "LONG_WAIT",
+                        timeout_sec=int(timeout),
+                        reason=signal.reason,
+                    )
                 _dashboard(self.cfg, state, last, signal)
             except Exception as exc:
                 slog("ERROR", "loop error", error=type(exc).__name__, detail=str(exc)[:200])
+                if time.monotonic() - last_ok >= timeout:
+                    slog("WATCHDOG", "FAIL stuck loop", idle_sec=int(time.monotonic() - last_ok))
+                    break
             for _ in range(int(max(1, self.cfg.poll_sec))):
                 if self._stop:
                     break
