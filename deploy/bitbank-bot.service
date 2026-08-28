@@ -1,0 +1,17 @@
+[Unit]
+Description=Bitbank BTC/JPY README-rule bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/bitbank-bot
+Environment=PYTHONPATH=/opt/bitbank-bot/src
+EnvironmentFile=-/opt/bitbank-bot/.env
+ExecStart=/usr/bin/python3 -m bitbank_bot
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
