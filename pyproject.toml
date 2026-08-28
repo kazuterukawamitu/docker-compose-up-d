@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bitbank-bot"
+version = "0.1.0"
+description = "Bitbank BTC/JPY dry-run-first trading bot using README MA crossover rules"
+readme = "README.md"
+requires-python = ">=3.12"
+authors = [{ name = "kazuteru Kawamitsu" }]
+dependencies = [
+    "aiohttp>=3.9,<4",
+    "websockets>=12,<16",
+    "python-dotenv>=1.0,<2",
+    "rich>=13,<15",
+    "numpy>=1.26,<3",
+    "pandas>=2.2,<3",
+    "matplotlib>=3.8,<4",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8,<9",
+    "pytest-asyncio>=0.23,<2",
+]
+ml = [
+    "scikit-learn>=1.4",
+]
+
+[project.scripts]
+bitbank-bot = "bitbank_bot.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"

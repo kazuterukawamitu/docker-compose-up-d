@@ -1,0 +1,17 @@
+[Unit]
+Description=Bitbank BTC/JPY trading bot (dry-run unless DRY_RUN=false)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/bitbank-bot
+EnvironmentFile=-/opt/bitbank-bot/.env
+Environment=DRY_RUN=true
+ExecStart=/opt/bitbank-bot/.venv/bin/python -m bitbank_bot run
+Restart=on-failure
+RestartSec=10
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
