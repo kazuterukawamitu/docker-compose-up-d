@@ -14,7 +14,7 @@ from bitbank_bot.preflight import run_preflight
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Bitbank BTC/JPY README-rule bot")
+    parser = argparse.ArgumentParser(prog="bitbank-bot", description="Bitbank BTC/JPY README-rule bot")
     parser.add_argument("--env-file", default=".env")
     parser.add_argument("--preflight", action="store_true", help="connectivity checks; no orders")
     parser.add_argument("--private", action="store_true", help="include private asset check in preflight")
