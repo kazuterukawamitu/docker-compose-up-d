@@ -17,6 +17,7 @@ SRC = ROOT / "src"
 PACKAGE = SRC / "bitbank_bot" / "__init__.py"
 
 _CLONE = "https://github.com/kazuterukawamitu/docker-compose-up-d.git"
+_BRANCH = "cursor/bitbank-btc-jpy-bot-09cf"
 
 
 def fail(message: str, code: int = 2) -> None:
@@ -28,11 +29,14 @@ def require_repo() -> None:
     if PACKAGE.is_file() and (ROOT / "pyproject.toml").is_file():
         return
     fail(
-        "bitbank_bot のソースが見つかりません。ホームディレクトリ (~) ではなく、"
-        "clone したリポジトリで実行してください。\n"
-        f"  git clone {_CLONE}\n"
+        "bitbank_bot のソースが見つかりません。ホーム (~) や main ブランチではなく、"
+        "ボット用ブランチを clone したフォルダで実行してください。\n"
+        "chmod: start.sh: No such file or directory のときは start.sh が無い場所で chmod しています。\n"
+        "chmod は不要です。\n"
+        f"  git clone -b {_BRANCH} {_CLONE}\n"
         "  cd docker-compose-up-d\n"
-        "  ./start.sh --preflight\n"
+        "  bash ./start.sh --preflight\n"
+        "  bash ./start.sh\n"
         f"現在の run.py: {Path(__file__).resolve()}"
     )
 
@@ -49,7 +53,7 @@ def require_python() -> None:
         "  source .venv/bin/activate\n"
         "  python -m pip install -r requirements.txt\n"
         "  python -m bitbank_bot --preflight\n"
-        "またはリポジトリ直下で ./start.sh を実行してください。"
+        "またはリポジトリ直下で bash ./start.sh を実行してください。"
     )
 
 

@@ -41,22 +41,61 @@ Do **not** paste this README or Python source into zsh. History expansion (`!`) 
 
 Python **3.12+** is required. macOS CommandLineTools (`/usr/bin/python3`) is often 3.9 and cannot run this bot.
 
+`start.sh` lives on the **bot branch**, not on `main` (wiki HTML only) and not in your home directory (`~`). That is why `chmod +x start.sh` prints `chmod: start.sh: No such file or directory`. **Do not chmod.** Git already marks `start.sh` executable. Use `bash ./start.sh` so a missing execute bit does not matter.
+
+### Fresh clone (correct)
+
 ```bash
-git clone https://github.com/kazuterukawamitu/docker-compose-up-d.git
+git clone -b cursor/bitbank-btc-jpy-bot-09cf https://github.com/kazuterukawamitu/docker-compose-up-d.git
 cd docker-compose-up-d
-chmod +x start.sh
-./start.sh --preflight
-./start.sh
+ls start.sh src/bitbank_bot/__init__.py
+bash ./start.sh --preflight
+bash ./start.sh
 ```
 
-`start.sh` creates `.venv`, installs with `python -m pip`, copies `.env.example` → `.env` if needed, and starts the bot. You can invoke it from home by full path:
+### Already cloned (you are probably on `main`)
 
 ```bash
-~/docker-compose-up-d/start.sh --preflight
-~/docker-compose-up-d/start.sh
+cd docker-compose-up-d
+git fetch origin cursor/bitbank-btc-jpy-bot-09cf
+git checkout cursor/bitbank-btc-jpy-bot-09cf
+ls start.sh src/bitbank_bot/__init__.py
+bash ./start.sh --preflight
+bash ./start.sh
 ```
 
-Manual equivalent after `cd` into the repo:
+### From home (`~`) without `cd`
+
+Only after the clone above exists. Replace the path if you cloned somewhere else:
+
+```bash
+bash "$HOME/docker-compose-up-d/start.sh" --preflight
+bash "$HOME/docker-compose-up-d/start.sh"
+```
+
+`start.sh` creates `.venv`, installs with `python -m pip`, copies `.env.example` → `.env` if needed, and starts the bot.
+
+### `chmod: start.sh: No such file or directory`
+
+You ran `chmod +x start.sh` or `./start.sh` where the file is not. Typical cases:
+
+| Where you ran it | Why it fails |
+| --- | --- |
+| `~` (home) | `start.sh` is inside the clone, not in home |
+| default `main` clone | `main` has wiki HTML only; no Python bot, no `start.sh` |
+| zip of `main` | same as `main` |
+
+Check, then use the clone/checkout commands above:
+
+```bash
+pwd
+ls start.sh
+git branch --show-current
+```
+
+You want `start.sh` listed and branch `cursor/bitbank-btc-jpy-bot-09cf`. If `ls` says No such file, `chmod` cannot fix it.
+
+### Manual equivalent after `cd` into the repo
 
 ```bash
 python3.12 -m venv .venv
@@ -66,6 +105,13 @@ python -m pip install -e .
 cp .env.example .env
 python run.py --preflight
 python run.py
+```
+
+If `./start.sh` says `Permission denied` (file exists but is not executable):
+
+```bash
+bash ./start.sh --preflight
+bash ./start.sh
 ```
 
 Single evaluation cycle:

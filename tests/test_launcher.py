@@ -25,6 +25,24 @@ def test_start_sh_uses_script_directory_and_pip_module() -> None:
     assert "-m pip" in text
     assert "run.py" in text
     assert ".env.example" in text
+    assert 'exec "$VENV_PY" "$ROOT/run.py" "$@"' in text
+    assert "chmod: start.sh: No such file or directory" in text
+    assert "cursor/bitbank-btc-jpy-bot-09cf" in text
+    assert "ensurepip" in text or "venv を作れませんでした" in text
+
+
+def test_start_sh_is_tracked_executable() -> None:
+    out = subprocess.check_output(["git", "ls-files", "-s", "start.sh"], cwd=ROOT, text=True)
+    assert out.startswith("100755"), out
+
+
+def test_readme_tells_bash_start_not_chmod_from_home() -> None:
+    text = (ROOT / "README.md").read_text(encoding="utf-8")
+    assert "bash ./start.sh --preflight" in text
+    assert "bash ./start.sh" in text
+    assert "chmod: start.sh: No such file or directory" in text
+    assert "git clone -b cursor/bitbank-btc-jpy-bot-09cf" in text
+    assert "cd ~\nchmod +x start.sh" not in text
 
 
 def test_run_py_rejects_missing_package(tmp_path, monkeypatch) -> None:
@@ -35,6 +53,11 @@ def test_run_py_rejects_missing_package(tmp_path, monkeypatch) -> None:
         raise AssertionError("expected SystemExit")
     except SystemExit as exc:
         assert exc.code == 2
+
+
+def test_start_sh_bash_syntax() -> None:
+    result = subprocess.run(["bash", "-n", str(ROOT / "start.sh")], check=False, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
 
 
 def test_run_py_help_works_from_another_directory(tmp_path) -> None:
