@@ -1,112 +1,166 @@
-"""Order intent vs live execution. DRY_RUN never calls create_order."""
+"""Order gate: DRY_RUN never hits create_order; duplicate active orders block."""
 
 from __future__ import annotations
 
-import json
-import logging
+from dataclasses import dataclass
 from decimal import Decimal
+from typing import Any, Protocol
 
-from bitbank_bot.config import Settings
-from bitbank_bot.exceptions import DuplicateOrderError
-from bitbank_bot.models import AmountKind, AmountPlan, OrderRecord, OrderStatus, Signal
-from bitbank_bot.money import to_decimal
-from bitbank_bot.rest_client import BitbankRestClient
-
-LOGGER = logging.getLogger("bitbank_bot.orders")
-
-
-def parse_order_status(raw: str | None) -> OrderStatus:
-    if not raw:
-        return OrderStatus.UNFILLED
-    try:
-        return OrderStatus(raw)
-    except ValueError:
-        return OrderStatus.UNFILLED
+from bitbank_bot.amounts import AmountPlan
+from bitbank_bot.config import Config
+from bitbank_bot.logging_setup import slog
+from bitbank_bot.money import D, ZERO, quantize_price
+from bitbank_bot.strategy import Signal
 
 
-class OrderManager:
-    def __init__(self, rest: BitbankRestClient, settings: Settings) -> None:
-        self.rest = rest
-        self.settings = settings
-        self.last: OrderRecord | None = None
+class OrderClient(Protocol):
+    def get_active_orders(self, pair: str) -> list[dict[str, Any]]: ...
 
-    async def has_active_orders(self) -> bool:
-        if self.settings.dry_run or not self.settings.has_keys:
-            return False
-        orders = await self.rest.active_orders(self.settings.pair)
-        return bool(orders)
+    def create_order(
+        self,
+        pair: str,
+        amount: str,
+        side: str,
+        order_type: str,
+        price: str | None = None,
+        post_only: bool | None = None,
+    ) -> dict[str, Any]: ...
 
-    async def submit(self, signal: Signal, plan: AmountPlan) -> OrderRecord:
-        record = OrderRecord(
-            pair=self.settings.pair,
+
+@dataclass
+class OrderResult:
+    ok: bool
+    reason: str
+    dry_run: bool
+    simulated: bool
+    order_id: str | None
+    status: str | None
+    executed_amount: Decimal
+    average_price: Decimal
+    actual_execution_jpy: Decimal | None
+    raw: dict[str, Any] | None
+
+
+class OrderExecutor:
+    def __init__(self, cfg: Config, client: OrderClient | None) -> None:
+        self.cfg = cfg
+        self.client = client
+
+    def active_orders(self) -> list[dict[str, Any]]:
+        if self.client is None:
+            return []
+        try:
+            return self.client.get_active_orders(self.cfg.pair)
+        except Exception as exc:
+            slog("ERROR", "active_orders failed", error=type(exc).__name__)
+            raise
+
+    def place(self, signal: Signal, plan: AmountPlan) -> OrderResult:
+        slog(
+            "ORDER_REQUEST",
+            "order request",
+            kind=signal.kind,
             side=plan.side,
-            order_type=self.settings.order_type,
-            price=plan.price,
-            planned_amount=plan.planned_amount,
-            remaining_amount=plan.planned_amount,
-            rule=signal.rule,
-            dry_run=self.settings.dry_run,
-            amount_kind=AmountKind.PLANNED,
-            extra={
-                "reason": signal.reason,
-                "plan_reason": plan.reason,
-                "target_amount": str(plan.target_amount),
-                "size_hint": signal.size_hint,
-                "crossover_price": str(signal.crossover_price) if signal.crossover_price else None,
-            },
+            amount=str(plan.amount),
+            price=str(plan.price),
+            target_jpy=str(plan.target_jpy),
+            planned_order_jpy=str(plan.planned_order_jpy),
+            actual_execution_jpy="unset",
         )
-        intent = {
-            "event": "ORDER_INTENT",
-            "pair": record.pair,
-            "side": record.side,
-            "type": record.order_type,
-            "price": str(record.price),
-            "amount": str(record.planned_amount),
-            "rule": record.rule,
-            "reason": signal.reason,
-            "dry_run": self.settings.dry_run,
-            "live_trading": self.settings.live_trading,
-        }
-        LOGGER.info("%s", json.dumps(intent, ensure_ascii=False))
-
-        if self.settings.dry_run or not self.settings.live_trading:
-            record.status = OrderStatus.DRY_RUN_INTENT
-            record.executed_amount = plan.planned_amount
-            record.remaining_amount = Decimal("0")
-            record.average_price = plan.price
-            record.amount_kind = AmountKind.ACTUAL_EXECUTION
-            record.extra["simulated_fill"] = True
-            self.last = record
-            return record
-
-        if await self.has_active_orders():
-            raise DuplicateOrderError(f"active order already open for {self.settings.pair}")
-
-        raw = await self.rest.create_order(
-            pair=self.settings.pair,
-            amount=str(plan.planned_amount),
-            side=plan.side,
-            order_type=self.settings.order_type,
-            price=str(plan.price) if self.settings.order_type == "limit" else None,
-            post_only=self.settings.post_only,
-        )
-        return self._from_exchange(record, raw)
-
-    def _from_exchange(self, record: OrderRecord, raw: dict) -> OrderRecord:
-        executed = to_decimal(raw.get("executed_amount") or "0")
-        remaining = raw.get("remaining_amount")
-        record.order_id = int(raw["order_id"]) if raw.get("order_id") is not None else None
-        record.executed_amount = executed
-        record.remaining_amount = to_decimal(remaining) if remaining is not None else None
-        record.status = parse_order_status(raw.get("status"))
-        if raw.get("average_price"):
-            record.average_price = to_decimal(raw["average_price"])
-        record.amount_kind = AmountKind.ACTUAL_EXECUTION
-        if not record.is_fill():
-            LOGGER.info(
-                "order_id=%s status=%s executed_amount=0 — not treating as fill",
-                record.order_id,
-                record.status.value,
+        if not plan.ok or plan.amount <= ZERO:
+            return OrderResult(
+                False, plan.reason, self.cfg.dry_run, False, None, None, ZERO, ZERO, None, None
             )
-        self.last = record
-        return record
+        active = self.active_orders()
+        if active:
+            slog("ERROR", "duplicate prevention: active order exists", count=len(active))
+            return OrderResult(
+                False,
+                "active_order_exists",
+                self.cfg.dry_run,
+                False,
+                None,
+                None,
+                ZERO,
+                ZERO,
+                None,
+                None,
+            )
+        price_str = None
+        if self.cfg.order_type == "limit":
+            price_str = str(quantize_price(plan.price, self.cfg.price_tick))
+        if self.cfg.dry_run or not self.cfg.live_trading:
+            slog(
+                "ORDER_INTENT",
+                "dry-run; create_order not called",
+                kind=signal.kind,
+                side=plan.side,
+                amount=str(plan.amount),
+                order_type=self.cfg.order_type,
+            )
+            if self.cfg.simulate_fill:
+                filled = plan.amount
+                avg = plan.price
+                actual = filled * avg
+                slog(
+                    "FILL",
+                    "SIMULATED_FILL not live",
+                    executed_amount=str(filled),
+                    average_price=str(avg),
+                    actual_execution_jpy=str(actual),
+                )
+                return OrderResult(
+                    True,
+                    "simulated_fill",
+                    True,
+                    True,
+                    "DRY_RUN",
+                    "FULLY_FILLED",
+                    filled,
+                    avg,
+                    actual,
+                    None,
+                )
+            return OrderResult(
+                True, "intent_only", True, False, None, None, ZERO, ZERO, None, None
+            )
+        if self.client is None:
+            return OrderResult(
+                False, "no_client", False, False, None, None, ZERO, ZERO, None, None
+            )
+        raw = self.client.create_order(
+            pair=self.cfg.pair,
+            amount=str(plan.amount),
+            side=plan.side,
+            order_type=self.cfg.order_type,
+            price=price_str,
+        )
+        order_id = str(raw.get("order_id") or "")
+        status = str(raw.get("status") or "")
+        slog("ORDER_ACCEPTED", "order accepted", order_id=order_id, status=status)
+        executed = D(raw.get("executed_amount") or 0)
+        avg = D(raw.get("average_price") or 0)
+        slog(
+            "ORDER_STATUS",
+            "order status",
+            order_id=order_id,
+            status=status,
+            executed_amount=str(executed),
+        )
+        if executed <= ZERO:
+            slog("ORDER_STATUS", "no fill yet; not logging FILL", order_id=order_id, status=status)
+            return OrderResult(
+                True, "accepted_unfilled", False, False, order_id, status, ZERO, ZERO, None, raw
+            )
+        actual = executed * avg
+        slog(
+            "FILL",
+            "fill",
+            order_id=order_id,
+            executed_amount=str(executed),
+            average_price=str(avg),
+            actual_execution_jpy=str(actual),
+        )
+        return OrderResult(
+            True, "fill", False, False, order_id, status, executed, avg, actual, raw
+        )

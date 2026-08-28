@@ -1,84 +1,85 @@
-"""Kill switch, stale data, daily PnL floor, max position, balances."""
+"""Kill switch, max position, and daily loss caps."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
-from pathlib import Path
 
-from bitbank_bot.config import Settings
-from bitbank_bot.models import AmountPlan
+from bitbank_bot.config import Config
+from bitbank_bot.logging_setup import slog
+from bitbank_bot.money import D, ZERO
+
+JST = timezone(timedelta(hours=9))
+
+
+def jst_today() -> date:
+    return datetime.now(JST).date()
 
 
 @dataclass
 class RiskDecision:
     allowed: bool
+    capped_btc: Decimal
     reason: str
+    killed: bool
 
 
 class RiskManager:
-    def __init__(self, settings: Settings) -> None:
-        self.settings = settings
-        self.kill_switch = False
-        self.daily_pnl = Decimal("0")
-        self.day_key: str | None = None
-
-    def _roll_day(self, now: datetime | None = None) -> None:
-        now = now or datetime.now(tz=UTC)
-        key = now.astimezone().date().isoformat()
-        if self.day_key != key:
-            self.day_key = key
-            self.daily_pnl = Decimal("0")
-
-    def record_realized_pnl(self, jpy: Decimal, now: datetime | None = None) -> None:
-        self._roll_day(now)
-        self.daily_pnl += jpy
-
-    def kill_switch_file_on(self) -> bool:
-        return Path(self.settings.kill_switch_path).is_file()
-
-    def trip_kill_switch(self, reason: str) -> RiskDecision:
-        self.kill_switch = True
-        return RiskDecision(False, f"kill_switch:{reason}")
-
-    def check(
+    def __init__(
         self,
-        *,
-        stale: bool,
-        side: str,
-        plan: AmountPlan,
-        free_jpy: Decimal,
-        free_btc: Decimal,
-        now: datetime | None = None,
-        halt_status: str | None = None,
-    ) -> RiskDecision:
-        self._roll_day(now)
-        if self.kill_switch or self.kill_switch_file_on():
-            return RiskDecision(False, "kill_switch")
-        if halt_status == "HALT":
-            return self.trip_kill_switch("exchange_halt")
-        if stale:
-            return RiskDecision(False, "stale_data")
-        if self.daily_pnl <= -self.settings.daily_pnl_floor:
-            return RiskDecision(
-                False,
-                f"daily_pnl_floor pnl={self.daily_pnl} floor=-{self.settings.daily_pnl_floor}",
-            )
-        max_loss = self.settings.max_daily_loss_jpy
-        if max_loss is not None and self.daily_pnl <= -max_loss:
-            return RiskDecision(False, f"max_daily_loss pnl={self.daily_pnl}")
-        if plan.planned_amount <= 0:
-            return RiskDecision(False, f"amount_zero:{plan.reason}")
-        if side == "buy":
-            needed = plan.planned_amount * plan.price
-            if free_jpy < needed:
-                return RiskDecision(False, "insufficient_jpy_free_amount")
-        elif side == "sell":
-            if free_btc < plan.planned_amount:
-                return RiskDecision(False, "insufficient_btc_free_amount")
-        if plan.min_amount and plan.planned_amount < plan.min_amount:
-            return RiskDecision(False, "below_exchange_min_amount")
-        if plan.max_amount is not None and plan.planned_amount > plan.max_amount:
-            return RiskDecision(False, "above_exchange_max_amount")
-        return RiskDecision(True, "ok")
+        cfg: Config,
+        daily_pnl: Decimal = ZERO,
+        daily_pnl_date: str | None = None,
+        killed: bool | None = None,
+    ) -> None:
+        self.cfg = cfg
+        self.max_position_btc = cfg.max_position_btc
+        self.max_order_btc = cfg.max_order_btc
+        self.max_daily_loss_jpy = cfg.max_daily_loss_jpy
+        self.daily_pnl = D(daily_pnl)
+        self.daily_pnl_date = daily_pnl_date or jst_today().isoformat()
+        self._killed = cfg.kill_switch if killed is None else bool(killed)
+
+    def _roll_day(self) -> None:
+        today = jst_today().isoformat()
+        if today != self.daily_pnl_date:
+            self.daily_pnl = ZERO
+            self.daily_pnl_date = today
+
+    @property
+    def killed(self) -> bool:
+        self._roll_day()
+        if self._killed:
+            return True
+        if self.max_daily_loss_jpy > ZERO and self.daily_pnl <= -self.max_daily_loss_jpy:
+            return True
+        return False
+
+    def trip(self, reason: str) -> None:
+        self._killed = True
+        slog("RISK", "kill switch tripped", reason=reason)
+
+    def record_realized_pnl(self, pnl_jpy: Decimal) -> None:
+        self._roll_day()
+        self.daily_pnl += D(pnl_jpy)
+        slog("RISK", "realized pnl", pnl=str(pnl_jpy), daily_pnl=str(self.daily_pnl))
+        if self.max_daily_loss_jpy > ZERO and self.daily_pnl <= -self.max_daily_loss_jpy:
+            self.trip("max_daily_loss")
+
+    def check_buy(self, current_btc: Decimal, requested_btc: Decimal) -> RiskDecision:
+        if self.killed:
+            return RiskDecision(False, ZERO, "kill_switch", True)
+        headroom = self.max_position_btc - D(current_btc)
+        if headroom <= ZERO:
+            return RiskDecision(False, ZERO, "max_position", False)
+        capped = min(D(requested_btc), headroom, self.max_order_btc)
+        if capped <= ZERO:
+            return RiskDecision(False, ZERO, "capped_to_zero", False)
+        return RiskDecision(True, capped, "ok", False)
+
+    def check_sell(self, requested_btc: Decimal) -> RiskDecision:
+        if self.killed and self.cfg.kill_switch:
+            return RiskDecision(False, ZERO, "kill_switch", True)
+        capped = min(D(requested_btc), self.max_order_btc)
+        return RiskDecision(True, capped, "ok", self.killed)

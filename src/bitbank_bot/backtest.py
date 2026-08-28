@@ -109,7 +109,6 @@ def run_backtest(
     if position is not None and snaps:
         last = snaps[-1].close
         cash += position.amount * last
-        btc = ZERO
         pnl = position.amount * last - position.actual_execution_jpy
         trades += 1
         if pnl >= ZERO:

@@ -1,120 +1,116 @@
-"""Position sizing from free_amount (never onhand_amount)."""
+"""Size orders from latest free_amount. Never treat TARGET/PLANNED as a fill."""
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from decimal import Decimal
 
-from bitbank_bot.models import AmountKind, AmountPlan, PairConstraints
-from bitbank_bot.money import floor_to_unit, jpy_tick, to_decimal
+from bitbank_bot.config import Config
+from bitbank_bot.money import D, ONE, ZERO, meets_min_amount, truncate
+from bitbank_bot.risk import RiskManager
+
+
+@dataclass
+class AmountPlan:
+    side: str
+    amount: Decimal
+    price: Decimal
+    available_jpy: Decimal
+    available_btc: Decimal
+    target_jpy: Decimal
+    planned_order_jpy: Decimal
+    actual_execution_jpy: Decimal | None
+    actual_balance_jpy: Decimal
+    actual_balance_btc: Decimal
+    ok: bool
+    reason: str
 
 
 def plan_buy(
     *,
-    free_jpy: Decimal,
+    available_jpy: Decimal,
+    available_btc: Decimal,
     price: Decimal,
-    max_balance_usage: Decimal,
-    fee_buffer: Decimal,
-    constraints: PairConstraints,
+    cfg: Config,
+    risk: RiskManager,
+    target_jpy: Decimal | None = None,
 ) -> AmountPlan:
-    """BUY: free_jpy * MAX_BALANCE_USAGE / price, minus fee buffer, floored to unit."""
-    free_jpy = to_decimal(free_jpy)
-    price = jpy_tick(price, side="buy")
-    if price <= 0:
-        return AmountPlan(
-            kind=AmountKind.PLANNED,
-            side="buy",
-            target_amount=Decimal("0"),
-            planned_amount=Decimal("0"),
-            price=price,
-            quote_budget=free_jpy,
-            reason="invalid_price",
-            min_amount=constraints.min_amount,
-            max_amount=constraints.limit_max_amount,
-        )
-    target_quote = free_jpy * max_balance_usage
-    after_fee = target_quote * (Decimal("1") - fee_buffer)
-    target_btc = after_fee / price
-    planned = floor_to_unit(target_btc, constraints.unit_amount)
-    cap = constraints.limit_max_amount
-    if cap is not None and planned > cap:
-        planned = floor_to_unit(cap, constraints.unit_amount)
-    reason = "buy_max_from_free_jpy"
-    if planned < constraints.min_amount:
-        reason = (
-            f"below_min_amount planned={planned} min={constraints.min_amount} "
-            "exchange min/max not bypassed"
-        )
-        planned = Decimal("0")
+    available_jpy = D(available_jpy)
+    available_btc = D(available_btc)
+    price = D(price)
+    max_usable_jpy = available_jpy * cfg.max_balance_usage * (ONE - cfg.fee_buffer)
+    if target_jpy is None:
+        target_jpy = max_usable_jpy
+    else:
+        target_jpy = D(target_jpy)
+    usable_jpy = min(target_jpy, max_usable_jpy)
+    balance_btc = ZERO if price <= ZERO else usable_jpy / price
+    decision = risk.check_buy(available_btc, balance_btc)
+    raw = min(balance_btc, decision.capped_btc) if decision.allowed else ZERO
+    amount = truncate(raw, cfg.amount_precision)
+    planned = amount * price
+    ok = decision.allowed and meets_min_amount(amount, cfg.min_amount_btc)
+    if ok:
+        reason = "ok"
+    elif not decision.allowed:
+        reason = decision.reason
+    elif amount > ZERO:
+        reason = "below_min_amount"
+    else:
+        reason = "insufficient"
     return AmountPlan(
-        kind=AmountKind.PLANNED,
         side="buy",
-        target_amount=floor_to_unit(target_btc, constraints.unit_amount),
-        planned_amount=planned,
+        amount=amount if ok else ZERO,
         price=price,
-        quote_budget=after_fee,
+        available_jpy=available_jpy,
+        available_btc=available_btc,
+        target_jpy=target_jpy,
+        planned_order_jpy=planned if ok else ZERO,
+        actual_execution_jpy=None,
+        actual_balance_jpy=available_jpy,
+        actual_balance_btc=available_btc,
+        ok=ok,
         reason=reason,
-        min_amount=constraints.min_amount,
-        max_amount=cap,
     )
 
 
-def plan_sell_all(
+def plan_sell(
     *,
-    free_btc: Decimal,
+    available_jpy: Decimal,
+    available_btc: Decimal,
     price: Decimal,
-    constraints: PairConstraints,
+    cfg: Config,
+    risk: RiskManager,
 ) -> AmountPlan:
-    """SELL ALL: latest free BTC floored to unit. Never use onhand_amount."""
-    free_btc = to_decimal(free_btc)
-    price = jpy_tick(price, side="sell")
-    planned = floor_to_unit(free_btc, constraints.unit_amount)
-    cap = constraints.limit_max_amount
-    if cap is not None and planned > cap:
-        planned = floor_to_unit(cap, constraints.unit_amount)
-    reason = "sell_all_from_free_btc"
-    if planned < constraints.min_amount:
-        reason = (
-            f"below_min_amount planned={planned} min={constraints.min_amount} "
-            "exchange min/max not bypassed"
-        )
-        planned = Decimal("0")
+    available_jpy = D(available_jpy)
+    available_btc = D(available_btc)
+    price = D(price)
+    target_jpy = available_btc * price
+    raw = available_btc * cfg.sell_safety_factor
+    decision = risk.check_sell(raw)
+    raw = min(raw, decision.capped_btc) if decision.allowed else ZERO
+    amount = truncate(raw, cfg.amount_precision)
+    planned = amount * price
+    ok = decision.allowed and meets_min_amount(amount, cfg.min_amount_btc)
+    if ok:
+        reason = "ok"
+    elif not decision.allowed:
+        reason = decision.reason
+    elif amount > ZERO:
+        reason = "below_min_amount"
+    else:
+        reason = "insufficient"
     return AmountPlan(
-        kind=AmountKind.PLANNED,
         side="sell",
-        target_amount=floor_to_unit(free_btc, constraints.unit_amount),
-        planned_amount=planned,
+        amount=amount if ok else ZERO,
         price=price,
-        quote_budget=None,
+        available_jpy=available_jpy,
+        available_btc=available_btc,
+        target_jpy=target_jpy,
+        planned_order_jpy=planned if ok else ZERO,
+        actual_execution_jpy=None,
+        actual_balance_jpy=available_jpy,
+        actual_balance_btc=available_btc,
+        ok=ok,
         reason=reason,
-        min_amount=constraints.min_amount,
-        max_amount=cap,
     )
-
-
-plan_sell = plan_sell_all
-
-
-def apply_max_position(
-    plan: AmountPlan,
-    *,
-    current_btc: Decimal,
-    max_position_btc: Decimal | None,
-    unit: Decimal,
-) -> AmountPlan:
-    if plan.side != "buy" or max_position_btc is None:
-        return plan
-    current_btc = to_decimal(current_btc)
-    headroom = max_position_btc - current_btc
-    if headroom <= 0:
-        plan.planned_amount = Decimal("0")
-        plan.reason = "max_position_reached"
-        return plan
-    capped = floor_to_unit(min(plan.planned_amount, headroom), unit)
-    if capped < plan.min_amount:
-        plan.planned_amount = Decimal("0")
-        plan.reason = "max_position_headroom_below_min"
-        return plan
-    if capped < plan.planned_amount:
-        plan.planned_amount = capped
-        plan.reason = "capped_by_max_position"
-    return plan
