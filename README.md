@@ -31,3 +31,5 @@ Btcを全て売る
 Btc価格が移動平均線よりも4％以上マイナス（extend all)に下降した後再度btc価格は上昇したが移動平均線まで上昇せずに再び下落した時に
 Btcを全て売る
 
+See [docs/STRATEGY.md](docs/STRATEGY.md) for these rules in one table, and [docs/PROMPT-ANALYSIS.md](docs/PROMPT-ANALYSIS.md) for how this repository relates to the concatenated prompt (Bitbank dry-run only; no third bot; no secrets).
+
