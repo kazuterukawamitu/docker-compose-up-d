@@ -1,0 +1,19 @@
+[Unit]
+Description=Bitbank BTC/JPY MA spot bot (iTerm15 VPS-resident)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/bitbank-bot
+EnvironmentFile=/opt/bitbank-bot/.env
+Environment=PYTHONPATH=/opt/bitbank-bot/src
+ExecStart=/opt/bitbank-bot/.venv/bin/python -m bitbank_bot
+Restart=always
+RestartSec=10
+# Survives Mac sleep, iTerm15 close, SSH drop, and J:COM drop.
+# DRY_RUN=true unless LIVE_TRADING is explicitly enabled in EnvironmentFile
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
