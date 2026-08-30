@@ -195,6 +195,41 @@ def aggregate_candles(candles: list[Candle], bucket_ms: int) -> list[Candle]:
     return out
 
 
+def track_record_candles() -> list[Candle]:
+    """Deterministic Master Policy series: SMA20/50 BUY1 then +3% TP.
+
+    Used by ``--backtest`` when no CSV is given so a closed-trade ledger
+    exists without depending on live Bitbank history.
+    """
+    prices = [D("10000000") - D(i) * D("20000") for i in range(60)]
+    base = prices[-1]
+    bounce = base + D("350000")
+    prices.extend(
+        [
+            base + D("50000"),
+            base + D("150000"),
+            bounce,
+            (bounce * D("1.04")).to_integral_value(),
+            (bounce * D("1.06")).to_integral_value(),
+        ]
+    )
+    candles: list[Candle] = []
+    base_ts = 1_700_000_000_000
+    hour = 3_600_000
+    for i, price in enumerate(prices):
+        candles.append(
+            Candle(
+                open=price,
+                high=price,
+                low=price,
+                close=price,
+                volume=D("1.5"),
+                timestamp_ms=base_ts + i * hour,
+            )
+        )
+    return candles
+
+
 def synthetic_candles(count: int = 120, start: Decimal = D("10000000")) -> list[Candle]:
     candles: list[Candle] = []
     price = start

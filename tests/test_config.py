@@ -26,6 +26,8 @@ def test_master_policy_defaults_match_dataclass() -> None:
     assert empty.lock_path == baked.lock_path == DEFAULT_LOCK_PATH
     assert empty.stale_ws_sec == baked.stale_ws_sec == 60.0
     assert empty.daily_pnl_floor == baked.daily_pnl_floor == D("150")
+    assert empty.kill_switch is False
+    assert baked.kill_switch is False
     assert empty.wiki_cross_rules is False
     assert empty.mtf_filter is False
 
