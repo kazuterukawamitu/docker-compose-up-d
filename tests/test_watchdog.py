@@ -29,7 +29,9 @@ def test_normal_wait_before_timeout() -> None:
 
 
 def test_long_wait_after_timeout() -> None:
-    status, _reason = diagnose(_inp(now_ms=2_000_000, started_ms=1_000_000))
+    status, _reason = diagnose(
+        _inp(now_ms=2_000_000, started_ms=1_000_000, last_market_data_ms=1_999_000)
+    )
     assert status == "LONG_WAIT"
 
 
@@ -51,6 +53,7 @@ def test_fail_when_signal_never_reaches_orders() -> None:
         _inp(
             now_ms=2_000_000,
             started_ms=1_000_000,
+            last_market_data_ms=1_999_000,
             buy_signals=2,
             order_attempts=0,
             last_block_reason="",
@@ -65,6 +68,7 @@ def test_blocked_signal_is_long_wait_not_fail() -> None:
         _inp(
             now_ms=2_000_000,
             started_ms=1_000_000,
+            last_market_data_ms=1_999_000,
             buy_signals=1,
             order_attempts=0,
             last_block_reason="kill_switch",
