@@ -89,21 +89,7 @@ def main(argv: list[str] | None = None) -> int:
 
         candles = load_csv(Path(args.backtest)) if args.backtest else synthetic_candles(200)
         report = run_backtest(candles, cfg, initial_jpy=D("1000000"))
-        print(
-            json.dumps(
-                {
-                    "trades": report.trades,
-                    "wins": report.wins,
-                    "losses": report.losses,
-                    "win_rate": str(report.win_rate),
-                    "profit_factor": str(report.profit_factor),
-                    "max_drawdown": str(report.max_drawdown),
-                    "net_pnl": str(report.net_pnl),
-                    "equity": str(report.equity),
-                },
-                indent=2,
-            )
-        )
+        print(json.dumps(report.as_dict(), indent=2))
         return 0
 
     engine = Engine(cfg, client=rest)

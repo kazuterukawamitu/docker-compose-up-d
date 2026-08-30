@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import csv
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
 
@@ -17,6 +17,18 @@ from bitbank_bot.strategy import Position, Strategy, build_snapshots
 
 
 @dataclass
+class ClosedTrade:
+    kind: str
+    entry_ts: int
+    exit_ts: int
+    entry_price: Decimal
+    exit_price: Decimal
+    amount: Decimal
+    pnl: Decimal
+    reason: str
+
+
+@dataclass
 class BacktestReport:
     trades: int
     wins: int
@@ -26,6 +38,36 @@ class BacktestReport:
     max_drawdown: Decimal
     net_pnl: Decimal
     equity: Decimal
+    blocked_buys: int = 0
+    last_block_reason: str = ""
+    closed: list[ClosedTrade] = field(default_factory=list)
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "trades": self.trades,
+            "wins": self.wins,
+            "losses": self.losses,
+            "win_rate": str(self.win_rate),
+            "profit_factor": str(self.profit_factor),
+            "max_drawdown": str(self.max_drawdown),
+            "net_pnl": str(self.net_pnl),
+            "equity": str(self.equity),
+            "blocked_buys": self.blocked_buys,
+            "last_block_reason": self.last_block_reason,
+            "closed": [
+                {
+                    "kind": t.kind,
+                    "entry_ts": t.entry_ts,
+                    "exit_ts": t.exit_ts,
+                    "entry_price": str(t.entry_price),
+                    "exit_price": str(t.exit_price),
+                    "amount": str(t.amount),
+                    "pnl": str(t.pnl),
+                    "reason": t.reason,
+                }
+                for t in self.closed
+            ],
+        }
 
 
 def load_csv(path: Path) -> list[Candle]:
@@ -54,7 +96,11 @@ def run_backtest(
     gross_win = ZERO
     gross_loss = ZERO
     trades = 0
+    blocked_buys = 0
+    last_block_reason = ""
+    closed: list[ClosedTrade] = []
     for snap in snaps:
+        risk.set_as_of(snap.timestamp_ms)
         signal = strategy.evaluate(snap, position)
         if signal.side == "buy" and position is None:
             plan = plan_buy(
@@ -65,6 +111,9 @@ def run_backtest(
                 risk=risk,
             )
             if not plan.ok:
+                blocked_buys += 1
+                last_block_reason = plan.reason
+                slog("RISK", "backtest buy blocked", reason=plan.reason)
                 continue
             cash -= plan.planned_order_jpy
             btc += plan.amount
@@ -86,6 +135,7 @@ def run_backtest(
                 risk=risk,
             )
             if not plan.ok:
+                last_block_reason = plan.reason
                 continue
             proceeds = plan.amount * snap.close
             pnl = proceeds - position.actual_execution_jpy
@@ -93,6 +143,18 @@ def run_backtest(
             btc -= plan.amount
             risk.record_realized_pnl(pnl)
             trades += 1
+            closed.append(
+                ClosedTrade(
+                    kind=position.kind,
+                    entry_ts=position.entry_candle_ts,
+                    exit_ts=snap.timestamp_ms,
+                    entry_price=position.average_price,
+                    exit_price=snap.close,
+                    amount=plan.amount,
+                    pnl=pnl,
+                    reason=signal.kind,
+                )
+            )
             if pnl >= ZERO:
                 wins += 1
                 gross_win += pnl
@@ -111,6 +173,18 @@ def run_backtest(
         cash += position.amount * last
         pnl = position.amount * last - position.actual_execution_jpy
         trades += 1
+        closed.append(
+            ClosedTrade(
+                kind=position.kind,
+                entry_ts=position.entry_candle_ts,
+                exit_ts=snaps[-1].timestamp_ms,
+                entry_price=position.average_price,
+                exit_price=last,
+                amount=position.amount,
+                pnl=pnl,
+                reason="mark_to_market",
+            )
+        )
         if pnl >= ZERO:
             wins += 1
             gross_win += pnl
@@ -129,5 +203,19 @@ def run_backtest(
         pf=str(pf),
         max_dd=str(max_dd),
         net=str(net),
+        blocked_buys=blocked_buys,
+        last_block_reason=last_block_reason or "-",
     )
-    return BacktestReport(trades, wins, losses, win_rate, pf, max_dd, net, equity)
+    return BacktestReport(
+        trades,
+        wins,
+        losses,
+        win_rate,
+        pf,
+        max_dd,
+        net,
+        equity,
+        blocked_buys=blocked_buys,
+        last_block_reason=last_block_reason,
+        closed=closed,
+    )

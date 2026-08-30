@@ -66,12 +66,13 @@ Strategy must not set quantity. [`src/bitbank_bot/amounts.py`](../src/bitbank_bo
 
 ## Risk
 
-- `DAILY_PNL_FLOOR=150` JPY (halt when realized daily PnL ≤ −150)
-- Extra `MAX_DAILY_LOSS_JPY` optional (empty = disabled)
-- Kill file: `data/KILL`
+- `KILL_SWITCH=false` (operator hard-stop). Also `data/KILL` — live-checked; delete the file to resume. This is the only source of `last_block_reason="kill_switch"`.
+- `DAILY_PNL_FLOOR=150` JPY (halt **new buys** when realized daily PnL ≤ −150). Reason is `daily_pnl_floor`, not `kill_switch`. Resets at the next JST day. Sells still flatten.
+- Extra `MAX_DAILY_LOSS_JPY` optional (empty = disabled); reason `max_daily_loss`.
 - Stale data: 60 seconds
 - Watchdog: 900 seconds (`NORMAL_WAIT` / `LONG_WAIT` / `FAIL`)
 - Single-instance lock: `data/bot.lock`
+- `state.json` must not persist a computed daily/file halt as a latched `kill_switch`
 
 ## Execution honesty
 

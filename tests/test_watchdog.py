@@ -76,3 +76,36 @@ def test_blocked_signal_is_long_wait_not_fail() -> None:
     )
     assert status == "LONG_WAIT"
     assert "kill_switch" in reason
+
+
+def test_successful_orders_are_ok_not_blocked() -> None:
+    status, reason = diagnose(
+        _inp(
+            now_ms=1_100_000,
+            started_ms=1_000_000,
+            last_market_data_ms=1_099_000,
+            buy_signals=2,
+            order_attempts=2,
+            last_signal_kind="BUY1",
+            last_signal_reason="MA left downtrend and price crossed above MA",
+            last_block_reason="",
+        )
+    )
+    assert status == "OK"
+    assert "kill_switch" not in reason
+
+
+def test_daily_floor_block_is_long_wait_not_kill_switch() -> None:
+    status, reason = diagnose(
+        _inp(
+            now_ms=2_000_000,
+            started_ms=1_000_000,
+            last_market_data_ms=1_999_000,
+            buy_signals=1,
+            order_attempts=0,
+            last_block_reason="daily_pnl_floor",
+        )
+    )
+    assert status == "LONG_WAIT"
+    assert "daily_pnl_floor" in reason
+    assert "kill_switch" not in reason

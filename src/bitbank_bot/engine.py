@@ -72,11 +72,16 @@ def load_state(path: str | Path, cfg: Config) -> BotState:
                 actual_execution_jpy=D(pos["actual_execution_jpy"]),
                 kind=str(pos.get("kind") or ""),
             )
+        # Old builds persisted a computed halt as kill_switch=true after a
+        # daily-loss trip or a momentary KILL file. That latched every later
+        # buy as last_block_reason="kill_switch". Restore only an explicit
+        # operator flag; recompute daily/file halt from current inputs.
+        operator_killed = bool(raw.get("operator_killed", False))
         risk = RiskManager(
             cfg,
             daily_pnl=D(raw.get("daily_pnl") or 0),
             daily_pnl_date=raw.get("daily_pnl_date"),
-            killed=bool(raw.get("kill_switch", cfg.kill_switch)),
+            killed=operator_killed or cfg.kill_switch,
         )
         last_ts = int(raw.get("last_candle_ts") or 0)
     return BotState(position, risk, last_ts, time.monotonic())
@@ -88,7 +93,8 @@ def save_state(path: str | Path, state: BotState) -> None:
     payload: dict[str, Any] = {
         "daily_pnl": str(state.risk.daily_pnl),
         "daily_pnl_date": state.risk.daily_pnl_date,
-        "kill_switch": state.risk.killed,
+        "operator_killed": state.risk.operator_killed,
+        "kill_switch": state.risk.operator_killed,
         "last_candle_ts": state.last_candle_ts,
         "position": None,
     }
@@ -184,7 +190,9 @@ class Engine:
     ) -> Signal:
         candles = drop_incomplete_candle(candles, self.cfg.candle_type)
         if candles:
-            self.stats.last_market_data_ms = candles[-1].timestamp_ms
+            # Wall clock: candle.open times can be hours old on 1hour bars and
+            # would otherwise look like MARKET_DATA_STALE to the watchdog.
+            self.stats.last_market_data_ms = int(time.time() * 1000)
         closes = [c.close for c in candles]
         stamps = [c.timestamp_ms for c in candles]
         snaps = build_snapshots(closes, stamps, self.cfg)
@@ -265,7 +273,9 @@ class Engine:
         )
         if not plan.ok:
             self.stats.last_block_reason = plan.reason
+            slog("RISK", "order blocked", reason=plan.reason, side=signal.side)
             return
+        self.stats.last_block_reason = ""
         self.stats.order_attempts += 1
         order_client = rest if self.cfg.has_keys else None
         executor = OrderExecutor(self.cfg, order_client)

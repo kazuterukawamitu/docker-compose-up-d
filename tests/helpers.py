@@ -7,6 +7,8 @@ from bitbank_bot.indicators import Trend
 
 
 def cfg(**kwargs) -> Config:
+    kwargs.setdefault("kill_switch", False)
+    kwargs.setdefault("kill_switch_path", "/tmp/bitbank-bot-tests-no-kill-file")
     return Config(**kwargs)
 
 
