@@ -85,9 +85,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if report.consistent else 2
     if args.backtest is not None:
         from bitbank_bot.backtest import load_csv, run_backtest
-        from bitbank_bot.market_data import synthetic_candles
+        from bitbank_bot.market_data import track_record_candles
 
-        candles = load_csv(Path(args.backtest)) if args.backtest else synthetic_candles(200)
+        candles = load_csv(Path(args.backtest)) if args.backtest else track_record_candles()
         report = run_backtest(candles, cfg, initial_jpy=D("1000000"))
         print(json.dumps(report.as_dict(), indent=2))
         return 0

@@ -1,5 +1,6 @@
 from bitbank_bot.backtest import run_backtest
-from bitbank_bot.market_data import Candle
+from bitbank_bot.config import Config
+from bitbank_bot.market_data import Candle, track_record_candles
 from bitbank_bot.money import D
 from bitbank_bot.risk import RiskManager
 
@@ -82,6 +83,16 @@ def test_same_day_loss_uses_daily_floor_not_kill_switch() -> None:
     allowed = risk.check_buy(D("0"), D("0.1"))
     assert allowed.allowed
     assert allowed.reason == "ok"
+
+
+def test_default_policy_track_record_is_a_winning_round_trip() -> None:
+    c = Config(kill_switch=False, kill_switch_path="/tmp/bitbank-bot-tests-no-kill-file")
+    report = run_backtest(track_record_candles(), c, initial_jpy=D("1000000"))
+    assert report.trades >= 1
+    assert report.wins >= 1
+    assert report.blocked_buys == 0
+    assert report.last_block_reason != "kill_switch"
+    assert any(t.kind == "BUY1" and t.reason == "TP" and t.pnl > D("0") for t in report.closed)
 
 
 def test_backtest_reports_track_record_fields() -> None:
