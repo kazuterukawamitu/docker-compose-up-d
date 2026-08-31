@@ -87,6 +87,63 @@ def test_engine_synthetic_once_dry_run(tmp_path) -> None:
     assert engine.strategy_evaluations >= 1
 
 
+def test_engine_loop_continues_after_hold(tmp_path) -> None:
+    c = cfg(
+        state_path=str(tmp_path / "state.json"),
+        lock_path=str(tmp_path / "bot.lock"),
+        log_dir=str(tmp_path / "logs"),
+        enable_websocket=False,
+        dry_run=True,
+        live_trading=False,
+        poll_sec=0.05,
+    )
+    fake = FakeRest()
+    engine = Engine(c, client=fake)  # type: ignore[arg-type]
+    rc = engine.run_forever(synthetic=True, max_cycles=3)
+    assert rc == 0
+    assert engine.cycles == 3
+    assert engine.strategy_evaluations >= 2
+    assert engine.last_watchdog == "NORMAL WAIT"
+    assert fake.create_order_calls == 0
+
+
+def test_dry_run_loop_without_api_keys_when_public_fails(tmp_path) -> None:
+    c = cfg(
+        state_path=str(tmp_path / "state.json"),
+        lock_path=str(tmp_path / "bot.lock"),
+        log_dir=str(tmp_path / "logs"),
+        enable_websocket=False,
+        dry_run=True,
+        live_trading=False,
+        api_key="",
+        api_secret="",
+        poll_sec=0.05,
+    )
+    rest = MagicMock()
+    rest.get_ticker.side_effect = RuntimeError("no net")
+    rest.get_spot_status.side_effect = RuntimeError("no net")
+    rest.get_candlestick.side_effect = RuntimeError("no net")
+    rest.get_assets.side_effect = AssertionError("private should not be called")
+    rest.create_order.side_effect = AssertionError("live order")
+    engine = Engine(c, client=rest)
+    rc = engine.run_forever(synthetic=False, max_cycles=2)
+    assert rc == 0
+    assert engine.cycles == 2
+    assert engine.used_synthetic_fallback is True
+    rest.create_order.assert_not_called()
+    rest.get_assets.assert_not_called()
+
+
+def test_preflight_dry_run_no_keys_public_fail_does_not_abort() -> None:
+    c = cfg(dry_run=True, live_trading=False, api_key="", api_secret="")
+    rest = MagicMock()
+    rest.get_ticker.side_effect = RuntimeError("offline")
+    rest.get_spot_status.side_effect = RuntimeError("offline")
+    result = preflight(c, rest, require_public=False)
+    assert result.ok
+    assert "no_keys_public_only" in result.checks
+
+
 def test_engine_skips_order_when_balance_fetch_fails(tmp_path) -> None:
     c = cfg(
         state_path=str(tmp_path / "state.json"),

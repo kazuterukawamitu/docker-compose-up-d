@@ -54,8 +54,13 @@ class BitbankWebsocket:
             self._thread.join(timeout=5)
 
     def is_stale(self) -> bool:
+        """True only after we have received data that then went cold.
+
+        Never-connected is not stale: REST candles remain authoritative so
+        the DRY_RUN loop does not skip every order at startup.
+        """
         if self._last_event_mono <= 0:
-            return True
+            return False
         return (time.monotonic() - self._last_event_mono) > self.stale_sec
 
     def is_connected(self) -> bool:

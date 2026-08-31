@@ -8,7 +8,12 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Mapping
 
-from dotenv import load_dotenv
+try:
+    from dotenv import load_dotenv
+except ImportError:  # system python without venv; start.sh installs dotenv
+
+    def load_dotenv(*_args: object, **_kwargs: object) -> bool:
+        return False
 
 from bitbank_bot.money import D
 

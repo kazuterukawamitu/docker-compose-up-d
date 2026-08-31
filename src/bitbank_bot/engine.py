@@ -102,6 +102,9 @@ class Engine:
         self.cache = CandleCache(cfg.ma_period)
         self.last_block_reason = ""
         self.strategy_evaluations = 0
+        self.cycles = 0
+        self.used_synthetic_fallback = False
+        self.last_watchdog = ""
 
     def request_stop(self, *_args: object) -> None:
         slog("BOOT", "shutdown requested")
@@ -324,40 +327,123 @@ class Engine:
         slog("BOOT", "run_once complete")
         return 0
 
-    def run_forever(self) -> int:
-        slog("BOOT", "run_forever", pair=self.cfg.pair)
+    def _candles_for_cycle(
+        self,
+        rest: RestClient,
+        *,
+        latest_only: bool,
+        force_synthetic: bool,
+    ) -> list[Candle]:
+        if force_synthetic:
+            self.used_synthetic_fallback = True
+            slog("MARKET", "using synthetic candles")
+            return synthetic_candles()
+        try:
+            incoming = fetch_candles(rest, self.cfg, latest_only=latest_only)
+            if incoming:
+                self.used_synthetic_fallback = False
+                return incoming
+            slog("WATCHDOG", "NORMAL WAIT", reason="empty_public_candles")
+            self.last_watchdog = "NORMAL WAIT"
+        except Exception as exc:
+            slog(
+                "WATCHDOG",
+                "FAIL",
+                reason="public_candles_failed_using_synthetic",
+                error=type(exc).__name__,
+            )
+            self.last_watchdog = "FAIL"
+        self.used_synthetic_fallback = True
+        slog("MARKET", "synthetic fallback; loop continues")
+        return synthetic_candles()
+
+    def run_forever(
+        self,
+        *,
+        synthetic: bool = False,
+        max_cycles: int | None = None,
+    ) -> int:
+        slog(
+            "BOOT",
+            "run_forever",
+            pair=self.cfg.pair,
+            dry_run=self.cfg.dry_run,
+            synthetic=synthetic,
+        )
         rest = self._rest()
-        result = preflight(self.cfg, rest, require_public=True)
+        require_public = not (synthetic or self.cfg.dry_run)
+        result = preflight(self.cfg, rest, require_public=require_public)
         if not result.ok:
-            slog("ERROR", "preflight failed", reason=result.reason)
-            return 2
+            if self.cfg.dry_run:
+                slog(
+                    "BOOT",
+                    "preflight warning; DRY_RUN loop continues",
+                    reason=result.reason,
+                )
+            else:
+                slog("ERROR", "preflight failed", reason=result.reason)
+                return 2
         if self.cfg.enable_websocket:
             self._maybe_ws()
         state = load_state(self.cfg.state_path, self.cfg)
+        if synthetic:
+            state.last_candle_ts = 0
         last_ok = time.monotonic()
         timeout = float(self.cfg.no_trade_timeout_seconds)
         while not self._stop:
             try:
-                latest_only = bool(self.cache.candles)
-                incoming = fetch_candles(rest, self.cfg, latest_only=latest_only)
+                latest_only = bool(self.cache.candles) and not synthetic
+                incoming = self._candles_for_cycle(
+                    rest, latest_only=latest_only, force_synthetic=synthetic
+                )
                 candles = self.cache.merge(incoming)
-                signal = self.process_candles(candles, state, execute=True)
+                signal = self.process_candles(
+                    candles,
+                    state,
+                    execute=True,
+                    persist=not (synthetic or self.used_synthetic_fallback),
+                )
                 last_ok = time.monotonic()
                 last = str(candles[-1].close) if candles else "-"
                 self._heartbeat(state, signal, last)
-                idle = time.monotonic() - last_ok
-                if idle >= timeout:
-                    slog("WATCHDOG", "FAIL idle loop", idle_sec=int(idle))
+                if signal.kind == "HOLD" or signal.side is None:
+                    slog(
+                        "WATCHDOG",
+                        "NORMAL WAIT",
+                        reason=signal.reason,
+                        kind=signal.kind,
+                    )
+                    self.last_watchdog = "NORMAL WAIT"
+                self.cycles += 1
+                if max_cycles is not None and self.cycles >= max_cycles:
+                    slog("BOOT", "max_cycles reached", cycles=self.cycles)
+                    break
+            except KeyboardInterrupt:
+                slog("BOOT", "keyboard interrupt")
+                self._stop = True
+                break
             except Exception as exc:
                 _LOG.exception("loop error")
                 slog("ERROR", "loop error", error=type(exc).__name__, detail=str(exc)[:200])
-                if time.monotonic() - last_ok >= timeout:
-                    slog("WATCHDOG", "FAIL stuck loop", idle_sec=int(time.monotonic() - last_ok))
+                idle = time.monotonic() - last_ok
+                slog("WATCHDOG", "FAIL", reason="loop_error", idle_sec=int(idle))
+                self.last_watchdog = "FAIL"
+                if idle >= timeout:
+                    slog("WATCHDOG", "FAIL stuck errors; still not exiting on HOLD")
+                self.cycles += 1
+                if max_cycles is not None and self.cycles >= max_cycles:
                     break
-            for _ in range(int(max(1, self.cfg.poll_sec))):
-                if self._stop:
-                    break
-                time.sleep(1)
+            try:
+                if max_cycles is not None:
+                    time.sleep(0.05)
+                else:
+                    for _ in range(int(max(1, self.cfg.poll_sec))):
+                        if self._stop:
+                            break
+                        time.sleep(1)
+            except KeyboardInterrupt:
+                slog("BOOT", "keyboard interrupt")
+                self._stop = True
         if self.ws:
             self.ws.stop()
         slog("BOOT", "stopped")

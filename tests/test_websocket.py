@@ -5,9 +5,9 @@ from unittest.mock import MagicMock, patch
 from bitbank_bot.websocket_client import BitbankWebsocket
 
 
-def test_ws_stale_before_events() -> None:
+def test_ws_not_stale_before_first_event() -> None:
     ws = BitbankWebsocket("wss://example/socket.io/?EIO=4&transport=websocket", ("ticker_btc_jpy",))
-    assert ws.is_stale()
+    assert not ws.is_stale()
     assert not ws.is_connected()
     assert ws.last_price() is None
 

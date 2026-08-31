@@ -37,10 +37,12 @@ def preflight(
     status = ""
     slog("BOOT", "preflight start", **cfg.safe_dict())
 
+    if sys.version_info < (3, 9):
+        slog("ERROR", "python_below_3_9", version=sys.version)
+        return PreflightResult(False, "python_below_3_9", checks=checks)
     if sys.version_info < (3, 12):
-        slog("ERROR", "python_below_3_12", version=sys.version)
-        return PreflightResult(False, "python_below_3_12", checks=checks)
-    checks.append("python>=3.12")
+        slog("BOOT", "python older than 3.12; continuing", version=sys.version)
+    checks.append("python_ok")
 
     if cfg.pair != PAIR:
         slog("ERROR", "pair_not_btc_jpy", pair=cfg.pair)
@@ -87,7 +89,9 @@ def preflight(
             slog("PUBLIC_API", "spot status", status=status, min_amount=row.get("min_amount"))
             if status == "HALT":
                 slog("ERROR", "market_halt")
-                return PreflightResult(False, "market_halt", last, status, checks)
+                if cfg.live_trading:
+                    return PreflightResult(False, "market_halt", last, status, checks)
+                slog("BOOT", "market HALT ignored in DRY_RUN")
             if row.get("min_amount"):
                 exch_min = D(row["min_amount"])
                 if exch_min > cfg.min_amount_btc:
@@ -119,6 +123,7 @@ def preflight(
         if cfg.live_trading:
             slog("ERROR", "missing_keys_live")
             return PreflightResult(False, "missing_keys_live", last, status, checks)
+        slog("CONFIG", "DRY_RUN continues without private keys")
 
     slog("HEARTBEAT", "ORDER MANAGER OK")
     slog("HEARTBEAT", "RISK MANAGER OK")

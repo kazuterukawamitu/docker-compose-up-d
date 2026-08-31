@@ -1,29 +1,20 @@
 # Bitbank BTC/JPY spot bot
 
-`main` on this repository previously had **no Python entrypoint** — only GitHub wiki HTML dumps and a README of moving-average rules. This tree adds a **Bitbank-only** `btc_jpy` bot. Default mode is **DRY_RUN**: signals are evaluated and paper fills are logged; **no live orders**.
+Bitbank-only `btc_jpy` bot. Default is a **continuous DRY_RUN loop** (paper signals, **no live orders**). HOLD/WAIT on a bar is normal — the process keeps running.
 
-## How to start (DRY_RUN)
-
-```bash
-cd docker-compose-up-d
-python3.12 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements-dev.txt
-cp .env.example .env   # leave BITBANK_API_KEY / BITBANK_API_SECRET empty
-python3 main.py --once --synthetic --dry-run --skip-lock
-```
-
-Loop (still DRY_RUN unless you change `.env`):
+## Start (paste this ONE line in iTerm)
 
 ```bash
-python3 main.py --skip-lock
-# or
-bash ./start.sh --once --synthetic --dry-run --skip-lock
-PYTHONPATH=src python3 -m bitbank_bot --check-config
-PYTHONPATH=src python3 -m bitbank_bot --preflight
+bash ~/docker-compose-up-d/start.sh
 ```
 
-Live trading is **off** unless `.env` has `DRY_RUN=false` **and** `LIVE_TRADING=true` **and** both API keys. Do not set those flags unless you intend to send real orders.
+Do **not** paste a stack of commands. Do **not** run `python3 main.py` with macOS system Python (that causes `ModuleNotFoundError: dotenv`). `start.sh` cds into the clone, creates `.venv`, installs deps, copies `.env.example` → `.env` if needed, then starts the loop with `.venv/bin/python`.
+
+Stop with Ctrl-C.
+
+`--once --synthetic` is a one-cycle smoke test that **exits on purpose**. The launcher above does **not** use `--once`.
+
+Live trading stays **off** unless `.env` has `DRY_RUN=false` **and** `LIVE_TRADING=true` **and** both API keys.
 
 ## Strategy (from original README)
 
@@ -52,7 +43,7 @@ State-machine mapping: [docs/STRATEGY.md](docs/STRATEGY.md).
 
 ## Security
 
-- Copy `.env.example` to `.env`. **Never commit `.env`.**
+- Copy `.env.example` to `.env` is done by `start.sh` when missing. **Never commit `.env`.**
 - If API keys were pasted into chat, **rotate them in the bitbank console**.
 - `DRY_RUN=true` and `LIVE_TRADING=true` are mutually exclusive.
 - Create `data/KILL` to halt new orders.
@@ -60,7 +51,8 @@ State-machine mapping: [docs/STRATEGY.md](docs/STRATEGY.md).
 ## Tests
 
 ```bash
-PYTHONPATH=src pytest -q
+bash ~/docker-compose-up-d/start.sh --once --synthetic --skip-lock
+PYTHONPATH=src .venv/bin/python -m pytest -q
 ```
 
 systemd example (not installed by this repo): [deploy/bitbank-bot.service](deploy/bitbank-bot.service).
