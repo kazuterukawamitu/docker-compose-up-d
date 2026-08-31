@@ -1,15 +1,32 @@
-# Japanese
-RUN apt-get update \
-    && apt-get install -y locales \
-    && locale-gen ja_JP.UTF-8
-ENV LANG ja_JP.UTF-8
-ENV LANGUAGE ja_JP:ja
-ENV LC_ALL=ja_JP.UTF-8
-RUN localedef -f UTF-8 -i ja_JP ja_JP.utf8
+# Bitbank BTC/JPY spot bot
 
-web:
-  environment:
-    TZ: Japan
+`main` on this repository previously had **no Python entrypoint** — only GitHub wiki HTML dumps and a README of moving-average rules. This tree adds a **Bitbank-only** `btc_jpy` bot. Default mode is **DRY_RUN**: signals are evaluated and paper fills are logged; **no live orders**.
+
+## How to start (DRY_RUN)
+
+```bash
+cd docker-compose-up-d
+python3.12 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements-dev.txt
+cp .env.example .env   # leave BITBANK_API_KEY / BITBANK_API_SECRET empty
+python3 main.py --once --synthetic --dry-run --skip-lock
+```
+
+Loop (still DRY_RUN unless you change `.env`):
+
+```bash
+python3 main.py --skip-lock
+# or
+bash ./start.sh --once --synthetic --dry-run --skip-lock
+PYTHONPATH=src python3 -m bitbank_bot --check-config
+PYTHONPATH=src python3 -m bitbank_bot --preflight
+```
+
+Live trading is **off** unless `.env` has `DRY_RUN=false` **and** `LIVE_TRADING=true` **and** both API keys. Do not set those flags unless you intend to send real orders.
+
+## Strategy (from original README)
+
 下降トレンドだった移動平均線が横ばいor上昇となり
 Btcの価格が移動平均線を上抜けた時にbtcを可能量で買い
 買った価格の➕３%で売る
@@ -31,3 +48,21 @@ Btcを全て売る
 Btc価格が移動平均線よりも4％以上マイナス（extend all)に下降した後再度btc価格は上昇したが移動平均線まで上昇せずに再び下落した時に
 Btcを全て売る
 
+State-machine mapping: [docs/STRATEGY.md](docs/STRATEGY.md).
+
+## Security
+
+- Copy `.env.example` to `.env`. **Never commit `.env`.**
+- If API keys were pasted into chat, **rotate them in the bitbank console**.
+- `DRY_RUN=true` and `LIVE_TRADING=true` are mutually exclusive.
+- Create `data/KILL` to halt new orders.
+
+## Tests
+
+```bash
+PYTHONPATH=src pytest -q
+```
+
+systemd example (not installed by this repo): [deploy/bitbank-bot.service](deploy/bitbank-bot.service).
+
+HTML GitHub wiki exports in the repo root are preserved as-is.
