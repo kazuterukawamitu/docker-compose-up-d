@@ -23,10 +23,24 @@ def test_buy_from_free_jpy_floors_to_lot() -> None:
     assert plan.actual_execution_jpy is None
 
 
-def test_buy_below_min_rejected() -> None:
+def test_buy_insufficient_jpy() -> None:
     c = cfg()
     plan = plan_buy(
         available_jpy=Decimal("50"),
+        available_btc=Decimal("0"),
+        price=Decimal("10000000"),
+        cfg=c,
+        risk=risk(c),
+    )
+    assert not plan.ok
+    assert plan.amount == Decimal("0")
+    assert plan.reason == "insufficient"
+
+
+def test_buy_below_min_rejected() -> None:
+    c = cfg(min_amount_btc=Decimal("0.01"))
+    plan = plan_buy(
+        available_jpy=Decimal("100000"),
         available_btc=Decimal("0"),
         price=Decimal("10000000"),
         cfg=c,

@@ -147,6 +147,7 @@ class Engine:
         candles: list[Candle],
         state: BotState,
         execute: bool,
+        persist: bool = True,
     ) -> Signal:
         candles = drop_incomplete_candle(candles, self.cfg.candle_type)
         closes = [c.close for c in candles]
@@ -174,7 +175,7 @@ class Engine:
         if not execute:
             return signal
         if last.timestamp_ms == state.last_candle_ts:
-            slog("STRATEGY", "candle already processed", ts=last.timestamp_ms)
+            slog("STRATEGY", "candle already processed", candle_ts=last.timestamp_ms)
             return signal
         if signal.side in {"buy", "sell"}:
             if self.ws is not None and self.cfg.enable_websocket and self.ws.is_stale():
@@ -183,7 +184,8 @@ class Engine:
                 return Signal.hold("stale_websocket")
             self._execute(signal, last.close, last.index, last.timestamp_ms, state)
         state.last_candle_ts = last.timestamp_ms
-        save_state(self.cfg.state_path, state)
+        if persist:
+            save_state(self.cfg.state_path, state)
         return signal
 
     def _execute(
@@ -308,12 +310,15 @@ class Engine:
                 slog("ERROR", "preflight failed", reason=result.reason)
                 return 2
         candles = synthetic_candles() if synthetic else fetch_candles(rest, self.cfg)
-        if not synthetic:
-            candles = self.cache.merge(candles)
         if synthetic:
             slog("MARKET", "using synthetic candles", count=len(candles))
-        state = load_state(self.cfg.state_path, self.cfg)
-        signal = self.process_candles(candles, state, execute=True)
+            state = BotState(None, RiskManager(self.cfg), 0, time.monotonic())
+        else:
+            candles = self.cache.merge(candles)
+            state = load_state(self.cfg.state_path, self.cfg)
+        signal = self.process_candles(
+            candles, state, execute=True, persist=not synthetic
+        )
         last = str(candles[-1].close) if candles else "-"
         self._heartbeat(state, signal, last)
         slog("BOOT", "run_once complete")

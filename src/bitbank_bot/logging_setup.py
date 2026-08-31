@@ -13,16 +13,15 @@ from typing import Any
 _LOGGER = logging.getLogger("bitbank_bot")
 _CONFIGURED = False
 
-_REDACT_KEYS = re.compile(
-    r"(api[_-]?secret|access-signature|bitbank_api_secret|authorization)",
+_SECRET_FIELD = re.compile(
+    r"(?<!has_)(api[_-]?secret|access-signature|bitbank_api_secret|authorization)",
     re.IGNORECASE,
 )
-_HEX_SECRET = re.compile(r"\b[0-9a-f]{32,}\b", re.IGNORECASE)
+_HEX_SECRET = re.compile(r"\b[0-9a-f]{64}\b", re.IGNORECASE)
 
 
 def redact(text: str) -> str:
-    if _REDACT_KEYS.search(text):
-        return _REDACT_KEYS.sub("[REDACTED]", text)
+    text = _SECRET_FIELD.sub("[REDACTED]", text)
     return _HEX_SECRET.sub("[REDACTED]", text)
 
 
@@ -66,7 +65,9 @@ def slog(stage: str, message: str, *, level: int = logging.INFO, **fields: Any) 
         "msg": message,
     }
     for key, value in fields.items():
-        if _REDACT_KEYS.search(key):
+        if key.lower().startswith("has_"):
+            payload[key] = value
+        elif _SECRET_FIELD.search(key):
             payload[key] = "[REDACTED]"
         else:
             payload[key] = value

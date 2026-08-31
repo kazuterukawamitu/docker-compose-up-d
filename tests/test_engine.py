@@ -5,7 +5,7 @@ from typing import Any
 from unittest.mock import MagicMock
 
 from bitbank_bot.engine import Engine, load_state
-from bitbank_bot.market_data import Candle, parse_ohlcv, synthetic_candles
+from bitbank_bot.market_data import parse_ohlcv, synthetic_candles
 from bitbank_bot.preflight import preflight
 from tests.helpers import cfg
 

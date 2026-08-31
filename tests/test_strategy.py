@@ -35,9 +35,8 @@ def _snaps_from_closes(closes: list[Decimal]):
 
 
 def test_buy1_after_downtrend_cross_up() -> None:
-    # Falling series then bounce through MA.
-    closes = [D(100 - i) for i in range(20)]
-    closes.extend([D("82"), D("85"), D("90"), D("95")])
+    closes = [D(200 - i) for i in range(25)]
+    closes.extend([D("176"), D("177")])
     snaps, c = _snaps_from_closes(closes)
     strat = Strategy(c)
     last_buy = None
