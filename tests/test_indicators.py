@@ -1,6 +1,8 @@
 from bitbank_bot.indicators import (
     IncrementalSMA,
     Trend,
+    atr,
+    bollinger,
     crossed_down,
     crossed_up,
     crossover_price_bp,
@@ -9,6 +11,8 @@ from bitbank_bot.indicators import (
     is_dead_cross,
     is_golden_cross,
     ma_trend,
+    macd,
+    rsi,
     sma,
 )
 from bitbank_bot.money import D
@@ -73,3 +77,33 @@ def test_incremental_sma_matches_batch() -> None:
     inc = IncrementalSMA(3)
     out = [inc.update(v) for v in values]
     assert out == batch
+
+
+def test_rsi_bounds() -> None:
+    rising = [D(i) for i in range(1, 30)]
+    out = rsi(rising, 14)
+    last = out[-1]
+    assert last is not None
+    assert last > D("70")
+    flat = [D("10")] * 20
+    flat_rsi = rsi(flat, 14)
+    assert flat_rsi[-1] == D("50")
+
+
+def test_macd_histogram_defined() -> None:
+    values = [D(i) for i in range(1, 50)]
+    line, signal, hist = macd(values)
+    assert len(line) == len(values) == len(signal) == len(hist)
+    assert any(x is not None for x in hist)
+
+
+def test_atr_and_bollinger() -> None:
+    highs = [D("11"), D("12"), D("13"), D("14"), D("15")]
+    lows = [D("9"), D("10"), D("11"), D("12"), D("13")]
+    closes = [D("10"), D("11"), D("12"), D("13"), D("14")]
+    out = atr(highs, lows, closes, 3)
+    assert out[-1] is not None
+    mid, upper, lower = bollinger(closes, 3, D("2"))
+    assert mid[-1] is not None
+    assert upper[-1] is not None and lower[-1] is not None
+    assert upper[-1] >= mid[-1] >= lower[-1]

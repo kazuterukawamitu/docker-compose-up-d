@@ -58,6 +58,8 @@ DEFAULT_DRY_RUN_JPY = "100000"
 DEFAULT_DRY_RUN_BTC = "0"
 DEFAULT_LOOKBACK_DAYS = 14
 DEFAULT_ACCESS_WINDOW_MS = 5000
+DEFAULT_CIRCUIT_BREAKER_ERRORS = 5
+DEFAULT_MAX_DRAWDOWN_JPY = "0"
 
 TIMEFRAMES: dict[str, str] = {
     "1m": "1min",
@@ -185,6 +187,9 @@ class Config:
     wiki_cross_rules: bool = False
     mtf_health: bool = True
     mtf_filter: bool = False
+    circuit_breaker_errors: int = DEFAULT_CIRCUIT_BREAKER_ERRORS
+    max_drawdown_jpy: Decimal = D(DEFAULT_MAX_DRAWDOWN_JPY)
+    log_plugins: bool = True
     ws_rooms: tuple[str, ...] = (
         "ticker_btc_jpy",
         "transactions_btc_jpy",
@@ -222,6 +227,9 @@ class Config:
             "lock_path": self.lock_path,
             "stale_ws_sec": self.stale_ws_sec,
             "log_level": self.log_level,
+            "max_balance_usage": str(self.max_balance_usage),
+            "circuit_breaker_errors": self.circuit_breaker_errors,
+            "max_drawdown_jpy": str(self.max_drawdown_jpy),
         }
 
 
@@ -270,9 +278,13 @@ def load_config(
     if window < 1 or window > 60000:
         raise ConfigError("ACCESS_TIME_WINDOW_MS must be 1..60000")
 
-    usage = _dec(env, "MAX_BALANCE_USAGE", DEFAULT_MAX_BALANCE_USAGE)
+    # BALANCE_USAGE_RATIO is an alias; canonical default remains MAX_BALANCE_USAGE=0.95.
+    if _env(env, "BALANCE_USAGE_RATIO") is not None:
+        usage = _dec(env, "BALANCE_USAGE_RATIO", DEFAULT_MAX_BALANCE_USAGE)
+    else:
+        usage = _dec(env, "MAX_BALANCE_USAGE", DEFAULT_MAX_BALANCE_USAGE)
     if usage <= 0 or usage > 1:
-        raise ConfigError("MAX_BALANCE_USAGE must be in (0, 1]")
+        raise ConfigError("MAX_BALANCE_USAGE / BALANCE_USAGE_RATIO must be in (0, 1]")
 
     cfg = Config(
         pair=pair,
@@ -341,6 +353,11 @@ def load_config(
         wiki_cross_rules=_bool(env, "WIKI_CROSS_RULES", False),
         mtf_health=_bool(env, "MTF_HEALTH", True),
         mtf_filter=_bool(env, "MTF_FILTER", False),
+        circuit_breaker_errors=_int(
+            env, "CIRCUIT_BREAKER_ERRORS", DEFAULT_CIRCUIT_BREAKER_ERRORS
+        ),
+        max_drawdown_jpy=_dec(env, "MAX_DRAWDOWN_JPY", DEFAULT_MAX_DRAWDOWN_JPY),
+        log_plugins=_bool(env, "LOG_PLUGINS", True),
     )
     if live_trading and not cfg.has_keys:
         raise ConfigError("LIVE_TRADING requires BITBANK_API_KEY and BITBANK_API_SECRET")

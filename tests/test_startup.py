@@ -56,3 +56,12 @@ def test_backtest_synthetic(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> 
     monkeypatch.setenv("LIVE_TRADING", "false")
     monkeypatch.setenv("LOG_DIR", str(tmp_path / "logs"))
     assert main(["--backtest", "--skip-lock"]) == 0
+
+
+def test_diagnostics_flag(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("DRY_RUN", "true")
+    monkeypatch.setenv("LIVE_TRADING", "false")
+    monkeypatch.setenv("LOG_DIR", str(tmp_path / "logs"))
+    monkeypatch.setenv("LOCK_PATH", str(tmp_path / "bot.lock"))
+    monkeypatch.setenv("STATE_PATH", str(tmp_path / "state.json"))
+    assert main(["--diagnostics"]) == 0

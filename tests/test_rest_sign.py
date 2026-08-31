@@ -1,4 +1,10 @@
-from bitbank_bot.rest_client import dump_json, get_sign_payload, sign_access_time_window
+from bitbank_bot.rest_client import (
+    BitbankAPIError,
+    dump_json,
+    get_sign_payload,
+    is_auth_error,
+    sign_access_time_window,
+)
 
 
 def test_official_get_signature() -> None:
@@ -38,3 +44,15 @@ def test_dump_json_compact() -> None:
     assert " " not in raw
     assert raw.startswith("{")
     assert '"pair":"xrp_jpy"' in raw
+
+
+def test_hmac_uses_dummy_secret_not_env() -> None:
+    sig = sign_access_time_window("hoge", "1", "1", "/v1/user/assets")
+    assert len(sig) == 64
+    assert "hoge" not in sig
+
+
+def test_is_auth_error() -> None:
+    assert is_auth_error(BitbankAPIError("denied", code=20001, http_status=401))
+    assert is_auth_error(BitbankAPIError("http 403", http_status=403))
+    assert not is_auth_error(BitbankAPIError("server", http_status=500))

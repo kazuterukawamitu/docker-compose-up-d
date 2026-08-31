@@ -9,10 +9,11 @@ Canonical numbers: [docs/MASTER-POLICY.md](docs/MASTER-POLICY.md). Rule mapping:
 ## Start from the clone (not from `~`)
 
 ```bash
-git clone -b cursor/iterm15-suite-6df5 https://github.com/kazuterukawamitu/docker-compose-up-d.git
+git clone https://github.com/kazuterukawamitu/docker-compose-up-d.git
 cd docker-compose-up-d
 bash ./start.sh --preflight
-bash ./start.sh --once --synthetic --dry-run
+python3 diagnostics.py
+python3 main.py --once --synthetic --dry-run
 bash ./start.sh
 ```
 

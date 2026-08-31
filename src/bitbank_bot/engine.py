@@ -24,8 +24,9 @@ from bitbank_bot.market_data import (
 from bitbank_bot.money import D, ZERO
 from bitbank_bot.multi_timeframe import TimeframeHealth, higher_tf_ready, load_all_timeframes
 from bitbank_bot.orders import OrderExecutor, OrderResult
+from bitbank_bot.plugins import advise
 from bitbank_bot.preflight import preflight
-from bitbank_bot.rest_client import RestClient
+from bitbank_bot.rest_client import BitbankAPIError, RestClient, is_auth_error
 from bitbank_bot.risk import RiskManager
 from bitbank_bot.strategy import Position, Signal, Strategy, build_snapshots
 from bitbank_bot.watchdog import WatchInput, diagnose
@@ -221,6 +222,14 @@ class Engine:
         elif signal.side == "sell":
             self.stats.sell_signals += 1
         slog("SIGNAL", signal.kind, reason=signal.reason, side=signal.side or "-")
+        if self.cfg.log_plugins:
+            notes = advise(candles, last, state.position)
+            if notes:
+                slog(
+                    "STRATEGY",
+                    "plugin notes (advisory; do not place orders)",
+                    notes="|".join(f"{n.kind}:{n.reason}" for n in notes[:6]),
+                )
         if (
             signal.side == "buy"
             and self.cfg.mtf_filter
@@ -236,10 +245,11 @@ class Engine:
         if last.timestamp_ms == state.last_candle_ts:
             slog("STRATEGY", "candle already processed", ts=last.timestamp_ms)
             return signal
-        if self.ws is not None and self.cfg.enable_websocket and self.ws.is_stale():
-            slog("WEBSOCKET", "stale data; skipping orders")
-            return Signal.hold("stale_websocket")
         if signal.side in {"buy", "sell"}:
+            if self.ws is not None and self.cfg.enable_websocket and self.ws.is_stale():
+                slog("WEBSOCKET", "stale data; skipping orders")
+                self.stats.last_block_reason = "stale_websocket"
+                return Signal.hold("stale_websocket")
             self._execute(signal, last.close, last.index, last.timestamp_ms, state)
         state.last_candle_ts = last.timestamp_ms
         save_state(self.cfg.state_path, state)
@@ -256,7 +266,25 @@ class Engine:
         rest = self._rest()
         if self.ws is not None and not self.ws.is_stale() and self.ws.last_price():
             price = self.ws.last_price() or price
-        jpy, btc = self._balances(rest)
+        try:
+            jpy, btc = self._balances(rest)
+        except BitbankAPIError as exc:
+            if is_auth_error(exc):
+                state.risk.note_auth_failure()
+                reason = "auth_failure"
+            else:
+                state.risk.note_api_error()
+                reason = "balance_fetch_failed"
+            self.stats.last_block_reason = reason
+            slog("ERROR", "no order", reason=reason, error=type(exc).__name__)
+            return
+        except Exception as exc:
+            state.risk.note_api_error()
+            self.stats.last_block_reason = "balance_fetch_failed"
+            slog("ERROR", "no order", reason="balance_fetch_failed", error=type(exc).__name__)
+            return
+        state.risk.note_api_ok()
+        state.risk.update_equity(jpy, btc, price)
         sizer = PositionSizer(self.cfg, state.risk)
         if signal.side == "buy":
             plan = sizer.plan_buy(available_jpy=jpy, available_btc=btc, price=price)

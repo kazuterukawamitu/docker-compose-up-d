@@ -19,6 +19,7 @@ from bitbank_bot.logging_setup import slog
 from bitbank_bot.money import D
 
 JSON_SEPARATORS = (",", ":")
+AUTH_ERROR_CODES = frozenset({20001, 20002, 20003, 20011})
 
 
 class BitbankAPIError(RuntimeError):
@@ -33,6 +34,15 @@ class BitbankAPIError(RuntimeError):
         self.code = code
         self.http_status = http_status
         self.body = body
+
+
+def is_auth_error(exc: BitbankAPIError) -> bool:
+    if exc.http_status in {401, 403}:
+        return True
+    if exc.code in AUTH_ERROR_CODES:
+        return True
+    msg = str(exc).lower()
+    return "api key" in msg or "secret missing" in msg
 
 
 def dump_json(obj: dict[str, Any]) -> str:

@@ -88,3 +88,67 @@ def test_successful_fill_clears_prior_block_reason(tmp_path: Path) -> None:
     engine._execute(_buy_signal(), D("10000000"), 10, 1_700_000_000_000, state)
     assert engine.stats.order_attempts == 1
     assert engine.stats.last_block_reason == ""
+
+
+def test_stale_websocket_skips_order(tmp_path: Path, monkeypatch) -> None:
+    from bitbank_bot.market_data import synthetic_candles
+
+    c = _engine_cfg(tmp_path, enable_websocket=True)
+    engine = Engine(c)
+
+    class StaleWs:
+        def is_stale(self) -> bool:
+            return True
+
+        def is_connected(self) -> bool:
+            return False
+
+        def last_price(self):
+            return None
+
+    engine.ws = StaleWs()
+    monkeypatch.setattr(
+        "bitbank_bot.engine.Strategy.evaluate",
+        lambda self, snap, pos: _buy_signal(),
+    )
+    state = BotState(None, RiskManager(c), 0, time.monotonic())
+    signal = engine.process_candles(synthetic_candles(), state, execute=True)
+    assert signal.reason == "stale_websocket"
+    assert engine.stats.order_attempts == 0
+    assert state.position is None
+
+
+def test_balance_fetch_failure_skips_order(tmp_path: Path) -> None:
+    from bitbank_bot.rest_client import BitbankAPIError
+
+    c = _engine_cfg(tmp_path, api_key="paper-key", api_secret="paper-secret")
+    engine = Engine(c)
+
+    class Boom:
+        def free_amount(self, asset: str):
+            raise BitbankAPIError("boom", http_status=500)
+
+    engine.client = Boom()  # type: ignore[assignment]
+    state = BotState(None, RiskManager(c), 0, time.monotonic())
+    engine._execute(_buy_signal(), D("10000000"), 10, 1_700_000_000_000, state)
+    assert engine.stats.order_attempts == 0
+    assert engine.stats.last_block_reason == "balance_fetch_failed"
+    assert state.position is None
+
+
+def test_auth_failure_skips_order(tmp_path: Path) -> None:
+    from bitbank_bot.rest_client import BitbankAPIError
+
+    c = _engine_cfg(tmp_path, api_key="paper-key", api_secret="paper-secret")
+    engine = Engine(c)
+
+    class AuthBoom:
+        def free_amount(self, asset: str):
+            raise BitbankAPIError("denied", code=20001, http_status=401)
+
+    engine.client = AuthBoom()  # type: ignore[assignment]
+    state = BotState(None, RiskManager(c), 0, time.monotonic())
+    engine._execute(_buy_signal(), D("10000000"), 10, 1_700_000_000_000, state)
+    assert engine.stats.order_attempts == 0
+    assert engine.stats.last_block_reason == "auth_failure"
+    assert state.risk.halt_reason() == "auth_failure"

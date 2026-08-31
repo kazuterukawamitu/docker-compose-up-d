@@ -31,6 +31,11 @@ def _parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--check-config", action="store_true", help="Validate config and exit")
     p.add_argument("--preflight", action="store_true", help="Run preflight only")
+    p.add_argument(
+        "--diagnostics",
+        action="store_true",
+        help="Read-only diagnostics (never places an order)",
+    )
     p.add_argument("--audit", action="store_true", help="Read-only fill vs Bitbank audit")
     p.add_argument("--backtest", metavar="CSV", nargs="?", const="", help="Replay CSV candles")
     p.add_argument("--dashboard", action="store_true", help="Rich status table")
@@ -77,6 +82,12 @@ def main(argv: list[str] | None = None) -> int:
         result = preflight(cfg, rest, require_public=not args.synthetic)
         print(result.reason)
         return 0 if result.ok else 2
+    if args.diagnostics:
+        from bitbank_bot.diagnostics import run_diagnostics
+
+        report = run_diagnostics(cfg, rest, require_public=False)
+        print(json.dumps(report, indent=2, default=str))
+        return 0 if report["ok"] else 2
     if args.audit:
         from bitbank_bot.audit import run_audit
 

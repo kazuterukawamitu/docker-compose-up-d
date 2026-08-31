@@ -33,6 +33,8 @@ class BitbankWebsocket:
         self._last_event_mono = 0.0
         self._connected = False
         self.last_ticker: dict[str, Any] | None = None
+        self.last_trades: list[dict[str, Any]] = []
+        self.last_depth: dict[str, Any] | None = None
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -136,5 +138,10 @@ class BitbankWebsocket:
             self._last_event_mono = time.monotonic()
             if room.startswith("ticker_"):
                 self.last_ticker = inner
+            elif room.startswith("transactions_"):
+                self.last_trades.append(inner)
+                self.last_trades = self.last_trades[-50:]
+            elif "depth" in room:
+                self.last_depth = inner
         if self.on_message:
             self.on_message(room, inner)

@@ -146,3 +146,103 @@ def interpolate_crossover(
     if t < ZERO or t > D("1"):
         return None
     return prev_price + t * dp
+
+
+def rsi(values: Sequence[Decimal], period: int = 14) -> list[Decimal | None]:
+    if period < 1:
+        raise ValueError("period must be >= 1")
+    out: list[Decimal | None] = [None]
+    gains = ZERO
+    losses = ZERO
+    for i in range(1, len(values)):
+        change = values[i] - values[i - 1]
+        gain = change if change > ZERO else ZERO
+        loss = -change if change < ZERO else ZERO
+        if i <= period:
+            gains += gain
+            losses += loss
+            if i < period:
+                out.append(None)
+                continue
+            avg_gain = gains / D(period)
+            avg_loss = losses / D(period)
+        else:
+            avg_gain = (avg_gain * D(period - 1) + gain) / D(period)
+            avg_loss = (avg_loss * D(period - 1) + loss) / D(period)
+        if avg_loss == ZERO:
+            out.append(D("100") if avg_gain > ZERO else D("50"))
+        else:
+            rs = avg_gain / avg_loss
+            out.append(D("100") - (D("100") / (D("1") + rs)))
+    return out
+
+
+def macd(
+    values: Sequence[Decimal],
+    fast: int = 12,
+    slow: int = 26,
+    signal: int = 9,
+) -> tuple[list[Decimal | None], list[Decimal | None], list[Decimal | None]]:
+    fast_ema = ema(values, fast)
+    slow_ema = ema(values, slow)
+    line: list[Decimal | None] = []
+    for a, b in zip(fast_ema, slow_ema, strict=True):
+        if a is None or b is None:
+            line.append(None)
+        else:
+            line.append(a - b)
+    compact = [x for x in line if x is not None]
+    pad = len(line) - len(compact)
+    sig_compact = ema(compact, signal) if compact else []
+    sig_line: list[Decimal | None] = [None] * pad + sig_compact
+    hist: list[Decimal | None] = []
+    for a, b in zip(line, sig_line, strict=True):
+        if a is None or b is None:
+            hist.append(None)
+        else:
+            hist.append(a - b)
+    return line, sig_line, hist
+
+
+def atr(
+    highs: Sequence[Decimal],
+    lows: Sequence[Decimal],
+    closes: Sequence[Decimal],
+    period: int = 14,
+) -> list[Decimal | None]:
+    if not (len(highs) == len(lows) == len(closes)):
+        raise ValueError("highs, lows, and closes must be the same length")
+    trs: list[Decimal] = []
+    for i, (high, low, close) in enumerate(zip(highs, lows, closes, strict=True)):
+        if i == 0:
+            trs.append(high - low)
+            continue
+        prev = closes[i - 1]
+        span = high - low
+        up = high - prev if high > prev else prev - high
+        down = low - prev if low > prev else prev - low
+        trs.append(max(span, up, down))
+    return sma(trs, period)
+
+
+def bollinger(
+    values: Sequence[Decimal],
+    period: int = 20,
+    k: Decimal = D("2"),
+) -> tuple[list[Decimal | None], list[Decimal | None], list[Decimal | None]]:
+    mid = sma(values, period)
+    upper: list[Decimal | None] = []
+    lower: list[Decimal | None] = []
+    k = D(k)
+    for i, mean in enumerate(mid):
+        if mean is None:
+            upper.append(None)
+            lower.append(None)
+            continue
+        window = values[i + 1 - period : i + 1]
+        var = sum((v - mean) * (v - mean) for v in window) / D(period)
+        stdev = var.sqrt()
+        band = k * stdev
+        upper.append(mean + band)
+        lower.append(mean - band)
+    return mid, upper, lower

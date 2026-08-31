@@ -13,20 +13,17 @@ fi
 set -euo pipefail
 
 CLONE_URL="https://github.com/kazuterukawamitu/docker-compose-up-d.git"
-BOT_BRANCH="cursor/iterm15-suite-6df5"
 
 usage_clone() {
-  echo "start.sh はこのリポジトリのボット用ブランチにあります。main やホーム (~) にはありません。" >&2
+  echo "start.sh はこのリポジトリのクローン内にあります。ホーム (~) 単体では動きません。" >&2
   echo "chmod: start.sh: No such file or directory のときは、ファイルが無い場所で chmod しています。" >&2
   echo "chmod は不要です。次をそのまま実行してください:" >&2
-  echo "  git clone -b ${BOT_BRANCH} ${CLONE_URL}" >&2
+  echo "  git clone ${CLONE_URL}" >&2
   echo "  cd docker-compose-up-d" >&2
   echo "  bash ./start.sh --preflight" >&2
-  echo "  bash ./start.sh" >&2
+  echo "  bash ./start.sh --once --synthetic --dry-run" >&2
   echo "すでに clone 済みなら:" >&2
   echo "  cd docker-compose-up-d" >&2
-  echo "  git fetch origin ${BOT_BRANCH}" >&2
-  echo "  git checkout ${BOT_BRANCH}" >&2
   echo "  bash ./start.sh --preflight" >&2
   echo "ホームからは:" >&2
   echo "  bash \$HOME/docker-compose-up-d/start.sh --preflight" >&2

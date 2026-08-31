@@ -65,12 +65,15 @@ class Signal:
     peak_price: Decimal | None = None
     origin_price: Decimal | None = None
     crossover_price_bp: Decimal | None = None
+    score: Decimal = Decimal("0")
 
     @staticmethod
     def hold(reason: str = "no setup") -> "Signal":
         if not reason:
             raise ValueError("WAIT/HOLD requires an explicit reason")
-        return Signal(kind="HOLD", side=None, tp_pct=None, reason=reason)
+        return Signal(kind="HOLD", side=None, tp_pct=None, reason=reason, score=Decimal("0"))
+
+    wait = hold
 
 
 class Buy3Machine:

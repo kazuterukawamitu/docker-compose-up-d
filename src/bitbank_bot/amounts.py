@@ -1,7 +1,8 @@
 """PositionSizer: the only place that sets order quantity.
 
-Strategy must not choose size. Recalculate from free_amount every order.
-Never treat TARGET/PLANNED as a fill.
+Strategy must not choose size. Recalculate from free_amount every order
+(model A). BALANCE_USAGE_RATIO aliases MAX_BALANCE_USAGE.
+Never treat TARGET/PLANNED as a fill — those fields are telemetry only.
 """
 
 from __future__ import annotations

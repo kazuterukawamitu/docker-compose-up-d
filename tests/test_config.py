@@ -62,3 +62,23 @@ def test_dry_run_false_requires_live_flag() -> None:
             load_default_dotenv=False,
             environ={"DRY_RUN": "false", "LIVE_TRADING": "false"},
         )
+
+
+def test_pair_api_symbol_is_btc_jpy() -> None:
+    loaded = load_config(
+        load_default_dotenv=False,
+        environ={"DRY_RUN": "true", "LIVE_TRADING": "false", "BITBANK_PAIR": "BTC/JPY"},
+    )
+    assert loaded.pair == "btc_jpy"
+
+
+def test_balance_usage_ratio_aliases_max_balance_usage() -> None:
+    loaded = load_config(
+        load_default_dotenv=False,
+        environ={
+            "DRY_RUN": "true",
+            "LIVE_TRADING": "false",
+            "BALANCE_USAGE_RATIO": "0.99",
+        },
+    )
+    assert loaded.max_balance_usage == D("0.99")

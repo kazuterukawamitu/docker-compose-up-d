@@ -101,3 +101,47 @@ def test_open_allows_buy_when_kill_switch_off(tmp_path) -> None:
     assert decision.allowed
     assert decision.reason == "ok"
     assert decision.capped_btc == D("0.1")
+
+
+def test_circuit_breaker_after_consecutive_errors() -> None:
+    c = cfg(circuit_breaker_errors=3, daily_pnl_floor=D("0"), kill_switch=False)
+    risk = RiskManager(c)
+    risk.note_api_error()
+    risk.note_api_error()
+    assert risk.check_buy(D("0"), D("0.1")).allowed
+    risk.note_api_error()
+    decision = risk.check_buy(D("0"), D("0.1"))
+    assert not decision.allowed
+    assert decision.reason == "circuit_breaker"
+    sell = risk.check_sell(D("0.1"))
+    assert not sell.allowed
+    assert sell.reason == "circuit_breaker"
+
+
+def test_auth_failure_blocks_all_orders() -> None:
+    c = cfg(daily_pnl_floor=D("0"), kill_switch=False)
+    risk = RiskManager(c)
+    risk.note_auth_failure()
+    buy = risk.check_buy(D("0"), D("0.1"))
+    assert not buy.allowed
+    assert buy.reason == "auth_failure"
+    sell = risk.check_sell(D("0.1"))
+    assert not sell.allowed
+    assert sell.reason == "auth_failure"
+
+
+def test_max_drawdown_blocks_buy_not_sell() -> None:
+    c = cfg(
+        max_drawdown_jpy=D("150"),
+        daily_pnl_floor=D("0"),
+        kill_switch=False,
+        kill_switch_path="/tmp/bitbank-bot-tests-no-kill-file",
+    )
+    risk = RiskManager(c)
+    risk.update_equity(D("1000"), D("0"), D("1"))
+    risk.update_equity(D("800"), D("0"), D("1"))
+    assert risk.halt_reason() == "max_drawdown"
+    buy = risk.check_buy(D("0"), D("0.1"))
+    assert not buy.allowed
+    sell = risk.check_sell(D("0.1"))
+    assert sell.allowed

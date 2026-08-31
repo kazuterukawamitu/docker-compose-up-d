@@ -57,7 +57,7 @@ Wiki-only golden/dead-cross extra rules stay behind `WIKI_CROSS_RULES=false`.
 
 Strategy must not set quantity. [`src/bitbank_bot/amounts.py`](../src/bitbank_bot/amounts.py) `PositionSizer` recalculates from `free_amount` every order.
 
-- Buy: possible amount (`MAX_BALANCE_USAGE=0.95` minus fee buffer)
+- Buy: possible amount (`MAX_BALANCE_USAGE=0.95` minus fee buffer). `BALANCE_USAGE_RATIO` is an alias.
 - Sell: all free BTC × `0.999`
 - Min size: `0.0001` BTC
 - Amount step: `0.0001` BTC
@@ -69,7 +69,11 @@ Strategy must not set quantity. [`src/bitbank_bot/amounts.py`](../src/bitbank_bo
 - `KILL_SWITCH=false` (operator hard-stop). Also `data/KILL` — live-checked; delete the file to resume. This is the only source of `last_block_reason="kill_switch"`.
 - `DAILY_PNL_FLOOR=150` JPY (halt **new buys** when realized daily PnL ≤ −150). Reason is `daily_pnl_floor`, not `kill_switch`. Resets at the next JST day. Sells still flatten.
 - Extra `MAX_DAILY_LOSS_JPY` optional (empty = disabled); reason `max_daily_loss`.
-- Stale data: 60 seconds
+- Optional `MAX_DRAWDOWN_JPY` (0 = off) blocks new buys after equity peak-to-trough.
+- `CIRCUIT_BREAKER_ERRORS=5` consecutive private-API failures halt all orders until restart.
+- Auth failure (`401` / Bitbank 20001-class) latches `auth_failure` until restart.
+- Failed `free_amount` fetch → no order (`balance_fetch_failed`).
+- Stale data: 60 seconds (skip orders; retry the candle)
 - Watchdog: 900 seconds (`NORMAL_WAIT` / `LONG_WAIT` / `FAIL`)
 - Single-instance lock: `data/bot.lock`
 - `state.json` must not persist a computed daily/file halt as a latched `kill_switch`

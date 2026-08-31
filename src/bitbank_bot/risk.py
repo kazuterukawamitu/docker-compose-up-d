@@ -53,6 +53,10 @@ class RiskManager:
         # Explicit operator halt only. Never copy a computed daily/file halt here.
         self._operator_killed = cfg.kill_switch if killed is None else bool(killed)
         self._as_of: date | None = None
+        self._consecutive_errors = 0
+        self._auth_failed = False
+        self._peak_equity = ZERO
+        self._equity = ZERO
 
     def set_as_of(self, timestamp_ms: int) -> None:
         """Align the JST daily window to a candle time (backtest / replay)."""
@@ -88,15 +92,42 @@ class RiskManager:
 
     def halt_reason(self) -> str | None:
         self._roll_day()
+        if self._auth_failed:
+            return "auth_failure"
+        limit = int(getattr(self.cfg, "circuit_breaker_errors", 0) or 0)
+        if limit > 0 and self._consecutive_errors >= limit:
+            return "circuit_breaker"
         if self.operator_killed:
             return "kill_switch"
         if Path(self.cfg.kill_switch_path).exists():
             return "kill_switch"
+        max_dd = D(getattr(self.cfg, "max_drawdown_jpy", ZERO) or 0)
+        if max_dd > ZERO and self._peak_equity > ZERO:
+            drawdown = self._peak_equity - self._equity
+            if drawdown >= max_dd:
+                return "max_drawdown"
         return self._daily_halt_reason()
 
     @property
     def killed(self) -> bool:
         return self.halt_reason() is not None
+
+    def note_auth_failure(self) -> None:
+        self._auth_failed = True
+        slog("RISK", "auth failure; no further orders until restart")
+
+    def note_api_error(self) -> None:
+        self._consecutive_errors += 1
+        slog("RISK", "api error streak", count=self._consecutive_errors)
+
+    def note_api_ok(self) -> None:
+        self._consecutive_errors = 0
+
+    def update_equity(self, jpy: Decimal, btc: Decimal, price: Decimal) -> None:
+        equity = D(jpy) + D(btc) * D(price)
+        self._equity = equity
+        if equity > self._peak_equity:
+            self._peak_equity = equity
 
     def trip(self, reason: str) -> None:
         if reason in {"daily_pnl_floor", "max_daily_loss"}:
@@ -132,8 +163,13 @@ class RiskManager:
         return RiskDecision(True, capped, "ok", False)
 
     def check_sell(self, requested_btc: Decimal) -> RiskDecision:
-        # Flattening stays allowed during a daily halt. Only an operator kill
-        # (config flag) blocks sells.
+        # Flattening stays allowed during a daily halt. Auth failure and an
+        # operator kill block sells. Circuit breaker blocks all orders.
+        if self._auth_failed:
+            return RiskDecision(False, ZERO, "auth_failure", True)
+        limit = int(getattr(self.cfg, "circuit_breaker_errors", 0) or 0)
+        if limit > 0 and self._consecutive_errors >= limit:
+            return RiskDecision(False, ZERO, "circuit_breaker", True)
         if self.cfg.kill_switch or self._operator_killed:
             return RiskDecision(False, ZERO, "kill_switch", True)
         capped = min(D(requested_btc), self.max_order_btc)

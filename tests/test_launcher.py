@@ -24,5 +24,16 @@ def test_install_vps_syntax() -> None:
 def test_systemd_restarts_always() -> None:
     unit = (ROOT / "deploy/bitbank-bot.service").read_text(encoding="utf-8")
     assert "Restart=always" in unit
+    assert "network-online.target" in unit
     assert "WorkingDirectory=/opt/bitbank-bot" in unit
     assert "/Users/" not in unit
+
+
+def test_root_launchers_exist() -> None:
+    assert (ROOT / "main.py").is_file()
+    assert (ROOT / "diagnostics.py").is_file()
+    assert ".env" in (ROOT / ".gitignore").read_text(encoding="utf-8")
+    example = (ROOT / ".env.example").read_text(encoding="utf-8")
+    assert "BITBANK_API_KEY=" in example
+    assert "changeme" not in example.lower()
+    assert "DRY_RUN=true" in example

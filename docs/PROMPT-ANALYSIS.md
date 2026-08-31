@@ -30,3 +30,5 @@ This branch is the single Bitbank suite. Earlier overlapping bots ([PR #2](https
 - This agent SSHing to the user’s Sakura box (the install script is the deliverable)
 
 HTML wiki dumps in the repo root are identical footer pages, not charts. Leave them as-is.
+
+See [ANALYSIS.md](ANALYSIS.md) for the inventory of `main` vs this branch and the amount-model choice.
