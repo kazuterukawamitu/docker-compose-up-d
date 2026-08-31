@@ -1,0 +1,18 @@
+services:
+  web:
+    build: .
+    env_file: .env
+    environment:
+      TZ: Japan
+      LANG: ja_JP.UTF-8
+      LANGUAGE: ja_JP:ja
+      LC_ALL: ja_JP.UTF-8
+      PYTHONPATH: /app/src
+      DRY_RUN: "true"
+      LIVE_TRADING: "false"
+    volumes:
+      - ./logs:/app/logs
+      - ./data:/app/data
+      - ./.env:/app/.env:ro
+    restart: unless-stopped
+    command: python3 -m bitbank_bot
