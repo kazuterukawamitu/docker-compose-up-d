@@ -11,7 +11,7 @@ from helpers import cfg
 
 
 def _engine_cfg(tmp_path: Path, **kwargs):
-    return cfg(
+    values = dict(
         dry_run=True,
         simulate_fill=True,
         enable_websocket=False,
@@ -21,8 +21,9 @@ def _engine_cfg(tmp_path: Path, **kwargs):
         kill_switch_path=str(tmp_path / "KILL"),
         dry_run_free_jpy=D("100000"),
         dry_run_free_btc=D("0"),
-        **kwargs,
     )
+    values.update(kwargs)
+    return cfg(**values)
 
 
 def _buy_signal() -> Signal:
