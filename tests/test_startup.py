@@ -24,7 +24,9 @@ def test_compileall_src() -> None:
         py_compile.compile(str(path), doraise=True)
 
 
-def test_check_config_exit_zero() -> None:
+def test_check_config_exit_zero(monkeypatch) -> None:
+    monkeypatch.setenv("DRY_RUN", "true")
+    monkeypatch.setenv("LIVE_TRADING", "false")
     assert main(["--check-config"]) == 0
 
 
@@ -100,16 +102,18 @@ def test_live_sh_refuses_run_py_fallback() -> None:
     assert "--require-live" in text
     assert "live.env.example" in text
     assert "trade.py" in text
-    assert "exec" in text
-    exec_chunks = text.split("exec")[1:]
-    assert exec_chunks, "live.sh must exec a process"
-    for chunk in exec_chunks:
-        assert "run.py" not in chunk
-    assert "main.py" in text
-    assert "--live" in text
-    last = exec_chunks[-1]
-    assert "trade.py" in last
-    assert "--once" not in last
+    exec_lines = [
+        line.strip()
+        for line in text.splitlines()
+        if line.strip().startswith("exec ")
+    ]
+    assert exec_lines, "live.sh must exec a process"
+    for line in exec_lines:
+        assert "run.py" not in line
+        assert "--once" not in line
+    assert any("main.py" in line and "--require-live" in line for line in exec_lines)
+    assert any("trade.py" in line and "--live" in line for line in exec_lines)
+    assert "start_trade" in text
 
 
 def test_main_py_runs_without_pythonpath(tmp_path) -> None:
@@ -144,6 +148,8 @@ def test_main_py_runs_without_pythonpath(tmp_path) -> None:
 def test_audit_script_runs_without_pythonpath() -> None:
     root = Path(__file__).resolve().parents[1]
     env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+    env["DRY_RUN"] = "true"
+    env["LIVE_TRADING"] = "false"
     proc = subprocess.run(
         [sys.executable, str(root / "scripts" / "bitbank_execution_audit.py")],
         cwd=str(root),
