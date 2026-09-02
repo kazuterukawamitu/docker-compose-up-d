@@ -69,7 +69,7 @@ PYTHONPATH=src .venv/bin/python -m pytest -q
 Read-only execution check (never places an order):
 
 ```bash
-PYTHONPATH=src .venv/bin/python scripts/bitbank_execution_audit.py
+python3 scripts/bitbank_execution_audit.py
 ```
 
 Audit notes: [docs/AUDIT.md](docs/AUDIT.md).

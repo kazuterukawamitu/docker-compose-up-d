@@ -9,11 +9,25 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 from typing import Any
 
-from bitbank_bot.config import ConfigError, load_config
-from bitbank_bot.logging_setup import setup_logging, slog
-from bitbank_bot.rest_client import RestClient
+ROOT = Path(__file__).resolve().parents[1]
+SRC = ROOT / "src"
+if str(SRC) not in sys.path:
+    sys.path.insert(0, str(SRC))
+
+try:
+    from bitbank_bot.config import ConfigError, load_config
+    from bitbank_bot.logging_setup import setup_logging, slog
+    from bitbank_bot.rest_client import RestClient
+except ModuleNotFoundError as exc:
+    sys.stderr.write(
+        f"Missing Python package ({exc.name}). From the repo root run:\n"
+        "  python3 scripts/bitbank_execution_audit.py\n"
+        "or: bash start.sh --once --synthetic --skip-lock --no-screen\n"
+    )
+    raise SystemExit(2) from exc
 
 
 def _forbid_orders(rest: RestClient) -> None:
