@@ -47,6 +47,21 @@ def to_decimal(value: Any) -> Decimal:
     return D(value)
 
 
+def ensure_decimal(value: object, name: str) -> Decimal:
+    """Validate order fields. Logs the variable name, never secret values."""
+    if value is None or value == "":
+        raise InvalidOperation(f"{name}: number expected (empty)")
+    if isinstance(value, bool):
+        raise InvalidOperation(f"{name}: number expected (bool)")
+    try:
+        parsed = D(value)
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise InvalidOperation(f"{name}: number expected ({type(value).__name__})") from exc
+    if parsed.is_nan() or parsed.is_infinite():
+        raise InvalidOperation(f"{name}: number expected (non-finite)")
+    return parsed
+
+
 def truncate(value: Decimal, step: Decimal) -> Decimal:
     value = D(value)
     step = D(step)

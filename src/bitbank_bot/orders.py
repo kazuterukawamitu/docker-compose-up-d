@@ -9,7 +9,7 @@ from typing import Any, Protocol
 from bitbank_bot.amounts import AmountPlan
 from bitbank_bot.config import Config
 from bitbank_bot.logging_setup import slog
-from bitbank_bot.money import D, ZERO, quantize_price
+from bitbank_bot.money import D, ZERO, ensure_decimal, quantize_price
 from bitbank_bot.strategy import Signal
 
 
@@ -90,6 +90,24 @@ class OrderExecutor:
             planned_order_jpy=str(plan.planned_order_jpy),
             actual_execution_jpy="unset",
         )
+        try:
+            ensure_decimal(plan.amount, "order_amount")
+            ensure_decimal(plan.price, "order_price")
+            ensure_decimal(plan.planned_order_jpy, "planned_order_jpy")
+        except Exception as exc:
+            slog("ERROR", "number expected before order", error=str(exc))
+            return OrderResult(
+                False,
+                "number_expected",
+                self.cfg.dry_run,
+                False,
+                None,
+                None,
+                ZERO,
+                ZERO,
+                None,
+                None,
+            )
         if not plan.ok or plan.amount <= ZERO:
             return OrderResult(
                 False,
@@ -221,3 +239,35 @@ class OrderExecutor:
         return OrderResult(
             True, "fill", False, False, order_id, status, executed, avg, actual, raw
         )
+
+    def poll(self, order_id: str, fallback_amount: Decimal) -> OrderResult:
+        """Re-read a live order. Does not place a new order."""
+        raw = self._refresh_order(order_id)
+        if raw is None:
+            return OrderResult(
+                False, "poll_failed", False, False, order_id, None, ZERO, ZERO, None, None
+            )
+        executed = D(raw.get("executed_amount") or 0)
+        avg = D(raw.get("average_price") or 0)
+        ordered = D(raw.get("start_amount") or fallback_amount)
+        status = _fill_status(str(raw.get("status") or ""), executed, ordered)
+        slog(
+            "ORDER_STATUS",
+            "pending poll",
+            order_id=order_id,
+            status=status,
+            executed_amount=str(executed),
+        )
+        if executed <= ZERO:
+            return OrderResult(
+                True, "accepted_unfilled", False, False, order_id, status, ZERO, ZERO, None, raw
+            )
+        actual = executed * avg
+        slog(
+            "FILL",
+            "fill after poll",
+            order_id=order_id,
+            executed_amount=str(executed),
+            actual_execution_jpy=str(actual),
+        )
+        return OrderResult(True, "fill", False, False, order_id, status, executed, avg, actual, raw)

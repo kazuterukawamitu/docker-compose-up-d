@@ -164,6 +164,7 @@ class Config:
     poll_sec: float = float(DEFAULT_POLL_SEC)
     no_trade_timeout_seconds: int = DEFAULT_NO_TRADE_TIMEOUT
     enable_websocket: bool = True
+    enable_htf_filter: bool = True
     log_level: str = "INFO"
     log_dir: str = DEFAULT_LOG_DIR
     state_path: str = DEFAULT_STATE_PATH
@@ -205,6 +206,7 @@ class Config:
             "order_type": self.order_type,
             "kill_switch": self.kill_switch,
             "enable_websocket": self.enable_websocket,
+            "enable_htf_filter": self.enable_htf_filter,
             "lock_path": self.lock_path,
             "stale_ws_sec": self.stale_ws_sec,
             "log_level": self.log_level,
@@ -321,6 +323,7 @@ def load_config(
         poll_sec=float(_env(env, "POLL_SEC") or _env(env, "LOOP_SECONDS") or DEFAULT_POLL_SEC),
         no_trade_timeout_seconds=_int(env, "NO_TRADE_TIMEOUT_SECONDS", DEFAULT_NO_TRADE_TIMEOUT),
         enable_websocket=_bool(env, "ENABLE_WEBSOCKET", True),
+        enable_htf_filter=_bool(env, "ENABLE_HTF_FILTER", True),
         log_level=(_env(env, "LOG_LEVEL", "INFO") or "INFO").upper(),
         log_dir=_env(env, "LOG_DIR", DEFAULT_LOG_DIR) or DEFAULT_LOG_DIR,
         state_path=_env(env, "STATE_PATH", DEFAULT_STATE_PATH) or DEFAULT_STATE_PATH,

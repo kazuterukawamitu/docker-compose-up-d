@@ -12,7 +12,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
-from bitbank_bot.amounts import PositionSizer
+from bitbank_bot.amounts import AmountPlan, PositionSizer
 from bitbank_bot.config import Config
 from bitbank_bot.logging_setup import slog
 from bitbank_bot.market_data import (
@@ -23,15 +23,28 @@ from bitbank_bot.market_data import (
     synthetic_candles,
 )
 from bitbank_bot.money import D, ZERO
+from bitbank_bot.multi_timeframe import evaluate_htf
 from bitbank_bot.orders import OrderExecutor, OrderResult
 from bitbank_bot.preflight import preflight
 from bitbank_bot.rest_client import BitbankAPIError, RestClient, is_auth_error
 from bitbank_bot.risk import RiskManager
 from bitbank_bot.screen import TradingScreen, view_from_engine
 from bitbank_bot.strategy import Position, Signal, Strategy, build_snapshots
+from bitbank_bot.watchdog import classify as classify_watchdog
 from bitbank_bot.websocket_client import BitbankWebsocket
 
 _LOG = logging.getLogger("bitbank_bot")
+
+
+@dataclass
+class PendingOrder:
+    order_id: str
+    side: str
+    kind: str
+    tp_pct: Decimal | None
+    index: int
+    timestamp_ms: int
+    amount: Decimal
 
 
 @dataclass
@@ -40,12 +53,14 @@ class BotState:
     risk: RiskManager
     last_candle_ts: int
     started_at: float
+    pending: PendingOrder | None = None
 
 
 def load_state(path: str | Path, cfg: Config) -> BotState:
     risk = RiskManager(cfg)
     position = None
     last_ts = 0
+    pending: PendingOrder | None = None
     p = Path(path)
     if p.exists():
         raw = json.loads(p.read_text(encoding="utf-8"))
@@ -68,7 +83,19 @@ def load_state(path: str | Path, cfg: Config) -> BotState:
             killed=operator_killed or cfg.kill_switch,
         )
         last_ts = int(raw.get("last_candle_ts") or 0)
-    return BotState(position, risk, last_ts, time.monotonic())
+        pending_raw = raw.get("pending")
+        if pending_raw and pending_raw.get("order_id"):
+            tp_raw = pending_raw.get("tp_pct")
+            pending = PendingOrder(
+                order_id=str(pending_raw["order_id"]),
+                side=str(pending_raw.get("side") or ""),
+                kind=str(pending_raw.get("kind") or ""),
+                tp_pct=D(tp_raw) if tp_raw not in (None, "") else None,
+                index=int(pending_raw.get("index") or 0),
+                timestamp_ms=int(pending_raw.get("timestamp_ms") or 0),
+                amount=D(pending_raw.get("amount") or 0),
+            )
+    return BotState(position, risk, last_ts, time.monotonic(), pending)
 
 
 def save_state(path: str | Path, state: BotState) -> None:
@@ -80,7 +107,18 @@ def save_state(path: str | Path, state: BotState) -> None:
         "operator_killed": state.risk.operator_killed,
         "last_candle_ts": state.last_candle_ts,
         "position": None,
+        "pending": None,
     }
+    if state.pending:
+        payload["pending"] = {
+            "order_id": state.pending.order_id,
+            "side": state.pending.side,
+            "kind": state.pending.kind,
+            "tp_pct": str(state.pending.tp_pct) if state.pending.tp_pct is not None else "",
+            "index": state.pending.index,
+            "timestamp_ms": state.pending.timestamp_ms,
+            "amount": str(state.pending.amount),
+        }
     if state.position:
         payload["position"] = {
             "amount": str(state.position.amount),
@@ -111,6 +149,7 @@ class Engine:
         self.strategy_evaluations = 0
         self.cycles = 0
         self.used_synthetic_fallback = False
+        self._explicit_synthetic = False
         self.last_watchdog = ""
         self.last_close: Decimal | str = "-"
         self.last_ma: Decimal | str = "-"
@@ -174,6 +213,10 @@ class Engine:
             hold = Signal.hold("not_enough_candles")
             self.last_signal = hold
             return hold
+        if execute and state.pending:
+            self._poll_pending(state)
+            if persist:
+                save_state(self.cfg.state_path, state)
         strategy = Strategy(self.cfg)
         last = snaps[-1]
         self.last_close = last.close
@@ -205,6 +248,28 @@ class Engine:
                     slog("STRATEGY", "candle already processed", candle_ts=snap.timestamp_ms)
                 continue
             if signal.side in {"buy", "sell"}:
+                if state.pending:
+                    slog("ORDER_STATUS", "pending live order; skip new signal")
+                    self.last_block_reason = "pending_order"
+                    signal = Signal.hold("pending_order")
+                    state.last_candle_ts = snap.timestamp_ms
+                    if persist:
+                        save_state(self.cfg.state_path, state)
+                    continue
+                if (
+                    signal.side == "buy"
+                    and self.cfg.enable_htf_filter
+                    and not self._explicit_synthetic
+                ):
+                    verdict = evaluate_htf(self._rest(), self.cfg)
+                    if not verdict.allow_buy:
+                        self.last_block_reason = verdict.reason
+                        slog("STRATEGY", "BUY blocked by HTF", reason=verdict.reason)
+                        signal = Signal.hold(verdict.reason)
+                        state.last_candle_ts = snap.timestamp_ms
+                        if persist:
+                            save_state(self.cfg.state_path, state)
+                        continue
                 if self.ws is not None and self.cfg.enable_websocket and self.ws.is_stale():
                     slog("WEBSOCKET", "stale data; skipping orders")
                     self.last_block_reason = "stale_websocket"
@@ -286,6 +351,76 @@ class Engine:
         )
         self._apply_fill(signal, plan, result, index, ts, state, jpy, btc)
 
+    def _poll_pending(self, state: BotState) -> None:
+        pending = state.pending
+        if pending is None:
+            return
+        rest = self._rest()
+        executor = OrderExecutor(self.cfg, rest if self.cfg.has_keys else None)
+        result = executor.poll(pending.order_id, pending.amount)
+        if not result.ok:
+            slog(
+                "ORDER_STATUS",
+                "pending poll failed; holding new orders",
+                order_id=pending.order_id,
+            )
+            return
+        if result.executed_amount <= ZERO:
+            slog(
+                "ORDER_STATUS",
+                "pending still unfilled; skip new orders",
+                order_id=pending.order_id,
+            )
+            return
+        signal = Signal(pending.kind, pending.side, pending.tp_pct, "pending_fill")
+        plan = AmountPlan(
+            side=pending.side,
+            amount=pending.amount,
+            price=result.average_price,
+            available_jpy=ZERO,
+            available_btc=ZERO,
+            target_jpy=ZERO,
+            planned_order_jpy=ZERO,
+            actual_execution_jpy=None,
+            actual_balance_jpy=ZERO,
+            actual_balance_btc=ZERO,
+            ok=True,
+            reason="pending_poll",
+        )
+        try:
+            jpy, btc = self._balances(rest)
+        except Exception:
+            jpy, btc = ZERO, ZERO
+        state.pending = None
+        self._apply_fill(
+            signal, plan, result, pending.index, pending.timestamp_ms, state, jpy, btc
+        )
+
+    def _set_watchdog(
+        self,
+        state: BotState,
+        signal: Signal,
+        *,
+        fail_reason: str = "",
+        market_ok: bool = True,
+    ) -> None:
+        report = classify_watchdog(
+            uptime_sec=int(time.monotonic() - state.started_at),
+            timeout_sec=int(self.cfg.no_trade_timeout_seconds),
+            strategy_evaluations=self.strategy_evaluations,
+            market_ok=market_ok,
+            fail_reason=fail_reason,
+            has_order_signal=signal.side in {"buy", "sell"},
+        )
+        slog(
+            "WATCHDOG",
+            report.status,
+            reason=report.reason,
+            kind=signal.kind,
+            uptime_sec=report.uptime_sec,
+        )
+        self.last_watchdog = report.status
+
     def _apply_fill(
         self,
         signal: Signal,
@@ -297,8 +432,26 @@ class Engine:
         jpy: Decimal,
         btc: Decimal,
     ) -> None:
+        if result.reason == "accepted_unfilled" and result.order_id:
+            state.pending = PendingOrder(
+                order_id=result.order_id,
+                side=signal.side or "",
+                kind=signal.kind,
+                tp_pct=signal.tp_pct,
+                index=index,
+                timestamp_ms=ts,
+                amount=plan.amount,
+            )
+            slog(
+                "ORDER_STATUS",
+                "persisting unfilled live order",
+                order_id=result.order_id,
+                side=signal.side,
+            )
+            return
         if not result.ok or result.executed_amount <= ZERO:
             return
+        state.pending = None
         actual_jpy = result.actual_execution_jpy
         if actual_jpy is None:
             slog("ERROR", "fill missing actual_execution_jpy; ignoring TARGET/PLANNED")
@@ -332,6 +485,7 @@ class Engine:
 
     def run_once(self, *, synthetic: bool = False, skip_preflight: bool = False) -> int:
         slog("BOOT", "run_once", synthetic=synthetic, dry_run=self.cfg.dry_run)
+        self._explicit_synthetic = synthetic
         rest = self._rest()
         if not skip_preflight and not synthetic:
             result = preflight(self.cfg, rest, require_public=True)
@@ -349,6 +503,7 @@ class Engine:
             candles, state, execute=True, persist=not synthetic
         )
         last = str(candles[-1].close) if candles else "-"
+        self._set_watchdog(state, signal)
         self._heartbeat(state, signal, last)
         slog("BOOT", "run_once complete")
         return 0
@@ -369,8 +524,7 @@ class Engine:
             if incoming:
                 self.used_synthetic_fallback = False
                 return incoming
-            slog("WATCHDOG", "NORMAL WAIT", reason="empty_public_candles")
-            self.last_watchdog = "NORMAL WAIT"
+            slog("MARKET", "empty public candles; synthetic fallback without orders")
         except Exception as exc:
             slog(
                 "WATCHDOG",
@@ -378,9 +532,8 @@ class Engine:
                 reason="public_candles_failed_using_synthetic",
                 error=type(exc).__name__,
             )
-            self.last_watchdog = "FAIL"
         self.used_synthetic_fallback = True
-        slog("MARKET", "synthetic fallback; loop continues")
+        slog("MARKET", "synthetic fallback; loop continues (no orders)")
         return synthetic_candles()
 
     def run_forever(
@@ -396,6 +549,7 @@ class Engine:
             dry_run=self.cfg.dry_run,
             synthetic=synthetic,
         )
+        self._explicit_synthetic = synthetic
         rest = self._rest()
         if self.screen is not None:
             self.screen.boot("公開ティッカーと足を取得しています…")
@@ -426,22 +580,32 @@ class Engine:
                 )
                 self._refresh_public_last(rest)
                 candles = self.cache.merge(incoming)
+                accidental_synthetic = (
+                    self.used_synthetic_fallback and not self._explicit_synthetic
+                )
+                if accidental_synthetic:
+                    slog(
+                        "WATCHDOG",
+                        "FAIL",
+                        reason="synthetic_fallback_no_orders",
+                    )
                 signal = self.process_candles(
                     candles,
                     state,
-                    execute=True,
+                    execute=not accidental_synthetic,
                     persist=not (synthetic or self.used_synthetic_fallback),
                 )
                 last_ok = time.monotonic()
                 last = str(candles[-1].close) if candles else "-"
-                if signal.kind == "HOLD" or signal.side is None:
-                    slog(
-                        "WATCHDOG",
-                        "NORMAL WAIT",
-                        reason=signal.reason,
-                        kind=signal.kind,
-                    )
-                    self.last_watchdog = "NORMAL WAIT"
+                fail_reason = (
+                    "synthetic_fallback_no_orders" if accidental_synthetic else ""
+                )
+                self._set_watchdog(
+                    state,
+                    signal,
+                    fail_reason=fail_reason,
+                    market_ok=bool(candles) and not accidental_synthetic,
+                )
                 self.cycles += 1
                 self._heartbeat(state, signal, last)
                 if max_cycles is not None and self.cycles >= max_cycles:
