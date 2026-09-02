@@ -14,8 +14,17 @@ def test_default_is_dry_run() -> None:
     assert cfg.may_place_live_orders is False
     assert cfg.daily_pnl_floor == Decimal("0")
     assert cfg.pair == PAIR
+    assert cfg.enable_htf_filter is True
     assert "secret" not in cfg.safe_dict()
     assert cfg.safe_dict()["has_api_secret"] is False
+    assert cfg.safe_dict()["enable_htf_filter"] is True
+
+
+def test_htf_filter_env() -> None:
+    cfg = load_config(
+        environ={"ENABLE_HTF_FILTER": "false"}, load_default_dotenv=False
+    )
+    assert cfg.enable_htf_filter is False
 
 
 def test_pair_normalize_and_reject() -> None:

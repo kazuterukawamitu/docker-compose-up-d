@@ -125,3 +125,58 @@ def test_active_orders_block_live() -> None:
     assert not result.ok
     assert result.reason == "active_orders"
     client.create_order.assert_not_called()
+
+
+def test_place_rejects_non_finite_amount() -> None:
+    client = MagicMock()
+    plan = _plan()
+    plan.amount = Decimal("NaN")
+    c = cfg(dry_run=False, live_trading=True, api_key="k", api_secret="s")
+    result = OrderExecutor(c, client).place(
+        Signal("BUY1", "buy", Decimal("0.03"), "test"), plan
+    )
+    assert not result.ok
+    assert result.reason == "number_expected"
+    client.create_order.assert_not_called()
+
+
+def test_poll_fill() -> None:
+    client = MagicMock()
+    client.get_order.return_value = {
+        "order_id": "42",
+        "status": "FULLY_FILLED",
+        "executed_amount": "0.001",
+        "average_price": "10000000",
+        "start_amount": "0.001",
+    }
+    c = cfg(dry_run=False, live_trading=True, api_key="k", api_secret="s")
+    result = OrderExecutor(c, client).poll("42", Decimal("0.001"))
+    assert result.ok
+    assert result.reason == "fill"
+    assert result.executed_amount == Decimal("0.001")
+    assert result.actual_execution_jpy == Decimal("10000")
+
+
+def test_poll_unfilled() -> None:
+    client = MagicMock()
+    client.get_order.return_value = {
+        "order_id": "42",
+        "status": "UNFILLED",
+        "executed_amount": "0",
+        "average_price": "0",
+        "start_amount": "0.001",
+    }
+    c = cfg(dry_run=False, live_trading=True, api_key="k", api_secret="s")
+    result = OrderExecutor(c, client).poll("42", Decimal("0.001"))
+    assert result.ok
+    assert result.reason == "accepted_unfilled"
+    assert result.executed_amount == Decimal("0")
+
+
+def test_poll_failed() -> None:
+    client = MagicMock()
+    client.get_order.side_effect = RuntimeError("offline")
+    c = cfg(dry_run=False, live_trading=True, api_key="k", api_secret="s")
+    result = OrderExecutor(c, client).poll("42", Decimal("0.001"))
+    assert not result.ok
+    assert result.reason == "poll_failed"

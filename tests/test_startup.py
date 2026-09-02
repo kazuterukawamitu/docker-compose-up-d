@@ -15,6 +15,8 @@ def test_compileall_src() -> None:
     diag = root / "diagnostics.py"
     if diag.is_file():
         py_compile.compile(str(diag), doraise=True)
+    for path in (root / "scripts").rglob("*.py"):
+        py_compile.compile(str(path), doraise=True)
 
 
 def test_check_config_exit_zero() -> None:
@@ -46,6 +48,7 @@ def test_start_sh_is_venv_loop_launcher() -> None:
     assert ".env.example" in text
     assert "python3.12" in text
     assert "python3" in text
+    assert 'BOT_BRANCH="cursor/bitbank-audit-unify-f5fd"' in text
 
 
 def test_loop_cli_exits_after_max_cycles(tmp_path, monkeypatch) -> None:

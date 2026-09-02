@@ -4,7 +4,7 @@ from decimal import Decimal, InvalidOperation
 
 import pytest
 
-from bitbank_bot.money import D, floor_btc, meets_min_amount, to_decimal, truncate
+from bitbank_bot.money import D, ensure_decimal, floor_btc, meets_min_amount, to_decimal, truncate
 
 
 def test_d_parses_exchange_strings() -> None:
@@ -31,6 +31,16 @@ def test_bool_rejected() -> None:
 def test_empty_strict() -> None:
     with pytest.raises(ValueError, match="empty"):
         to_decimal("")
+
+
+def test_ensure_decimal_names_the_field() -> None:
+    with pytest.raises(InvalidOperation, match="order_amount"):
+        ensure_decimal("", "order_amount")
+    with pytest.raises(InvalidOperation, match="bool"):
+        ensure_decimal(True, "order_price")
+    with pytest.raises(InvalidOperation, match="non-finite"):
+        ensure_decimal(Decimal("NaN"), "planned_order_jpy")
+    assert ensure_decimal("0.0001", "order_amount") == Decimal("0.0001")
 
 
 def test_invalid_string() -> None:

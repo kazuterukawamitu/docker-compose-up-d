@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import json
+import time
 from decimal import Decimal
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
-from bitbank_bot.engine import Engine, load_state
+from bitbank_bot.engine import Engine, PendingOrder, load_state
 from bitbank_bot.market_data import parse_ohlcv, synthetic_candles
+from bitbank_bot.multi_timeframe import HtfVerdict
 from bitbank_bot.preflight import preflight
+from bitbank_bot.risk import RiskManager
+from bitbank_bot.strategy import Signal
 from tests.helpers import cfg
 
 
@@ -136,6 +141,7 @@ def test_dry_run_loop_without_api_keys_when_public_fails(tmp_path) -> None:
     assert rc == 0
     assert engine.cycles == 2
     assert engine.used_synthetic_fallback is True
+    assert engine.last_watchdog == "FAIL"
     rest.create_order.assert_not_called()
     rest.get_assets.assert_not_called()
 
@@ -195,3 +201,149 @@ def test_engine_skips_order_when_balance_fetch_fails(tmp_path) -> None:
     engine._execute(Signal("BUY1", "buy", Decimal("0.03"), "t"), Decimal("10000000"), 1, 1, state)
     rest.create_order.assert_not_called()
     assert engine.last_block_reason == "balance_fetch_failed"
+
+
+def test_load_state_without_file_has_no_pending(tmp_path) -> None:
+    c = cfg(state_path=str(tmp_path / "missing.json"))
+    state = load_state(c.state_path, c)
+    assert state.pending is None
+    assert state.position is None
+
+
+def test_engine_long_wait_after_timeout(tmp_path) -> None:
+    c = cfg(
+        state_path=str(tmp_path / "state.json"),
+        lock_path=str(tmp_path / "bot.lock"),
+        log_dir=str(tmp_path / "logs"),
+        enable_websocket=False,
+        no_trade_timeout_seconds=900,
+    )
+    engine = Engine(c, client=FakeRest())  # type: ignore[arg-type]
+    from bitbank_bot.engine import BotState
+
+    state = BotState(None, RiskManager(c), 0, time.monotonic() - 901)
+    engine.strategy_evaluations = 4
+    engine._set_watchdog(state, Signal.hold("no_setup"))
+    assert engine.last_watchdog == "LONG_WAIT"
+
+
+def test_htf_blocks_buy_without_placing(tmp_path) -> None:
+    c = cfg(
+        state_path=str(tmp_path / "state.json"),
+        lock_path=str(tmp_path / "bot.lock"),
+        log_dir=str(tmp_path / "logs"),
+        enable_websocket=False,
+        enable_htf_filter=True,
+        dry_run=True,
+        live_trading=False,
+        ma_period=3,
+        short_ma_period=3,
+        long_ma_period=5,
+    )
+    fake = FakeRest()
+    engine = Engine(c, client=fake)  # type: ignore[arg-type]
+    from bitbank_bot.engine import BotState
+
+    state = BotState(None, RiskManager(c), 0, time.monotonic())
+    blocked = HtfVerdict(False, "htf_downtrend", "DOWN", "DOWN")
+    with (
+        patch("bitbank_bot.engine.evaluate_htf", return_value=blocked),
+        patch(
+            "bitbank_bot.strategy.Strategy.evaluate",
+            return_value=Signal("BUY1", "buy", Decimal("0.03"), "forced"),
+        ),
+    ):
+        signal = engine.process_candles(
+            synthetic_candles(40), state, execute=True, persist=False
+        )
+    assert signal.kind == "HOLD"
+    assert signal.reason == "htf_downtrend"
+    assert engine.last_block_reason == "htf_downtrend"
+    assert fake.create_order_calls == 0
+    assert state.position is None
+
+
+def test_pending_unfilled_is_persisted_and_polled(tmp_path) -> None:
+    c = cfg(
+        state_path=str(tmp_path / "state.json"),
+        lock_path=str(tmp_path / "bot.lock"),
+        log_dir=str(tmp_path / "logs"),
+        enable_websocket=False,
+        enable_htf_filter=False,
+        dry_run=False,
+        live_trading=True,
+        api_key="k",
+        api_secret="s",
+        ma_period=3,
+        short_ma_period=3,
+        long_ma_period=5,
+    )
+    rest = MagicMock()
+    rest.free_amount.side_effect = lambda asset: (
+        Decimal("100000") if asset == "jpy" else Decimal("0")
+    )
+    rest.get_active_orders.return_value = []
+    rest.create_order.return_value = {
+        "order_id": "42",
+        "status": "UNFILLED",
+        "executed_amount": "0",
+        "average_price": "0",
+        "start_amount": "0.001",
+    }
+    rest.get_order.return_value = {
+        "order_id": "42",
+        "status": "UNFILLED",
+        "executed_amount": "0",
+        "average_price": "0",
+        "start_amount": "0.001",
+    }
+    engine = Engine(c, client=rest)
+    from bitbank_bot.engine import BotState
+
+    state = BotState(None, RiskManager(c), 0, time.monotonic())
+    candles = synthetic_candles(40)
+    with patch(
+        "bitbank_bot.strategy.Strategy.evaluate",
+        return_value=Signal("BUY1", "buy", Decimal("0.03"), "forced"),
+    ):
+        engine.process_candles(candles, state, execute=True, persist=True)
+    assert state.pending is not None
+    assert state.pending.order_id == "42"
+    assert state.position is None
+    saved = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
+    assert saved["pending"]["order_id"] == "42"
+    rest.create_order.assert_called_once()
+
+    state.last_candle_ts = 0
+    with patch(
+        "bitbank_bot.strategy.Strategy.evaluate",
+        return_value=Signal("BUY1", "buy", Decimal("0.03"), "forced"),
+    ):
+        engine.process_candles(candles, state, execute=True, persist=True)
+    assert engine.last_block_reason == "pending_order"
+    assert rest.create_order.call_count == 1
+
+    rest.get_order.return_value = {
+        "order_id": "42",
+        "status": "FULLY_FILLED",
+        "executed_amount": "0.001",
+        "average_price": "10000000",
+        "start_amount": "0.001",
+    }
+    engine.process_candles(candles, state, execute=True, persist=True)
+    assert state.pending is None
+    assert state.position is not None
+    assert state.position.actual_execution_jpy == Decimal("10000")
+
+
+def test_pending_dataclass_roundtrip() -> None:
+    pending = PendingOrder(
+        order_id="7",
+        side="buy",
+        kind="BUY1",
+        tp_pct=Decimal("0.03"),
+        index=1,
+        timestamp_ms=1,
+        amount=Decimal("0.001"),
+    )
+    assert pending.order_id == "7"
