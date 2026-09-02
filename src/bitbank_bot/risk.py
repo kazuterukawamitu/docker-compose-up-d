@@ -151,7 +151,7 @@ class RiskManager:
         limit = int(self.cfg.circuit_breaker_errors or 0)
         if limit > 0 and self._consecutive_errors >= limit:
             return RiskDecision(False, ZERO, "circuit_breaker", True)
-        if self.cfg.kill_switch or self._operator_killed:
+        if self.operator_killed or Path(self.cfg.kill_switch_path).exists():
             return RiskDecision(False, ZERO, "kill_switch", True)
         capped = min(D(requested_btc), self.max_order_btc)
         return RiskDecision(True, capped, "ok", self.killed)

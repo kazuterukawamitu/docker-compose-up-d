@@ -77,6 +77,19 @@ def test_sell_flattens_free_btc() -> None:
     assert plan.amount == Decimal("0.0123")
 
 
+def test_sell_flattens_min_lot_dust() -> None:
+    c = cfg()
+    plan = plan_sell(
+        available_jpy=Decimal("0"),
+        available_btc=Decimal("0.001"),
+        price=Decimal("10000000"),
+        cfg=c,
+        risk=risk(c),
+    )
+    assert plan.ok
+    assert plan.amount == Decimal("0.001")
+
+
 def test_sizer_class_matches_functions() -> None:
     c = cfg()
     sizer = PositionSizer(c, risk(c))

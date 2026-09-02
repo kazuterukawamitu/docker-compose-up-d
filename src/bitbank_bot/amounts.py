@@ -109,6 +109,9 @@ def plan_sell(
     decision = risk.check_sell(raw)
     raw = min(raw, decision.capped_btc) if decision.allowed else ZERO
     amount = truncate(raw, cfg.amount_precision)
+    leftover = available_btc - amount
+    if ZERO < leftover <= cfg.min_amount_btc:
+        amount = truncate(available_btc, cfg.amount_precision)
     planned = amount * price
     ok = decision.allowed and meets_min_amount(amount, cfg.min_amount_btc)
     if ok:

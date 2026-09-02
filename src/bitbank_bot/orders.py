@@ -228,16 +228,18 @@ class OrderExecutor:
                 True, "accepted_unfilled", False, False, order_id, status, ZERO, ZERO, None, raw
             )
         actual = executed * avg
+        reason = "partial_fill" if status == "PARTIALLY_FILLED" else "fill"
         slog(
-            "FILL",
-            "fill",
+            "FILL" if reason == "fill" else "ORDER_STATUS",
+            "fill" if reason == "fill" else "partial fill; keep polling",
             order_id=order_id,
             executed_amount=str(executed),
             average_price=str(avg),
             actual_execution_jpy=str(actual),
+            status=status,
         )
         return OrderResult(
-            True, "fill", False, False, order_id, status, executed, avg, actual, raw
+            True, reason, False, False, order_id, status, executed, avg, actual, raw
         )
 
     def poll(self, order_id: str, fallback_amount: Decimal) -> OrderResult:
@@ -263,11 +265,13 @@ class OrderExecutor:
                 True, "accepted_unfilled", False, False, order_id, status, ZERO, ZERO, None, raw
             )
         actual = executed * avg
+        reason = "partial_fill" if status == "PARTIALLY_FILLED" else "fill"
         slog(
-            "FILL",
-            "fill after poll",
+            "FILL" if reason == "fill" else "ORDER_STATUS",
+            "fill after poll" if reason == "fill" else "partial fill after poll",
             order_id=order_id,
             executed_amount=str(executed),
             actual_execution_jpy=str(actual),
+            status=status,
         )
-        return OrderResult(True, "fill", False, False, order_id, status, executed, avg, actual, raw)
+        return OrderResult(True, reason, False, False, order_id, status, executed, avg, actual, raw)

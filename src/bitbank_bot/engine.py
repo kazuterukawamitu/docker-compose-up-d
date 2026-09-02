@@ -45,6 +45,7 @@ class PendingOrder:
     index: int
     timestamp_ms: int
     amount: Decimal
+    filled_amount: Decimal = ZERO
 
 
 @dataclass
@@ -54,6 +55,8 @@ class BotState:
     last_candle_ts: int
     started_at: float
     pending: PendingOrder | None = None
+    paper_jpy: Decimal = ZERO
+    paper_btc: Decimal = ZERO
 
 
 def load_state(path: str | Path, cfg: Config) -> BotState:
@@ -61,6 +64,8 @@ def load_state(path: str | Path, cfg: Config) -> BotState:
     position = None
     last_ts = 0
     pending: PendingOrder | None = None
+    paper_jpy = cfg.dry_run_free_jpy
+    paper_btc = cfg.dry_run_free_btc
     p = Path(path)
     if p.exists():
         raw = json.loads(p.read_text(encoding="utf-8"))
@@ -94,8 +99,15 @@ def load_state(path: str | Path, cfg: Config) -> BotState:
                 index=int(pending_raw.get("index") or 0),
                 timestamp_ms=int(pending_raw.get("timestamp_ms") or 0),
                 amount=D(pending_raw.get("amount") or 0),
+                filled_amount=D(pending_raw.get("filled_amount") or 0),
             )
-    return BotState(position, risk, last_ts, time.monotonic(), pending)
+        if raw.get("paper_jpy") not in (None, ""):
+            paper_jpy = D(raw.get("paper_jpy"))
+        if raw.get("paper_btc") not in (None, ""):
+            paper_btc = D(raw.get("paper_btc"))
+    return BotState(
+        position, risk, last_ts, time.monotonic(), pending, paper_jpy, paper_btc
+    )
 
 
 def save_state(path: str | Path, state: BotState) -> None:
@@ -106,6 +118,8 @@ def save_state(path: str | Path, state: BotState) -> None:
         "daily_pnl_date": state.risk.daily_pnl_date,
         "operator_killed": state.risk.operator_killed,
         "last_candle_ts": state.last_candle_ts,
+        "paper_jpy": str(state.paper_jpy),
+        "paper_btc": str(state.paper_btc),
         "position": None,
         "pending": None,
     }
@@ -118,6 +132,7 @@ def save_state(path: str | Path, state: BotState) -> None:
             "index": state.pending.index,
             "timestamp_ms": state.pending.timestamp_ms,
             "amount": str(state.pending.amount),
+            "filled_amount": str(state.pending.filled_amount),
         }
     if state.position:
         payload["position"] = {
@@ -177,13 +192,21 @@ class Engine:
             )
         return self.client
 
-    def _balances(self, rest: RestClient) -> tuple[Decimal, Decimal]:
+    def _balances(self, rest: RestClient, state: BotState | None = None) -> tuple[Decimal, Decimal]:
         if self.cfg.has_keys:
             jpy = rest.free_amount("jpy")
             btc = rest.free_amount("btc")
             slog("ASSET", "free_amount", jpy=str(jpy), btc=str(btc))
             return jpy, btc
-        return self.cfg.dry_run_free_jpy, self.cfg.dry_run_free_btc
+        jpy = self.cfg.dry_run_free_jpy
+        btc = self.cfg.dry_run_free_btc
+        if state is not None and (state.paper_jpy > ZERO or state.paper_btc > ZERO or state.position):
+            jpy = state.paper_jpy
+            btc = state.paper_btc
+        if state is not None and state.position:
+            btc = max(btc, state.position.amount)
+        slog("ASSET", "paper free_amount", jpy=str(jpy), btc=str(btc))
+        return jpy, btc
 
     def _maybe_ws(self) -> None:
         if not self.cfg.enable_websocket or self.ws is not None:
@@ -248,6 +271,16 @@ class Engine:
                     slog("STRATEGY", "candle already processed", candle_ts=snap.timestamp_ms)
                 continue
             if signal.side in {"buy", "sell"}:
+                if not is_last:
+                    slog(
+                        "STRATEGY",
+                        "catchup observe only; no order on historical bar",
+                        candle_ts=snap.timestamp_ms,
+                    )
+                    state.last_candle_ts = snap.timestamp_ms
+                    if persist:
+                        save_state(self.cfg.state_path, state)
+                    continue
                 if state.pending:
                     slog("ORDER_STATUS", "pending live order; skip new signal")
                     self.last_block_reason = "pending_order"
@@ -294,7 +327,7 @@ class Engine:
         if self.ws is not None and not self.ws.is_stale() and self.ws.last_price():
             price = self.ws.last_price() or price
         try:
-            jpy, btc = self._balances(rest)
+            jpy, btc = self._balances(rest, state)
         except BitbankAPIError as exc:
             _LOG.exception("balance fetch failed on order path")
             if is_auth_error(exc):
@@ -365,13 +398,27 @@ class Engine:
                 order_id=pending.order_id,
             )
             return
-        if result.executed_amount <= ZERO:
+        if result.executed_amount <= pending.filled_amount:
             slog(
                 "ORDER_STATUS",
                 "pending still unfilled; skip new orders",
                 order_id=pending.order_id,
             )
             return
+        delta = result.executed_amount - pending.filled_amount
+        avg = result.average_price
+        delta_result = OrderResult(
+            True,
+            result.reason,
+            False,
+            False,
+            pending.order_id,
+            result.status,
+            delta,
+            avg,
+            delta * avg if avg else ZERO,
+            result.raw,
+        )
         signal = Signal(pending.kind, pending.side, pending.tp_pct, "pending_fill")
         plan = AmountPlan(
             side=pending.side,
@@ -388,13 +435,17 @@ class Engine:
             reason="pending_poll",
         )
         try:
-            jpy, btc = self._balances(rest)
+            jpy, btc = self._balances(rest, state)
         except Exception:
             jpy, btc = ZERO, ZERO
-        state.pending = None
+        pending.filled_amount = result.executed_amount
+        if result.reason != "partial_fill":
+            state.pending = None
         self._apply_fill(
-            signal, plan, result, pending.index, pending.timestamp_ms, state, jpy, btc
+            signal, plan, delta_result, pending.index, pending.timestamp_ms, state, jpy, btc
         )
+        if result.reason == "partial_fill":
+            state.pending = pending
 
     def _set_watchdog(
         self,
@@ -441,6 +492,7 @@ class Engine:
                 index=index,
                 timestamp_ms=ts,
                 amount=plan.amount,
+                filled_amount=ZERO,
             )
             slog(
                 "ORDER_STATUS",
@@ -451,7 +503,6 @@ class Engine:
             return
         if not result.ok or result.executed_amount <= ZERO:
             return
-        state.pending = None
         actual_jpy = result.actual_execution_jpy
         if actual_jpy is None:
             slog("ERROR", "fill missing actual_execution_jpy; ignoring TARGET/PLANNED")
@@ -467,21 +518,65 @@ class Engine:
             actual_balance_btc=str(btc),
             bitbank_jpy_unchanged=bool(self.cfg.dry_run or result.simulated),
         )
+        if result.simulated or (self.cfg.dry_run and not self.cfg.has_keys):
+            if state.paper_jpy <= ZERO and state.paper_btc <= ZERO:
+                state.paper_jpy = jpy
+                state.paper_btc = btc
+            if signal.side == "buy":
+                state.paper_btc += result.executed_amount
+                state.paper_jpy = max(ZERO, state.paper_jpy - actual_jpy)
+            elif signal.side == "sell":
+                state.paper_btc = max(ZERO, state.paper_btc - result.executed_amount)
+                state.paper_jpy += actual_jpy
         if signal.side == "buy":
             tp = signal.tp_pct if signal.tp_pct is not None else self.cfg.buy1_tp
-            state.position = Position(
-                amount=result.executed_amount,
-                average_price=result.average_price,
-                tp_pct=tp,
-                entry_candle_index=index,
-                entry_candle_ts=ts,
-                actual_execution_jpy=actual_jpy,
-                kind=signal.kind,
-            )
+            if state.position:
+                total_amt = state.position.amount + result.executed_amount
+                total_jpy = state.position.actual_execution_jpy + actual_jpy
+                avg = (total_jpy / total_amt) if total_amt > ZERO else result.average_price
+                state.position = Position(
+                    amount=total_amt,
+                    average_price=avg,
+                    tp_pct=state.position.tp_pct,
+                    entry_candle_index=state.position.entry_candle_index,
+                    entry_candle_ts=state.position.entry_candle_ts,
+                    actual_execution_jpy=total_jpy,
+                    kind=state.position.kind,
+                )
+            else:
+                state.position = Position(
+                    amount=result.executed_amount,
+                    average_price=result.average_price,
+                    tp_pct=tp,
+                    entry_candle_index=index,
+                    entry_candle_ts=ts,
+                    actual_execution_jpy=actual_jpy,
+                    kind=signal.kind,
+                )
         elif signal.side == "sell" and state.position:
-            pnl = actual_jpy - state.position.actual_execution_jpy
-            state.risk.record_realized_pnl(pnl)
-            state.position = None
+            pos_amt = state.position.amount
+            if pos_amt <= ZERO or result.executed_amount >= pos_amt:
+                state.risk.record_realized_pnl(actual_jpy - state.position.actual_execution_jpy)
+                state.position = None
+            else:
+                cost = state.position.actual_execution_jpy * (result.executed_amount / pos_amt)
+                state.risk.record_realized_pnl(actual_jpy - cost)
+                state.position.amount = pos_amt - result.executed_amount
+                state.position.actual_execution_jpy -= cost
+        if result.reason == "partial_fill" and result.order_id:
+            already = state.pending.filled_amount if state.pending else ZERO
+            state.pending = PendingOrder(
+                order_id=result.order_id,
+                side=signal.side or "",
+                kind=signal.kind,
+                tp_pct=signal.tp_pct,
+                index=index,
+                timestamp_ms=ts,
+                amount=plan.amount,
+                filled_amount=already + result.executed_amount,
+            )
+        elif result.reason != "partial_fill":
+            state.pending = None
 
     def run_once(self, *, synthetic: bool = False, skip_preflight: bool = False) -> int:
         slog("BOOT", "run_once", synthetic=synthetic, dry_run=self.cfg.dry_run)
@@ -495,7 +590,14 @@ class Engine:
         candles = synthetic_candles() if synthetic else fetch_candles(rest, self.cfg)
         if synthetic:
             slog("MARKET", "using synthetic candles", count=len(candles))
-            state = BotState(None, RiskManager(self.cfg), 0, time.monotonic())
+            state = BotState(
+                None,
+                RiskManager(self.cfg),
+                0,
+                time.monotonic(),
+                paper_jpy=self.cfg.dry_run_free_jpy,
+                paper_btc=self.cfg.dry_run_free_btc,
+            )
         else:
             candles = self.cache.merge(candles)
             state = load_state(self.cfg.state_path, self.cfg)
@@ -579,7 +681,6 @@ class Engine:
                     rest, latest_only=latest_only, force_synthetic=synthetic
                 )
                 self._refresh_public_last(rest)
-                candles = self.cache.merge(incoming)
                 accidental_synthetic = (
                     self.used_synthetic_fallback and not self._explicit_synthetic
                 )
@@ -589,6 +690,9 @@ class Engine:
                         "FAIL",
                         reason="synthetic_fallback_no_orders",
                     )
+                    candles = list(self.cache.candles) if self.cache.candles else incoming
+                else:
+                    candles = self.cache.merge(incoming)
                 signal = self.process_candles(
                     candles,
                     state,

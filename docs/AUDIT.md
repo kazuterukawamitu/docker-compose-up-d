@@ -44,6 +44,15 @@ bitFlyer, Coincheck, and GMO are not imported and are not executed.
    the order path and names the field (never secrets).
 6. **Missing state file.** `load_state` always initializes `pending` so a first
    boot cannot raise `NameError`.
+7. **Audit script import path.** `python3 scripts/bitbank_execution_audit.py`
+   adds `src/` itself; it no longer requires `PYTHONPATH`.
+8. **Paper sells.** DRY_RUN sizes sells from the paper position, not static
+   `DRY_RUN_FREE_BTC=0`, and flattens leftover dust at or below the min lot.
+9. **Synthetic cache.** Accidental fallback bars are not merged into
+   `CandleCache`, so a later real fetch cannot trade on mixed fake MAs.
+10. **Partial fills.** `PARTIALLY_FILLED` stays in `state.pending` and is polled
+    until the remainder fills.
+11. **Kill file.** `data/KILL` blocks sells as well as buys.
 
 ## What this bot does not do
 

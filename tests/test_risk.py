@@ -26,6 +26,9 @@ def test_kill_file_blocks(tmp_path: Path) -> None:
     buy = r.check_buy(Decimal("0"), Decimal("0.01"))
     assert not buy.allowed
     assert buy.reason == "kill_switch"
+    sell = r.check_sell(Decimal("0.01"))
+    assert not sell.allowed
+    assert sell.reason == "kill_switch"
 
 
 def test_max_position() -> None:
