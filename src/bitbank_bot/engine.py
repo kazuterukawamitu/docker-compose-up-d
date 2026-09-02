@@ -434,7 +434,6 @@ class Engine:
                 )
                 last_ok = time.monotonic()
                 last = str(candles[-1].close) if candles else "-"
-                self._heartbeat(state, signal, last)
                 if signal.kind == "HOLD" or signal.side is None:
                     slog(
                         "WATCHDOG",
@@ -444,6 +443,7 @@ class Engine:
                     )
                     self.last_watchdog = "NORMAL WAIT"
                 self.cycles += 1
+                self._heartbeat(state, signal, last)
                 if max_cycles is not None and self.cycles >= max_cycles:
                     slog("BOOT", "max_cycles reached", cycles=self.cycles)
                     break
