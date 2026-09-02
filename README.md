@@ -8,7 +8,7 @@ HOLD for 15 minutes while market data and strategy are healthy is `LONG_WAIT`, n
 
 ## Start (this is the program)
 
-`main` on GitHub is wiki HTML. You do **not** need pip, venv, or `httpx`.
+You do **not** need pip, venv, or `httpx`.
 
 Paste **this one line** in iTerm. It starts a 取引画面 and places real Bitbank orders when `.env` has API keys:
 
