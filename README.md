@@ -6,21 +6,25 @@ Bitbank-only `btc_jpy` bot. Default is a **continuous DRY_RUN loop** with an iTe
 
 HOLD for 15 minutes while market data and strategy are healthy is `LONG_WAIT`, not a crash. Public-API fallback candles never place orders. Live UNFILLED limits are persisted and polled. New BUY is blocked when both 4h and 1d SMA slopes are down (`ENABLE_HTF_FILTER`).
 
-## Start (paste this ONE line in iTerm)
+## Start (this is the program)
 
-iTerm’s default shell is zsh. Paste **exactly** this one line. Do not paste `python3 main.py`. Do not use `!`.
+`main` on GitHub is wiki HTML. You do **not** need pip, venv, or `start.sh` for the bot to run.
 
-```bash
-bash -lc 'REPO="$HOME/docker-compose-up-d"; set -euo pipefail; if [ ! -d "$REPO/.git" ]; then git clone https://github.com/kazuterukawamitu/docker-compose-up-d.git "$REPO"; fi; cd "$REPO"; git fetch origin cursor/bitbank-audit-unify-f5fd; git checkout -B cursor/bitbank-audit-unify-f5fd origin/cursor/bitbank-audit-unify-f5fd; exec bash ./start.sh --screen'
-```
-
-That command clones if needed, **checks out the bot branch**, creates `.venv`, then opens the trading screen (pair, last price, MA, signal, position, DRY_RUN). You should see `Bitbank  BTC/JPY  取引画面` fill the terminal. Stop with Ctrl-C.
-
-If the repo is already on this branch:
+Paste **this one line** in iTerm. It downloads `run.py` and starts a DRY_RUN 取引画面 (no orders):
 
 ```bash
-bash "$HOME/docker-compose-up-d/start.sh" --screen
+curl -fsSL https://raw.githubusercontent.com/kazuterukawamitu/docker-compose-up-d/cursor/bitbank-audit-unify-f5fd/run.py -o "$HOME/bitbank_run.py" && python3 "$HOME/bitbank_run.py"
 ```
+
+You should see `Bitbank  BTC/JPY  取引画面`. HOLD/待機 is normal. Stop with Ctrl-C.
+
+If this repo is already checked out on this branch:
+
+```bash
+python3 run.py
+```
+
+`python3 main.py` also works: it uses the full package when httpx is installed, otherwise the same stdlib `run.py`.
 
 Live trading stays **off** unless `.env` has `DRY_RUN=false` **and** `LIVE_TRADING=true` **and** both API keys.
 

@@ -19,6 +19,10 @@ runnable bot lives in `src/bitbank_bot/`. This branch is Bitbank `btc_jpy` only.
 | Watchdog | `watchdog.py` | HOLD past 15 minutes is `LONG_WAIT`, not `FAIL` |
 | Read-only audit | `scripts/bitbank_execution_audit.py` | ticker / assets / active_orders / trade_history |
 
+`run.py` is a stdlib-only DRY_RUN 取引画面. It is the program that
+runs with plain `python3` when pip/httpx/the feature-branch checkout
+are missing. It never calls `create_order`.
+
 bitFlyer, Coincheck, and GMO are not imported and are not executed.
 
 ## Redundancies (kept on purpose)

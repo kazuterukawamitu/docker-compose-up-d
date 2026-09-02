@@ -126,8 +126,14 @@ if ! "$VPY" -c "import dotenv, httpx" >/dev/null 2>&1; then
 fi
 if [[ "$need_install" -eq 1 ]]; then
   echo "installing dependencies"
+  set +e
   install_reqs
-  "$VPY" -c "import dotenv, httpx" >/dev/null
+  set -e
+fi
+
+if ! "$VPY" -c "import dotenv, httpx" >/dev/null 2>&1; then
+  echo "pip packages missing; starting stdlib DRY_RUN (python3 run.py, no orders)"
+  exec "$PY" "$ROOT/run.py" "$@"
 fi
 
 if [[ ! -f "$ROOT/.env" ]]; then
