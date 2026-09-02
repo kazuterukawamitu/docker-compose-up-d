@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Bitbank BTC/JPY DRY_RUN launcher (continuous loop).
+# Bitbank BTC/JPY launcher — opens the iTerm 取引画面 (trading screen).
 #
-# Paste this ONE line in iTerm — not a stack of commands:
-#   bash ~/docker-compose-up-d/start.sh
+# Paste this ONE line in iTerm (zsh is fine; this wraps bash):
+#   bash -lc 'REPO="$HOME/docker-compose-up-d"; set -euo pipefail; if [ ! -d "$REPO/.git" ]; then git clone https://github.com/kazuterukawamitu/docker-compose-up-d.git "$REPO"; fi; cd "$REPO"; git fetch origin cursor/bitbank-btc-jpy-bot-6c41; git checkout -B cursor/bitbank-btc-jpy-bot-6c41 origin/cursor/bitbank-btc-jpy-bot-6c41; exec bash ./start.sh --screen'
 #
-# Do not chmod from ~. Do not run python3 main.py with Apple's system
-# interpreter; this script uses .venv/bin/python after installing deps.
+# That line clones if needed, checks out the bot branch (main is wiki HTML only),
+# then opens the trading dashboard. Do not paste python3 main.py. Do not use !.
 
 if [ -z "${BASH_VERSION:-}" ]; then
   exec /usr/bin/env bash "$0" "$@"
@@ -13,25 +13,53 @@ fi
 
 set -euo pipefail
 
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:${PATH:-}"
+export PYTHONUNBUFFERED=1
+export PYTHONIOENCODING=utf-8
+
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT"
 
-if [[ ! -f "$ROOT/src/bitbank_bot/__init__.py" || ! -f "$ROOT/main.py" ]]; then
-  echo "bitbank_bot source not found at $ROOT" >&2
-  echo "Clone, then paste this ONE line:" >&2
-  echo "  git clone https://github.com/kazuterukawamitu/docker-compose-up-d.git && bash ~/docker-compose-up-d/start.sh" >&2
-  exit 2
-fi
+BOT_BRANCH="cursor/bitbank-btc-jpy-bot-6c41"
+
+ensure_bot_source() {
+  if [[ -f "$ROOT/src/bitbank_bot/__init__.py" && -f "$ROOT/main.py" ]]; then
+    return 0
+  fi
+  echo "bot source not found at $ROOT (this clone is probably still on main / wiki dump)" >&2
+  if [[ ! -d "$ROOT/.git" ]]; then
+    echo "Paste this ONE line in iTerm:" >&2
+    echo "  bash -lc 'git clone https://github.com/kazuterukawamitu/docker-compose-up-d.git \"\$HOME/docker-compose-up-d\" && bash \"\$HOME/docker-compose-up-d/start.sh\" --screen'" >&2
+    exit 2
+  fi
+  echo "fetching $BOT_BRANCH so the trading screen can start" >&2
+  git fetch origin "$BOT_BRANCH"
+  git checkout -B "$BOT_BRANCH" "origin/$BOT_BRANCH"
+  if [[ ! -f "$ROOT/src/bitbank_bot/__init__.py" || ! -f "$ROOT/main.py" ]]; then
+    echo "still no bitbank_bot after checkout; branch may not be fetched" >&2
+    exit 2
+  fi
+}
+
+ensure_bot_source
 
 pick_python() {
   local c
-  for c in python3.12 python3 python; do
+  for c in \
+    /opt/homebrew/bin/python3.12 \
+    /usr/local/bin/python3.12 \
+    python3.12 \
+    /opt/homebrew/bin/python3 \
+    /usr/local/bin/python3 \
+    python3 \
+    python
+  do
     if command -v "$c" >/dev/null 2>&1; then
       echo "$c"
       return 0
     fi
   done
-  echo "python3 not found" >&2
+  echo "python3 not found. On a Mac: brew install python@3.12" >&2
   return 1
 }
 
@@ -40,6 +68,7 @@ PY_MAJ="$("$PY" -c 'import sys; print(sys.version_info.major)')"
 PY_MIN="$("$PY" -c 'import sys; print(sys.version_info.minor)')"
 if [[ "$PY_MAJ" -lt 3 || ( "$PY_MAJ" -eq 3 && "$PY_MIN" -lt 9 ) ]]; then
   echo "Python 3.9+ is required (found $PY $($PY -V 2>&1))." >&2
+  echo "On a Mac: brew install python@3.12" >&2
   exit 2
 fi
 if [[ "$PY_MAJ" -eq 3 && "$PY_MIN" -lt 12 ]]; then
@@ -85,8 +114,9 @@ install_reqs() {
     "$PY" -m pip install -q -r "$ROOT/requirements.txt" --target "$SITE"
     return
   fi
-  echo "pip is not available. On Debian: sudo apt install python3-venv python3-pip" >&2
+  echo "pip is not available." >&2
   echo "On a Mac with Homebrew: brew install python@3.12" >&2
+  echo "On Debian: sudo apt install python3-venv python3-pip" >&2
   exit 2
 }
 
@@ -109,9 +139,38 @@ fi
 
 export PYTHONPATH="$ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
 
-echo "starting Bitbank BTC/JPY DRY_RUN loop (Ctrl-C to stop)"
-echo "HOLD/WAIT on a bar is normal — the bot keeps running."
+want_screen=0
+if [[ -t 1 ]]; then
+  want_screen=1
+fi
+for a in "$@"; do
+  case "$a" in
+    --once|--check-config|--preflight|--backtest|--no-screen)
+      want_screen=0
+      ;;
+    --screen)
+      want_screen=1
+      ;;
+  esac
+done
+
+SCREEN_ARGS=()
+if [[ "$want_screen" -eq 1 ]]; then
+  has_screen=0
+  for a in "$@"; do
+    if [[ "$a" == "--screen" ]]; then
+      has_screen=1
+    fi
+  done
+  if [[ "$has_screen" -eq 0 ]]; then
+    SCREEN_ARGS=(--screen)
+  fi
+fi
+
+echo "opening Bitbank BTC/JPY 取引画面 (Ctrl-C to stop)"
+echo "HOLD/WAIT is normal. JSON detail is logs/bot.log"
 echo "using $VPY"
 
-# Default (no extra args): continuous loop. Do not pass --once here.
-exec "$VPY" "$ROOT/main.py" "$@"
+# Default (no extra args): continuous loop + trading screen on a TTY.
+# Do not pass --once here.
+exec "$VPY" "$ROOT/main.py" "${SCREEN_ARGS[@]}" "$@"

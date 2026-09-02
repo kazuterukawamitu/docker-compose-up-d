@@ -27,6 +27,7 @@ from bitbank_bot.orders import OrderExecutor, OrderResult
 from bitbank_bot.preflight import preflight
 from bitbank_bot.rest_client import BitbankAPIError, RestClient, is_auth_error
 from bitbank_bot.risk import RiskManager
+from bitbank_bot.screen import TradingScreen, view_from_engine
 from bitbank_bot.strategy import Position, Signal, Strategy, build_snapshots
 from bitbank_bot.websocket_client import BitbankWebsocket
 
@@ -94,9 +95,15 @@ def save_state(path: str | Path, state: BotState) -> None:
 
 
 class Engine:
-    def __init__(self, cfg: Config, client: RestClient | None = None) -> None:
+    def __init__(
+        self,
+        cfg: Config,
+        client: RestClient | None = None,
+        screen: TradingScreen | None = None,
+    ) -> None:
         self.cfg = cfg
         self.client = client
+        self.screen = screen
         self._stop = False
         self.ws: BitbankWebsocket | None = None
         self.cache = CandleCache(cfg.ma_period)
@@ -105,6 +112,12 @@ class Engine:
         self.cycles = 0
         self.used_synthetic_fallback = False
         self.last_watchdog = ""
+        self.last_close: Decimal | str = "-"
+        self.last_ma: Decimal | str = "-"
+        self.last_trend = "-"
+        self.last_signal = Signal.hold("starting")
+        self.last_public_last: str = "-"
+        self.last_error = ""
 
     def request_stop(self, *_args: object) -> None:
         slog("BOOT", "shutdown requested")
@@ -158,9 +171,14 @@ class Engine:
         snaps = build_snapshots(closes, stamps, self.cfg)
         if not snaps:
             slog("STRATEGY", "not enough candles for MA")
-            return Signal.hold("not_enough_candles")
+            hold = Signal.hold("not_enough_candles")
+            self.last_signal = hold
+            return hold
         strategy = Strategy(self.cfg)
         last = snaps[-1]
+        self.last_close = last.close
+        self.last_ma = last.ma
+        self.last_trend = last.ma_trend.value
         slog(
             "MARKET",
             "MARKET DATA OK",
@@ -196,6 +214,7 @@ class Engine:
             state.last_candle_ts = snap.timestamp_ms
             if persist:
                 save_state(self.cfg.state_path, state)
+        self.last_signal = signal
         return signal
 
     def _execute(
@@ -378,6 +397,8 @@ class Engine:
             synthetic=synthetic,
         )
         rest = self._rest()
+        if self.screen is not None:
+            self.screen.boot("公開ティッカーと足を取得しています…")
         require_public = not (synthetic or self.cfg.dry_run)
         result = preflight(self.cfg, rest, require_public=require_public)
         if not result.ok:
@@ -403,6 +424,7 @@ class Engine:
                 incoming = self._candles_for_cycle(
                     rest, latest_only=latest_only, force_synthetic=synthetic
                 )
+                self._refresh_public_last(rest)
                 candles = self.cache.merge(incoming)
                 signal = self.process_candles(
                     candles,
@@ -475,6 +497,45 @@ class Engine:
         slog("HEARTBEAT", "MARKET DATA OK")
         slog("HEARTBEAT", "ORDER MANAGER OK")
         slog("HEARTBEAT", "RISK MANAGER OK")
+        self._paint(state, signal, last)
+
+    def _refresh_public_last(self, rest: RestClient) -> None:
+        try:
+            ticker = rest.get_ticker(self.cfg.pair)
+            last = ticker.get("last")
+            if last not in (None, ""):
+                self.last_public_last = str(last)
+                self.last_error = ""
+        except Exception as exc:
+            self.last_error = type(exc).__name__
+
+    def _paint(self, state: BotState, signal: Signal, last: str = "-") -> None:
+        if self.screen is None:
+            return
+        pos = state.position
+        view = view_from_engine(
+            pair=self.cfg.pair,
+            dry_run=self.cfg.dry_run,
+            live_orders=self.cfg.may_place_live_orders,
+            price=last if last != "-" else self.last_close,
+            public_last=self.last_public_last,
+            ma=self.last_ma,
+            trend=self.last_trend,
+            signal_kind=signal.kind,
+            signal_reason=signal.reason,
+            in_position=bool(pos),
+            position_amount=pos.amount if pos else ZERO,
+            position_avg=pos.average_price if pos else ZERO,
+            position_tp=pos.tp_pct if pos else "",
+            watchdog=self.last_watchdog or "NORMAL WAIT",
+            ws_ok=bool(self.ws and self.ws.is_connected()),
+            cycles=self.cycles,
+            uptime_sec=int(time.monotonic() - state.started_at),
+            block_reason=self.last_block_reason,
+            error=self.last_error,
+            candle_type=self.cfg.candle_type,
+        )
+        self.screen.render(view)
 
 
 def install_signal_handlers(engine: Engine) -> None:
