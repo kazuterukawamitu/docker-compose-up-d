@@ -36,3 +36,9 @@ Priority: **SELL > TAKE_PROFIT > BUY**. No sell on the entry candle. HOLD always
 | R8 / SELL4 | Price was **≥4% below** the MA, rose **without reaching** the MA, then fell again |
 
 Trend uses `slope = (ma - prev_ma) / prev_ma` versus `MA_SLOPE_THRESHOLD=0.0005`.
+
+## Higher-timeframe filter (not a second strategy)
+
+When `ENABLE_HTF_FILTER=true` (default), a **new BUY** is blocked if the 4-hour
+and 1-day SMA slopes are both DOWN, or if those candles cannot be read. Sells
+and take-profit are unchanged. `--synthetic` smoke tests skip this filter.
