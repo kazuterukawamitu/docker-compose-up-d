@@ -148,9 +148,8 @@ fi
 
 if ! "$VPY" -c "import dotenv, httpx" >/dev/null 2>&1; then
   if [[ "$wants_live" -eq 1 ]]; then
-    echo "LIVE refused: pip packages missing. run.py cannot place orders." >&2
-    echo "pip install -r requirements.txt then: bash live.sh" >&2
-    exit 2
+    echo "full package missing; starting stdlib live trader (python3 trade.py --live)" >&2
+    exec "$PY" "$ROOT/trade.py" --live "$@"
   fi
   echo "pip packages missing; starting stdlib DRY_RUN (python3 run.py, no orders)"
   exec "$PY" "$ROOT/run.py" "$@"

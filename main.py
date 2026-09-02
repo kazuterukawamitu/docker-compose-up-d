@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""Repo-root launcher. Prefers the full package; falls back to stdlib run.py.
+"""Repo-root launcher. Prefers the full package; stdlib fallback otherwise.
 
-    python3 main.py
-    python3 run.py
-
-Both stay DRY_RUN. Neither places a Bitbank order.
+    python3 main.py          # DRY_RUN (run.py if httpx missing)
+    python3 trade.py --live  # real orders when .env has keys
+    python3 run.py           # paper screen, never orders
 """
 
 from __future__ import annotations
@@ -43,15 +42,16 @@ def _wants_live(argv: list[str]) -> bool:
     return dry.strip().lower() in {"0", "false", "no", "off"}
 
 
-def _stdlib() -> int:
-    path = ROOT / "run.py"
+def _stdlib(path: Path, argv: list[str] | None = None) -> int:
     spec = importlib.util.spec_from_file_location("bitbank_stdlib_run", path)
     if spec is None or spec.loader is None:
-        sys.stderr.write("run.py is missing; cannot start\n")
+        sys.stderr.write(f"{path.name} is missing; cannot start\n")
         return 2
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    return int(module.main())
+    if argv is None:
+        return int(module.main())
+    return int(module.main(argv))
 
 
 def _launch() -> int:
@@ -60,15 +60,24 @@ def _launch() -> int:
         import httpx  # noqa: F401
         from bitbank_bot.main import main
     except ModuleNotFoundError:
-        if _wants_live(argv):
-            sys.stderr.write(
-                "LIVE refused: httpx/dotenv missing. "
-                "run.py cannot place orders. pip install -r requirements.txt "
-                "then: bash live.sh\n"
-            )
-            return 2
+        if (
+            _wants_live(argv)
+            and "--synthetic" not in argv
+            and "--dry-run" not in argv
+        ):
+            if any(flag in argv for flag in ("--check-config", "--preflight", "--backtest")):
+                sys.stderr.write(
+                    "LIVE check needs httpx. pip install -r requirements.txt "
+                    "or run: python3 trade.py --live\n"
+                )
+                return 2
+            live_argv = list(argv)
+            if "--live" not in live_argv and "--require-live" not in live_argv:
+                live_argv.insert(0, "--live")
+            sys.stderr.write("full package/deps missing; starting stdlib trade.py --live\n")
+            return _stdlib(ROOT / "trade.py", live_argv)
         sys.stderr.write("full package/deps missing; starting stdlib DRY_RUN (run.py)\n")
-        return _stdlib()
+        return _stdlib(ROOT / "run.py")
     return int(main())
 
 

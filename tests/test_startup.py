@@ -16,6 +16,7 @@ def test_compileall_src() -> None:
         py_compile.compile(str(path), doraise=True)
     py_compile.compile(str(root / "main.py"), doraise=True)
     py_compile.compile(str(root / "run.py"), doraise=True)
+    py_compile.compile(str(root / "trade.py"), doraise=True)
     diag = root / "diagnostics.py"
     if diag.is_file():
         py_compile.compile(str(diag), doraise=True)
@@ -98,11 +99,17 @@ def test_live_sh_refuses_run_py_fallback() -> None:
     text = Path(__file__).resolve().parents[1].joinpath("live.sh").read_text(encoding="utf-8")
     assert "--require-live" in text
     assert "live.env.example" in text
+    assert "trade.py" in text
     assert "exec" in text
-    after_exec = text.rsplit("exec", 1)[-1]
-    assert "run.py" not in after_exec
-    assert "main.py" in after_exec
-    assert "--once" not in after_exec
+    exec_chunks = text.split("exec")[1:]
+    assert exec_chunks, "live.sh must exec a process"
+    for chunk in exec_chunks:
+        assert "run.py" not in chunk
+    assert "main.py" in text
+    assert "--live" in text
+    last = exec_chunks[-1]
+    assert "trade.py" in last
+    assert "--once" not in last
 
 
 def test_main_py_runs_without_pythonpath(tmp_path) -> None:
