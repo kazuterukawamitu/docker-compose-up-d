@@ -2,7 +2,7 @@
 # Bitbank BTC/JPY launcher — opens the iTerm 取引画面 (trading screen).
 #
 # Paste this ONE line in iTerm (zsh is fine; this wraps bash):
-#   bash -lc 'REPO="$HOME/docker-compose-up-d"; set -euo pipefail; if [ ! -d "$REPO/.git" ]; then git clone https://github.com/kazuterukawamitu/docker-compose-up-d.git "$REPO"; fi; cd "$REPO"; git fetch origin cursor/bitbank-audit-unify-f5fd; git checkout -B cursor/bitbank-audit-unify-f5fd origin/cursor/bitbank-audit-unify-f5fd; exec bash ./start.sh --screen'
+#   bash -lc 'REPO="$HOME/docker-compose-up-d"; set -euo pipefail; if [ ! -d "$REPO/.git" ]; then git clone https://github.com/kazuterukawamitu/docker-compose-up-d.git "$REPO"; fi; cd "$REPO"; git fetch origin cursor/bitbank-trade-live-f5fd; git checkout -B cursor/bitbank-trade-live-f5fd origin/cursor/bitbank-trade-live-f5fd; exec bash ./start.sh --screen'
 #
 # That line clones if needed, checks out the bot branch (main is wiki HTML only),
 # then opens the trading dashboard. Do not paste python3 main.py. Do not use !.
@@ -20,7 +20,7 @@ export PYTHONIOENCODING=utf-8
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT"
 
-BOT_BRANCH="cursor/bitbank-audit-unify-f5fd"
+BOT_BRANCH="cursor/bitbank-trade-live-f5fd"
 
 ensure_bot_source() {
   if [[ -f "$ROOT/src/bitbank_bot/__init__.py" && -f "$ROOT/main.py" ]]; then
@@ -131,7 +131,26 @@ if [[ "$need_install" -eq 1 ]]; then
   set -e
 fi
 
+wants_live=0
+for a in "$@"; do
+  if [[ "$a" == "--require-live" ]]; then
+    wants_live=1
+  fi
+done
+if [[ -f "$ROOT/.env" ]]; then
+  if grep -E '^[[:space:]]*LIVE_TRADING=([Tt]rue|1|yes|on)' "$ROOT/.env" >/dev/null 2>&1; then
+    wants_live=1
+  fi
+  if grep -E '^[[:space:]]*DRY_RUN=([Ff]alse|0|no|off)' "$ROOT/.env" >/dev/null 2>&1; then
+    wants_live=1
+  fi
+fi
+
 if ! "$VPY" -c "import dotenv, httpx" >/dev/null 2>&1; then
+  if [[ "$wants_live" -eq 1 ]]; then
+    echo "full package missing; starting stdlib live trader (python3 trade.py --live)" >&2
+    exec "$PY" "$ROOT/trade.py" --live "$@"
+  fi
   echo "pip packages missing; starting stdlib DRY_RUN (python3 run.py, no orders)"
   exec "$PY" "$ROOT/run.py" "$@"
 fi
