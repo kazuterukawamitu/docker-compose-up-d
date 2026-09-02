@@ -1,20 +1,29 @@
 # Bitbank BTC/JPY spot bot
 
-Bitbank-only `btc_jpy` bot. Default is a **continuous DRY_RUN loop** (paper signals, **no live orders**). HOLD/WAIT on a bar is normal — the process keeps running.
+Bitbank-only `btc_jpy` bot. Default is a **continuous DRY_RUN loop** with an iTerm **取引画面** (trading dashboard). HOLD/WAIT on a bar is normal. JSON lines are written to `logs/bot.log`, not the dashboard.
+
+`main` on GitHub is still wiki HTML. The runnable bot is branch `cursor/bitbank-btc-jpy-bot-6c41`.
 
 ## Start (paste this ONE line in iTerm)
 
+iTerm’s default shell is zsh. Paste **exactly** this one line. Do not paste `python3 main.py`. Do not use `!`.
+
 ```bash
-bash ~/docker-compose-up-d/start.sh
+bash -lc 'REPO="$HOME/docker-compose-up-d"; set -euo pipefail; if [ ! -d "$REPO/.git" ]; then git clone https://github.com/kazuterukawamitu/docker-compose-up-d.git "$REPO"; fi; cd "$REPO"; git fetch origin cursor/bitbank-btc-jpy-bot-6c41; git checkout -B cursor/bitbank-btc-jpy-bot-6c41 origin/cursor/bitbank-btc-jpy-bot-6c41; exec bash ./start.sh --screen'
 ```
 
-Do **not** paste a stack of commands. Do **not** run `python3 main.py` with macOS system Python (that causes `ModuleNotFoundError: dotenv`). `start.sh` cds into the clone, creates `.venv`, installs deps, copies `.env.example` → `.env` if needed, then starts the loop with `.venv/bin/python`.
+That command clones if needed, **checks out the bot branch**, creates `.venv`, then opens the trading screen (pair, last price, MA, signal, position, DRY_RUN). You should see `Bitbank  BTC/JPY  取引画面` fill the terminal. Stop with Ctrl-C.
 
-Stop with Ctrl-C.
+If the repo is already on this branch:
+
+```bash
+bash "$HOME/docker-compose-up-d/start.sh" --screen
+```
+
+Live trading stays **off** unless `.env` has `DRY_RUN=false` **and** `LIVE_TRADING=true` **and** both API keys.
 
 `--once --synthetic` is a one-cycle smoke test that **exits on purpose**. The launcher above does **not** use `--once`.
 
-Live trading stays **off** unless `.env` has `DRY_RUN=false` **and** `LIVE_TRADING=true` **and** both API keys.
 
 ## Strategy (from original README)
 

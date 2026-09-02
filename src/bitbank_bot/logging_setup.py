@@ -38,17 +38,23 @@ class _RedactFilter(logging.Filter):
         return True
 
 
-def setup_logging(level: str = "INFO", log_dir: str = "logs") -> None:
+def setup_logging(
+    level: str = "INFO",
+    log_dir: str = "logs",
+    *,
+    console: bool = True,
+) -> None:
     global _CONFIGURED
     Path(log_dir).mkdir(parents=True, exist_ok=True)
     root = logging.getLogger("bitbank_bot")
     root.setLevel(getattr(logging, level.upper(), logging.INFO))
     root.handlers.clear()
     formatter = logging.Formatter("%(message)s")
-    stream = logging.StreamHandler(sys.stdout)
-    stream.setFormatter(formatter)
-    stream.addFilter(_RedactFilter())
-    root.addHandler(stream)
+    if console:
+        stream = logging.StreamHandler(sys.stdout)
+        stream.setFormatter(formatter)
+        stream.addFilter(_RedactFilter())
+        root.addHandler(stream)
     file_handler = logging.FileHandler(Path(log_dir) / "bot.log", encoding="utf-8")
     file_handler.setFormatter(formatter)
     file_handler.addFilter(_RedactFilter())

@@ -11,6 +11,7 @@ from bitbank_bot.instance_lock import InstanceLock, InstanceLockError
 from bitbank_bot.logging_setup import setup_logging, slog
 from bitbank_bot.preflight import preflight
 from bitbank_bot.rest_client import RestClient
+from bitbank_bot.screen import TradingScreen, should_use_screen
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -32,6 +33,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--backtest",
         action="store_true",
         help="replay README rules on synthetic candles (no orders) and exit",
+    )
+    parser.add_argument(
+        "--screen",
+        action="store_true",
+        help="iTerm trading dashboard (default when stdout is a TTY)",
+    )
+    parser.add_argument(
+        "--no-screen",
+        action="store_true",
+        help="JSON lines on stdout instead of the trading dashboard",
     )
     parser.add_argument("--skip-lock", action="store_true", help="skip instance lock")
     parser.add_argument("--env-file", default=None, help="optional .env path")
@@ -59,7 +70,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.dry_run:
         cfg.dry_run = True
         cfg.live_trading = False
-    setup_logging(cfg.log_level, cfg.log_dir)
+    use_screen = should_use_screen(args, sys.stdout)
+    setup_logging(cfg.log_level, cfg.log_dir, console=not use_screen)
     slog("BOOT", "starting", **cfg.safe_dict())
     slog(
         "BOOT",
@@ -68,6 +80,7 @@ def main(argv: list[str] | None = None) -> int:
         synthetic=bool(args.synthetic),
         loop=not args.once,
         dry_run=cfg.dry_run,
+        screen=use_screen,
     )
     rest = RestClient(
         public_url=cfg.public_url,
@@ -98,7 +111,10 @@ def main(argv: list[str] | None = None) -> int:
         rest.close()
         return 0 if result.ok else 2
 
-    engine = Engine(cfg, client=rest)
+    screen = TradingScreen(sys.stdout) if use_screen else None
+    if use_screen and cfg.poll_sec > 3:
+        cfg.poll_sec = 3
+    engine = Engine(cfg, client=rest, screen=screen)
     lock: InstanceLock | None = None
     if not args.skip_lock:
         try:
@@ -107,6 +123,8 @@ def main(argv: list[str] | None = None) -> int:
         except InstanceLockError as exc:
             slog("ERROR", str(exc))
             slog("BOOT", "another instance is running; stop it or pass --skip-lock")
+            if screen is not None:
+                screen.boot("別プロセスが data/bot.lock を保持しています。止めてから再実行してください。")
             rest.close()
             return 3
     try:
