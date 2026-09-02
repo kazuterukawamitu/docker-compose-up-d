@@ -23,6 +23,10 @@ runnable bot lives in `src/bitbank_bot/`. This branch is Bitbank `btc_jpy` only.
 runs with plain `python3` when pip/httpx/the feature-branch checkout
 are missing. It never calls `create_order`.
 
+Live Bitbank orders use `live.sh` / `python3 main.py --require-live` after
+`.env` has `DRY_RUN=false`, `LIVE_TRADING=true`, and both API keys. That
+path will not fall back to `run.py`.
+
 bitFlyer, Coincheck, and GMO are not imported and are not executed.
 
 ## Redundancies (kept on purpose)

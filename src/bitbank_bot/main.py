@@ -27,6 +27,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="use synthetic candles (still loops unless --once is set)",
     )
     parser.add_argument("--dry-run", action="store_true", help="force DRY_RUN=true")
+    parser.add_argument(
+        "--require-live",
+        action="store_true",
+        help="refuse to start unless DRY_RUN=false, LIVE_TRADING=true, and keys can place orders",
+    )
     parser.add_argument("--preflight", action="store_true", help="run preflight and exit")
     parser.add_argument("--check-config", action="store_true", help="load config and exit")
     parser.add_argument(
@@ -67,9 +72,27 @@ def main(argv: list[str] | None = None) -> int:
         setup_logging()
         slog("ERROR", "config failed", reason=str(exc))
         return 2
+    if args.dry_run and args.require_live:
+        setup_logging()
+        slog("ERROR", "config failed", reason="--dry-run cannot be combined with --require-live")
+        return 2
     if args.dry_run:
         cfg.dry_run = True
         cfg.live_trading = False
+    if args.require_live:
+        if args.synthetic:
+            setup_logging()
+            slog("ERROR", "config failed", reason="--synthetic cannot place live orders")
+            return 2
+        if not cfg.may_place_live_orders:
+            setup_logging()
+            slog(
+                "ERROR",
+                "live launch refused",
+                reason="need DRY_RUN=false and LIVE_TRADING=true and API keys",
+                **cfg.safe_dict(),
+            )
+            return 2
     use_screen = should_use_screen(args, sys.stdout)
     setup_logging(cfg.log_level, cfg.log_dir, console=not use_screen)
     slog("BOOT", "starting", **cfg.safe_dict())
@@ -131,7 +154,11 @@ def main(argv: list[str] | None = None) -> int:
         if args.once:
             return engine.run_once(synthetic=args.synthetic, skip_preflight=args.synthetic)
         install_signal_handlers(engine)
-        slog("BOOT", "continuous loop (HOLD/WAIT is normal; Ctrl-C to stop)")
+        slog(
+            "BOOT",
+            "continuous loop (HOLD/WAIT is normal; Ctrl-C to stop)",
+            live_orders=cfg.may_place_live_orders,
+        )
         return engine.run_forever(
             synthetic=args.synthetic,
             max_cycles=args.max_cycles,

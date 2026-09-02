@@ -19,6 +19,30 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 
+def _dotenv_flag(name: str, default: str = "") -> str:
+    path = ROOT / ".env"
+    if path.is_file():
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if line.startswith(f"{name}="):
+                return line.split("=", 1)[1].strip().strip('"').strip("'")
+    import os
+
+    return os.environ.get(name, default)
+
+
+def _truthy(raw: str) -> bool:
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _wants_live(argv: list[str]) -> bool:
+    if "--require-live" in argv:
+        return True
+    if _truthy(_dotenv_flag("LIVE_TRADING", "false")):
+        return True
+    dry = _dotenv_flag("DRY_RUN", "true")
+    return dry.strip().lower() in {"0", "false", "no", "off"}
+
+
 def _stdlib() -> int:
     path = ROOT / "run.py"
     spec = importlib.util.spec_from_file_location("bitbank_stdlib_run", path)
@@ -31,10 +55,18 @@ def _stdlib() -> int:
 
 
 def _launch() -> int:
+    argv = sys.argv[1:]
     try:
         import httpx  # noqa: F401
         from bitbank_bot.main import main
     except ModuleNotFoundError:
+        if _wants_live(argv):
+            sys.stderr.write(
+                "LIVE refused: httpx/dotenv missing. "
+                "run.py cannot place orders. pip install -r requirements.txt "
+                "then: bash live.sh\n"
+            )
+            return 2
         sys.stderr.write("full package/deps missing; starting stdlib DRY_RUN (run.py)\n")
         return _stdlib()
     return int(main())

@@ -131,7 +131,27 @@ if [[ "$need_install" -eq 1 ]]; then
   set -e
 fi
 
+wants_live=0
+for a in "$@"; do
+  if [[ "$a" == "--require-live" ]]; then
+    wants_live=1
+  fi
+done
+if [[ -f "$ROOT/.env" ]]; then
+  if grep -E '^[[:space:]]*LIVE_TRADING=([Tt]rue|1|yes|on)' "$ROOT/.env" >/dev/null 2>&1; then
+    wants_live=1
+  fi
+  if grep -E '^[[:space:]]*DRY_RUN=([Ff]alse|0|no|off)' "$ROOT/.env" >/dev/null 2>&1; then
+    wants_live=1
+  fi
+fi
+
 if ! "$VPY" -c "import dotenv, httpx" >/dev/null 2>&1; then
+  if [[ "$wants_live" -eq 1 ]]; then
+    echo "LIVE refused: pip packages missing. run.py cannot place orders." >&2
+    echo "pip install -r requirements.txt then: bash live.sh" >&2
+    exit 2
+  fi
   echo "pip packages missing; starting stdlib DRY_RUN (python3 run.py, no orders)"
   exec "$PY" "$ROOT/run.py" "$@"
 fi

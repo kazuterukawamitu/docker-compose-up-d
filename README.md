@@ -26,7 +26,29 @@ python3 run.py
 
 `python3 main.py` also works: it uses the full package when httpx is installed, otherwise the same stdlib `run.py`.
 
-Live trading stays **off** unless `.env` has `DRY_RUN=false` **and** `LIVE_TRADING=true` **and** both API keys.
+## Live orders (real Bitbank trades)
+
+`run.py` and `start.sh` without keys never call `create_order`. Live trades use the full package via `live.sh`.
+
+1. Check out this branch (or run the one-liner below).
+2. Copy `live.env.example` to `.env`.
+3. Put **your** Bitbank API key and secret in `.env` (trade permission). Do not paste them into chat.
+4. Confirm `.env` has `DRY_RUN=false` and `LIVE_TRADING=true`.
+5. Start:
+
+```bash
+bash live.sh
+```
+
+Or this one line in iTerm (after `.env` exists with keys):
+
+```bash
+bash -lc 'REPO="$HOME/docker-compose-up-d"; set -euo pipefail; if [ ! -d "$REPO/.git" ]; then git clone https://github.com/kazuterukawamitu/docker-compose-up-d.git "$REPO"; fi; cd "$REPO"; git fetch origin cursor/bitbank-audit-unify-f5fd; git checkout -B cursor/bitbank-audit-unify-f5fd origin/cursor/bitbank-audit-unify-f5fd; exec bash ./live.sh'
+```
+
+The engine then sizes from Bitbank `free_amount` and, when a README BUY/SELL signal fires, calls `POST /v1/user/spot/order` with `live_confirmed=true`. HOLD/待機 still means no setup — that is not a crash.
+
+If keys were pasted into chat, rotate them first. Touch `data/KILL` to halt new orders.
 
 `--once --synthetic` is a one-cycle smoke test that **exits on purpose**. The launcher above does **not** use `--once`.
 
