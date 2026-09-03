@@ -436,3 +436,242 @@ def test_partial_fill_keeps_pending(tmp_path) -> None:
     assert state.pending.filled_amount == Decimal("0.0004")
     assert state.position is not None
     assert state.position.amount == Decimal("0.0004")
+
+
+def test_blocked_live_place_sets_visibility(tmp_path) -> None:
+    c = cfg(
+        state_path=str(tmp_path / "state.json"),
+        lock_path=str(tmp_path / "bot.lock"),
+        log_dir=str(tmp_path / "logs"),
+        enable_websocket=False,
+        enable_htf_filter=False,
+        dry_run=False,
+        live_trading=True,
+        api_key="k",
+        api_secret="s",
+    )
+    rest = MagicMock()
+    rest.free_amount.side_effect = lambda asset: (
+        Decimal("100000") if asset == "jpy" else Decimal("0")
+    )
+    rest.get_active_orders.return_value = [{"order_id": "9"}]
+    engine = Engine(c, client=rest)
+    state = load_state(c.state_path, c)
+    engine._execute(
+        Signal("BUY1", "buy", Decimal("0.03"), "t"), Decimal("10000000"), 1, 1, state
+    )
+    rest.create_order.assert_not_called()
+    assert engine.last_block_reason == "active_orders"
+    assert engine.last_order_result == "ORDER_BLOCKED"
+
+
+def test_pending_poll_two_partials_accumulate(tmp_path) -> None:
+    c = cfg(
+        state_path=str(tmp_path / "state.json"),
+        lock_path=str(tmp_path / "bot.lock"),
+        log_dir=str(tmp_path / "logs"),
+        enable_websocket=False,
+        enable_htf_filter=False,
+        dry_run=False,
+        live_trading=True,
+        api_key="k",
+        api_secret="s",
+    )
+    rest = MagicMock()
+    rest.free_amount.side_effect = lambda asset: (
+        Decimal("100000") if asset == "jpy" else Decimal("0")
+    )
+    engine = Engine(c, client=rest)
+    from bitbank_bot.engine import BotState
+
+    state = BotState(
+        None,
+        RiskManager(c),
+        0,
+        time.monotonic(),
+        pending=PendingOrder(
+            order_id="42",
+            side="buy",
+            kind="BUY1",
+            tp_pct=Decimal("0.03"),
+            index=1,
+            timestamp_ms=1,
+            amount=Decimal("0.001"),
+        ),
+        paper_jpy=Decimal("100000"),
+        paper_btc=Decimal("0"),
+    )
+    rest.get_order.return_value = {
+        "order_id": "42",
+        "status": "PARTIALLY_FILLED",
+        "executed_amount": "0.0004",
+        "average_price": "10000000",
+        "start_amount": "0.001",
+    }
+    engine._poll_pending(state)
+    assert state.pending is not None
+    assert state.pending.filled_amount == Decimal("0.0004")
+    assert state.position is not None
+    assert state.position.amount == Decimal("0.0004")
+    assert state.position.actual_execution_jpy == Decimal("4000")
+
+    rest.get_order.return_value = {
+        "order_id": "42",
+        "status": "PARTIALLY_FILLED",
+        "executed_amount": "0.0008",
+        "average_price": "10000000",
+        "start_amount": "0.001",
+    }
+    engine._poll_pending(state)
+    assert state.pending is not None
+    assert state.pending.filled_amount == Decimal("0.0008")
+    assert state.position.amount == Decimal("0.0008")
+    assert state.position.actual_execution_jpy == Decimal("8000")
+
+    rest.get_order.return_value = {
+        "order_id": "42",
+        "status": "FULLY_FILLED",
+        "executed_amount": "0.001",
+        "average_price": "10000000",
+        "start_amount": "0.001",
+    }
+    engine._poll_pending(state)
+    assert state.pending is None
+    assert state.position is not None
+    assert state.position.amount == Decimal("0.001")
+    assert state.position.actual_execution_jpy == Decimal("10000")
+    assert engine.last_order_result == "FILL"
+
+
+def test_poll_balance_failure_keeps_paper_and_logs(tmp_path, caplog) -> None:
+    c = cfg(
+        state_path=str(tmp_path / "state.json"),
+        lock_path=str(tmp_path / "bot.lock"),
+        log_dir=str(tmp_path / "logs"),
+        enable_websocket=False,
+        enable_htf_filter=False,
+        dry_run=False,
+        live_trading=True,
+        api_key="k",
+        api_secret="s",
+    )
+    rest = MagicMock()
+    rest.free_amount.side_effect = RuntimeError("boom")
+    rest.get_order.return_value = {
+        "order_id": "42",
+        "status": "FULLY_FILLED",
+        "executed_amount": "0.001",
+        "average_price": "10000000",
+        "start_amount": "0.001",
+    }
+    engine = Engine(c, client=rest)
+    engine.last_known_jpy = Decimal("90000")
+    engine.last_known_btc = Decimal("0.002")
+    from bitbank_bot.engine import BotState
+
+    state = BotState(
+        None,
+        RiskManager(c),
+        0,
+        time.monotonic(),
+        pending=PendingOrder(
+            order_id="42",
+            side="buy",
+            kind="BUY1",
+            tp_pct=Decimal("0.03"),
+            index=1,
+            timestamp_ms=1,
+            amount=Decimal("0.001"),
+        ),
+        paper_jpy=Decimal("90000"),
+        paper_btc=Decimal("0.002"),
+    )
+    with caplog.at_level("ERROR", logger="bitbank_bot"):
+        engine._poll_pending(state)
+    assert state.paper_jpy == Decimal("90000")
+    assert state.paper_btc == Decimal("0.002")
+    assert engine.last_known_jpy == Decimal("90000")
+    assert engine.last_known_btc == Decimal("0.002")
+    assert state.position is not None
+    assert state.position.amount == Decimal("0.001")
+    assert "balance fetch failed" in caplog.text
+
+
+def test_rest_only_stale_ticker_blocks_execute(tmp_path) -> None:
+    c = cfg(
+        state_path=str(tmp_path / "state.json"),
+        lock_path=str(tmp_path / "bot.lock"),
+        log_dir=str(tmp_path / "logs"),
+        enable_websocket=False,
+        enable_htf_filter=False,
+        stale_ws_sec=60,
+        dry_run=False,
+        live_trading=True,
+        api_key="k",
+        api_secret="s",
+    )
+    rest = MagicMock()
+    rest.free_amount.side_effect = lambda asset: (
+        Decimal("100000") if asset == "jpy" else Decimal("0")
+    )
+    engine = Engine(c, client=rest)
+    engine.last_ticker_mono = time.monotonic() - 120
+    state = load_state(c.state_path, c)
+    engine._execute(
+        Signal("BUY1", "buy", Decimal("0.03"), "t"), Decimal("10000000"), 1, 1, state
+    )
+    rest.create_order.assert_not_called()
+    rest.free_amount.assert_not_called()
+    assert engine.last_block_reason == "stale_data"
+    assert engine.last_order_result == "ORDER_BLOCKED"
+
+
+def test_ticker_refresh_failure_is_logged(tmp_path, caplog) -> None:
+    c = cfg(
+        state_path=str(tmp_path / "state.json"),
+        lock_path=str(tmp_path / "bot.lock"),
+        log_dir=str(tmp_path / "logs"),
+        enable_websocket=False,
+    )
+    rest = MagicMock()
+    rest.get_ticker.side_effect = RuntimeError("offline")
+    engine = Engine(c, client=rest)
+    with caplog.at_level("INFO", logger="bitbank_bot"):
+        engine._refresh_public_last(rest)
+    assert engine.last_error == "RuntimeError"
+    assert engine.last_ticker_mono is None
+    assert "ticker refresh failed" in caplog.text
+
+
+def test_heartbeat_signal_only_skips_order_manager_ok(tmp_path, caplog) -> None:
+    c = cfg(
+        state_path=str(tmp_path / "state.json"),
+        lock_path=str(tmp_path / "bot.lock"),
+        log_dir=str(tmp_path / "logs"),
+        enable_websocket=False,
+    )
+    from bitbank_bot.engine import BotState
+
+    engine = Engine(c, client=FakeRest())  # type: ignore[arg-type]
+    state = BotState(None, RiskManager(c), 0, time.monotonic())
+    with caplog.at_level("INFO", logger="bitbank_bot"):
+        engine._heartbeat(state, Signal.hold("no_setup"), "1")
+    assert "SIGNAL_ONLY" in caplog.text
+    assert "ORDER MANAGER OK" not in caplog.text
+
+
+def test_heartbeat_logs_order_manager_ok_after_simulated_fill(tmp_path, caplog) -> None:
+    c = cfg(
+        state_path=str(tmp_path / "state.json"),
+        lock_path=str(tmp_path / "bot.lock"),
+        log_dir=str(tmp_path / "logs"),
+        enable_websocket=False,
+    )
+    from bitbank_bot.engine import BotState
+
+    engine = Engine(c, client=FakeRest())  # type: ignore[arg-type]
+    engine.last_order_result = "SIMULATED_FILL"
+    state = BotState(None, RiskManager(c), 0, time.monotonic())
+    with caplog.at_level("INFO", logger="bitbank_bot"):
+        engine._heartbeat(state, Signal.hold("no_setup"), "1")
+    assert "ORDER MANAGER OK" in caplog.text

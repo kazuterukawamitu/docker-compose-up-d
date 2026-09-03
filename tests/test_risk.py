@@ -39,6 +39,15 @@ def test_max_position() -> None:
     assert buy.reason == "max_position"
 
 
+def test_check_stale_blocks_old_ticker() -> None:
+    c = cfg(stale_ws_sec=60)
+    r = RiskManager(c)
+    assert r.check_stale(10).allowed
+    blocked = r.check_stale(61)
+    assert not blocked.allowed
+    assert blocked.reason == "stale_data"
+
+
 def test_daily_halt_resets_next_jst_day() -> None:
     c = cfg(daily_pnl_floor=Decimal("150"))
     r = RiskManager(c, daily_pnl=Decimal("-200"), daily_pnl_date="2000-01-01")

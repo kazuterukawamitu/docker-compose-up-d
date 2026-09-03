@@ -42,6 +42,8 @@ def test_format_screen_is_trading_dashboard() -> None:
     assert "実注文なし" in text
     assert "HOLD" in text
     assert "12,288,796" in text
+    assert "注文結果" in text
+    assert "SIGNAL_ONLY" in text
 
 
 def test_should_use_screen_tty_default() -> None:

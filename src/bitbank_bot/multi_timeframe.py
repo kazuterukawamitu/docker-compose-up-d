@@ -51,7 +51,13 @@ def _fetch_type(client: RestClient, pair: str, candle_type: str) -> list[Candle]
         for row in rows:
             try:
                 candle = parse_ohlcv(row)
-            except Exception:
+            except Exception as exc:
+                slog(
+                    "MARKET",
+                    "htf parse_ohlcv failed",
+                    candle_type=candle_type,
+                    error=type(exc).__name__,
+                )
                 continue
             if candle.timestamp_ms in seen:
                 continue

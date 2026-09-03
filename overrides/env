@@ -1,0 +1,5 @@
+# Corrections applied on top of the Git-hosted Bitbank bot.
+# No secrets. Live trading stays off.
+DRY_RUN=true
+LIVE_TRADING=false
+BITBANK_PAIR=btc_jpy
