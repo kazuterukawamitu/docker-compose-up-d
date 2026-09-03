@@ -55,6 +55,7 @@ class ScreenView:
     block_reason: str
     error: str
     candle_type: str
+    order_result: str = "SIGNAL_ONLY"
     note: str = "HOLD/待機は正常です。Ctrl-C で停止"
 
 
@@ -80,6 +81,7 @@ def format_screen(view: ScreenView) -> str:
         f"  戦略価格     {_commas(view.price)} JPY    足 {view.candle_type}",
         f"  移動平均     {_commas(view.ma)}    トレンド {view.trend}",
         f"  シグナル     {view.signal_kind}    {view.signal_reason}",
+        f"  注文結果     {view.order_result}",
         f"  建玉         {pos}",
         f"  監視         {view.watchdog}    WS {ws}",
         f"  ブロック     {block}",
@@ -151,6 +153,7 @@ def view_from_engine(
     block_reason: str = "",
     error: str = "",
     candle_type: str = "1hour",
+    order_result: str = "SIGNAL_ONLY",
 ) -> ScreenView:
     return ScreenView(
         pair=pair,
@@ -173,6 +176,7 @@ def view_from_engine(
         block_reason=block_reason,
         error=error,
         candle_type=candle_type,
+        order_result=order_result or "SIGNAL_ONLY",
     )
 
 

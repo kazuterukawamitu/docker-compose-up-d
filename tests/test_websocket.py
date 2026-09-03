@@ -27,3 +27,11 @@ def test_start_without_websockets_does_not_raise() -> None:
         with patch("builtins.__import__", fake_import):
             ws.start()
     assert ws._thread is None
+
+
+def test_ws_json_decode_failure_is_logged(caplog) -> None:
+    ws = BitbankWebsocket("wss://example", ("ticker_btc_jpy",))
+    with caplog.at_level("INFO", logger="bitbank_bot"):
+        ws._handle_42("not-json")
+    assert "json decode failed" in caplog.text
+    assert ws.last_ticker is None

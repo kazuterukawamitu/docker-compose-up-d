@@ -72,3 +72,15 @@ def test_missing_htf_blocks_buy() -> None:
     verdict = evaluate_htf(HtfRest([], []), c)  # type: ignore[arg-type]
     assert verdict.allow_buy is False
     assert verdict.reason == "htf_unavailable"
+
+
+def test_htf_parse_failure_is_logged(caplog) -> None:
+    class BadRowRest:
+        def get_candlestick(self, pair: str, candle_type: str, date_key: str) -> list:
+            return [["bad"], [1, 2, 3]]
+
+    with caplog.at_level("INFO", logger="bitbank_bot"):
+        verdict = evaluate_htf(BadRowRest(), cfg(ma_period=5))  # type: ignore[arg-type]
+    assert verdict.allow_buy is False
+    assert verdict.reason == "htf_unavailable"
+    assert "htf parse_ohlcv failed" in caplog.text

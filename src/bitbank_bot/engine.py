@@ -35,6 +35,19 @@ from bitbank_bot.websocket_client import BitbankWebsocket
 
 _LOG = logging.getLogger("bitbank_bot")
 
+_FILL_STAGES = {"FILL", "SIMULATED_FILL"}
+_ORDER_STAGES = {
+    "simulated": "SIMULATED_FILL",
+    "fill": "FILL",
+    "partial_fill": "FILL",
+    "accepted_unfilled": "ORDER_ACCEPTED_UNFILLED",
+    "intent_only": "SIGNAL_ONLY",
+}
+
+
+def order_stage_from_result(result: OrderResult) -> str:
+    return _ORDER_STAGES.get(result.reason, "ORDER_BLOCKED")
+
 
 @dataclass
 class PendingOrder:
@@ -161,6 +174,10 @@ class Engine:
         self.ws: BitbankWebsocket | None = None
         self.cache = CandleCache(cfg.ma_period)
         self.last_block_reason = ""
+        self.last_order_result = "SIGNAL_ONLY"
+        self.last_ticker_mono: float | None = None
+        self.last_known_jpy: Decimal | None = None
+        self.last_known_btc: Decimal | None = None
         self.strategy_evaluations = 0
         self.cycles = 0
         self.used_synthetic_fallback = False
@@ -197,6 +214,8 @@ class Engine:
             jpy = rest.free_amount("jpy")
             btc = rest.free_amount("btc")
             slog("ASSET", "free_amount", jpy=str(jpy), btc=str(btc))
+            self.last_known_jpy = jpy
+            self.last_known_btc = btc
             return jpy, btc
         jpy = self.cfg.dry_run_free_jpy
         btc = self.cfg.dry_run_free_btc
@@ -206,6 +225,8 @@ class Engine:
         if state is not None and state.position:
             btc = max(btc, state.position.amount)
         slog("ASSET", "paper free_amount", jpy=str(jpy), btc=str(btc))
+        self.last_known_jpy = jpy
+        self.last_known_btc = btc
         return jpy, btc
 
     def _maybe_ws(self) -> None:
@@ -283,7 +304,7 @@ class Engine:
                     continue
                 if state.pending:
                     slog("ORDER_STATUS", "pending live order; skip new signal")
-                    self.last_block_reason = "pending_order"
+                    self._block_order("pending_order")
                     signal = Signal.hold("pending_order")
                     state.last_candle_ts = snap.timestamp_ms
                     if persist:
@@ -296,7 +317,7 @@ class Engine:
                 ):
                     verdict = evaluate_htf(self._rest(), self.cfg)
                     if not verdict.allow_buy:
-                        self.last_block_reason = verdict.reason
+                        self._block_order(verdict.reason)
                         slog("STRATEGY", "BUY blocked by HTF", reason=verdict.reason)
                         signal = Signal.hold(verdict.reason)
                         state.last_candle_ts = snap.timestamp_ms
@@ -305,7 +326,7 @@ class Engine:
                         continue
                 if self.ws is not None and self.cfg.enable_websocket and self.ws.is_stale():
                     slog("WEBSOCKET", "stale data; skipping orders")
-                    self.last_block_reason = "stale_websocket"
+                    self._block_order("stale_websocket")
                     signal = Signal.hold("stale_websocket")
                     break
                 self._execute(signal, snap.close, snap.index, snap.timestamp_ms, state)
@@ -326,6 +347,8 @@ class Engine:
         rest = self._rest()
         if self.ws is not None and not self.ws.is_stale() and self.ws.last_price():
             price = self.ws.last_price() or price
+        if self._rest_price_is_stale(state):
+            return
         try:
             jpy, btc = self._balances(rest, state)
         except BitbankAPIError as exc:
@@ -336,13 +359,13 @@ class Engine:
             else:
                 state.risk.note_api_error()
                 reason = "balance_fetch_failed"
-            self.last_block_reason = reason
+            self._block_order(reason)
             slog("ERROR", "no order", reason=reason, error=type(exc).__name__)
             return
         except Exception as exc:
             _LOG.exception("balance fetch failed on order path")
             state.risk.note_api_error()
-            self.last_block_reason = "balance_fetch_failed"
+            self._block_order("balance_fetch_failed")
             slog("ERROR", "no order", reason="balance_fetch_failed", error=type(exc).__name__)
             return
         state.risk.note_api_ok()
@@ -362,10 +385,9 @@ class Engine:
             amount=str(plan.amount),
         )
         if not plan.ok:
-            self.last_block_reason = plan.reason
+            self._block_order(plan.reason)
             slog("RISK", "order blocked", reason=plan.reason, side=signal.side)
             return
-        self.last_block_reason = ""
         order_client = rest if self.cfg.has_keys else None
         executor = OrderExecutor(self.cfg, order_client)
         try:
@@ -374,14 +396,25 @@ class Engine:
             _LOG.exception("order place failed")
             slog("ERROR", "order path failed", error=type(exc).__name__)
             state.risk.note_api_error()
+            self._block_order("order_place_failed")
             return
-        slog(
-            "HEARTBEAT",
-            "ORDER MANAGER OK",
-            reason=result.reason,
-            simulated=result.simulated,
-            dry_run=result.dry_run,
-        )
+        stage = self._record_place_result(result)
+        if stage in _FILL_STAGES:
+            slog(
+                "HEARTBEAT",
+                "ORDER MANAGER OK",
+                reason=result.reason,
+                simulated=result.simulated,
+                dry_run=result.dry_run,
+            )
+        else:
+            slog(
+                "HEARTBEAT",
+                stage,
+                reason=result.reason,
+                simulated=result.simulated,
+                dry_run=result.dry_run,
+            )
         self._apply_fill(signal, plan, result, index, ts, state, jpy, btc)
 
     def _poll_pending(self, state: BotState) -> None:
@@ -397,6 +430,7 @@ class Engine:
                 "pending poll failed; holding new orders",
                 order_id=pending.order_id,
             )
+            self._block_order(result.reason)
             return
         if result.executed_amount <= pending.filled_amount:
             slog(
@@ -437,15 +471,31 @@ class Engine:
         try:
             jpy, btc = self._balances(rest, state)
         except Exception:
-            jpy, btc = ZERO, ZERO
+            _LOG.exception("pending poll: balance fetch failed")
+            slog(
+                "ERROR",
+                "pending poll balance fetch failed; keeping last known balances",
+                order_id=pending.order_id,
+            )
+            if self.last_known_jpy is not None and self.last_known_btc is not None:
+                jpy, btc = self.last_known_jpy, self.last_known_btc
+            else:
+                jpy, btc = state.paper_jpy, state.paper_btc
         pending.filled_amount = result.executed_amount
         if result.reason != "partial_fill":
             state.pending = None
         self._apply_fill(
-            signal, plan, delta_result, pending.index, pending.timestamp_ms, state, jpy, btc
+            signal,
+            plan,
+            delta_result,
+            pending.index,
+            pending.timestamp_ms,
+            state,
+            jpy,
+            btc,
+            manage_pending=False,
         )
-        if result.reason == "partial_fill":
-            state.pending = pending
+        self._record_place_result(delta_result)
 
     def _set_watchdog(
         self,
@@ -482,8 +532,10 @@ class Engine:
         state: BotState,
         jpy: Decimal,
         btc: Decimal,
+        *,
+        manage_pending: bool = True,
     ) -> None:
-        if result.reason == "accepted_unfilled" and result.order_id:
+        if manage_pending and result.reason == "accepted_unfilled" and result.order_id:
             state.pending = PendingOrder(
                 order_id=result.order_id,
                 side=signal.side or "",
@@ -563,20 +615,21 @@ class Engine:
                 state.risk.record_realized_pnl(actual_jpy - cost)
                 state.position.amount = pos_amt - result.executed_amount
                 state.position.actual_execution_jpy -= cost
-        if result.reason == "partial_fill" and result.order_id:
-            already = state.pending.filled_amount if state.pending else ZERO
-            state.pending = PendingOrder(
-                order_id=result.order_id,
-                side=signal.side or "",
-                kind=signal.kind,
-                tp_pct=signal.tp_pct,
-                index=index,
-                timestamp_ms=ts,
-                amount=plan.amount,
-                filled_amount=already + result.executed_amount,
-            )
-        elif result.reason != "partial_fill":
-            state.pending = None
+        if manage_pending:
+            if result.reason == "partial_fill" and result.order_id:
+                already = state.pending.filled_amount if state.pending else ZERO
+                state.pending = PendingOrder(
+                    order_id=result.order_id,
+                    side=signal.side or "",
+                    kind=signal.kind,
+                    tp_pct=signal.tp_pct,
+                    index=index,
+                    timestamp_ms=ts,
+                    amount=plan.amount,
+                    filled_amount=already + result.executed_amount,
+                )
+            elif result.reason != "partial_fill":
+                state.pending = None
 
     def run_once(self, *, synthetic: bool = False, skip_preflight: bool = False) -> int:
         slog("BOOT", "run_once", synthetic=synthetic, dry_run=self.cfg.dry_run)
@@ -763,9 +816,48 @@ class Engine:
         slog("HEARTBEAT", "WebSocket CONNECTED" if ws_ok else "WebSocket DISCONNECTED")
         slog("HEARTBEAT", "REST API OK")
         slog("HEARTBEAT", "MARKET DATA OK")
-        slog("HEARTBEAT", "ORDER MANAGER OK")
+        stage = self.last_order_result or "SIGNAL_ONLY"
+        slog("HEARTBEAT", stage, reason=self.last_block_reason or signal.reason)
+        if stage in _FILL_STAGES:
+            slog("HEARTBEAT", "ORDER MANAGER OK")
         slog("HEARTBEAT", "RISK MANAGER OK")
         self._paint(state, signal, last)
+
+    def _block_order(self, reason: str) -> None:
+        self.last_block_reason = reason
+        self.last_order_result = "ORDER_BLOCKED"
+
+    def _record_place_result(self, result: OrderResult) -> str:
+        stage = order_stage_from_result(result)
+        self.last_order_result = stage
+        if stage in _FILL_STAGES:
+            self.last_block_reason = ""
+        else:
+            self.last_block_reason = result.reason
+        return stage
+
+    def _ws_price_fresh(self) -> bool:
+        return bool(
+            self.ws is not None
+            and self.cfg.enable_websocket
+            and self.ws.is_connected()
+            and not self.ws.is_stale()
+        )
+
+    def _rest_price_is_stale(self, state: BotState) -> bool:
+        if self._explicit_synthetic:
+            return False
+        if self._ws_price_fresh():
+            return False
+        if self.last_ticker_mono is None:
+            return False
+        age = time.monotonic() - self.last_ticker_mono
+        decision = state.risk.check_stale(age)
+        if decision.allowed:
+            return False
+        self._block_order(decision.reason)
+        slog("RISK", "order blocked", reason=decision.reason, age_sec=round(age, 3))
+        return True
 
     def _refresh_public_last(self, rest: RestClient) -> None:
         try:
@@ -773,9 +865,11 @@ class Engine:
             last = ticker.get("last")
             if last not in (None, ""):
                 self.last_public_last = str(last)
+                self.last_ticker_mono = time.monotonic()
                 self.last_error = ""
         except Exception as exc:
             self.last_error = type(exc).__name__
+            slog("PUBLIC_API", "ticker refresh failed", error=type(exc).__name__)
 
     def _paint(self, state: BotState, signal: Signal, last: str = "-") -> None:
         if self.screen is None:
@@ -800,6 +894,7 @@ class Engine:
             cycles=self.cycles,
             uptime_sec=int(time.monotonic() - state.started_at),
             block_reason=self.last_block_reason,
+            order_result=self.last_order_result or "SIGNAL_ONLY",
             error=self.last_error,
             candle_type=self.cfg.candle_type,
         )

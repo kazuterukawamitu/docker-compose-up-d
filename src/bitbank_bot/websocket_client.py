@@ -136,6 +136,7 @@ class BitbankWebsocket:
         try:
             data = json.loads(payload)
         except json.JSONDecodeError:
+            slog("WEBSOCKET", "json decode failed")
             return
         if not isinstance(data, list) or len(data) < 2:
             return

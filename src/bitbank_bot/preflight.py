@@ -125,7 +125,5 @@ def preflight(
             return PreflightResult(False, "missing_keys_live", last, status, checks)
         slog("CONFIG", "DRY_RUN continues without private keys")
 
-    slog("HEARTBEAT", "ORDER MANAGER OK")
-    slog("HEARTBEAT", "RISK MANAGER OK")
     slog("BOOT", "preflight ok", checks=",".join(checks))
     return PreflightResult(True, "ok", last, status, checks)
