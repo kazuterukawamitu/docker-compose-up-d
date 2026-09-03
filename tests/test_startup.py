@@ -17,6 +17,7 @@ def test_compileall_src() -> None:
     py_compile.compile(str(root / "main.py"), doraise=True)
     py_compile.compile(str(root / "run.py"), doraise=True)
     py_compile.compile(str(root / "launch.py"), doraise=True)
+    py_compile.compile(str(root / "launch_from_git.py"), doraise=True)
     diag = root / "diagnostics.py"
     if diag.is_file():
         py_compile.compile(str(diag), doraise=True)
