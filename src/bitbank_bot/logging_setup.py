@@ -90,7 +90,7 @@ def setup_logging(
     _CONFIGURED = True
 
 
-def slog(stage: str, message: str, *, level: int = logging.INFO, **fields: Any) -> None:
+def slog(stage: str, message: str = "", /, *, level: int = logging.INFO, **fields: Any) -> None:
     if not _CONFIGURED:
         setup_logging()
     # Callers sometimes pass message=; never let that crash a trading loop.
