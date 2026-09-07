@@ -20,3 +20,10 @@ def test_slog_safe_dict_keys(caplog) -> None:
     text = caplog.text
     assert "has_api_secret" in text
     assert "false" in text
+
+
+def test_slog_message_kwarg_does_not_crash(caplog) -> None:
+    with caplog.at_level("INFO", logger="bitbank_bot"):
+        slog("ERROR", "collected", message="boom detail", error="RuntimeError")
+    assert "collected" in caplog.text
+    assert "boom detail" in caplog.text

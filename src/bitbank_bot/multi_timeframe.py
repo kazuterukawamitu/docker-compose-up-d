@@ -46,12 +46,32 @@ def _fetch_type(client: RestClient, pair: str, candle_type: str) -> list[Candle]
         try:
             rows = client.get_candlestick(pair, candle_type, key)
         except Exception as exc:
-            slog("MARKET", "htf fetch skipped", candle_type=candle_type, error=type(exc).__name__)
+            slog(
+                "CANDLE_API_ERROR",
+                "htf candlestick failed",
+                candle_type=candle_type,
+                date=key,
+                error=type(exc).__name__,
+                function="multi_timeframe._fetch_type",
+                pair=pair,
+                type=candle_type,
+                http_status=getattr(exc, "http_status", None),
+                bitbank_code=getattr(exc, "code", None),
+                endpoint=getattr(exc, "endpoint", None),
+                retry_count=getattr(exc, "retry_count", 0),
+            )
             continue
         for row in rows:
             try:
                 candle = parse_ohlcv(row)
-            except Exception:
+            except Exception as row_exc:
+                slog(
+                    "ERROR",
+                    "htf malformed ohlcv",
+                    error=type(row_exc).__name__,
+                    function="multi_timeframe._fetch_type",
+                    pair=pair,
+                )
                 continue
             if candle.timestamp_ms in seen:
                 continue

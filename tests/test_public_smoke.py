@@ -1,13 +1,45 @@
 from __future__ import annotations
 
 import httpx
+import pytest
+
+
+def _get(url: str) -> httpx.Response:
+    try:
+        return httpx.get(url, timeout=15)
+    except httpx.HTTPError as exc:
+        pytest.skip(f"public API not reachable: {type(exc).__name__}")
 
 
 def test_public_ticker_btc_jpy() -> None:
-    response = httpx.get("https://public.bitbank.cc/btc_jpy/ticker", timeout=15)
+    response = _get("https://public.bitbank.cc/btc_jpy/ticker")
     assert response.status_code == 200
     payload = response.json()
     assert payload.get("success") == 1
     last = payload["data"]["last"]
     assert last
     float(last)  # numeric string from Bitbank
+
+
+def test_public_5min_candlestick_jst_today() -> None:
+    from datetime import datetime, timedelta, timezone
+
+    jst = timezone(timedelta(hours=9))
+    now = datetime.now(jst)
+    payload = None
+    for offset in (0, 1):
+        day = (now - timedelta(days=offset)).strftime("%Y%m%d")
+        url = f"https://public.bitbank.cc/btc_jpy/candlestick/5min/{day}"
+        response = _get(url)
+        if response.status_code != 200:
+            continue
+        body = response.json()
+        if body.get("success") == 1:
+            payload = body
+            break
+    if payload is None:
+        pytest.skip("public 5min candlestick unavailable for JST today/yesterday")
+    sticks = payload["data"]["candlestick"]
+    assert sticks
+    assert sticks[0]["type"] == "5min"
+    assert sticks[0]["ohlcv"]

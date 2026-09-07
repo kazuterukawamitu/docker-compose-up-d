@@ -6,12 +6,17 @@ import json
 import logging
 import re
 import sys
+import uuid
+from contextvars import ContextVar
 from datetime import datetime, timezone
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any
 
 _LOGGER = logging.getLogger("bitbank_bot")
 _CONFIGURED = False
+_REQUEST_ID: ContextVar[str] = ContextVar("request_id", default="")
+_CYCLE_FIELDS: ContextVar[dict[str, Any]] = ContextVar("cycle_fields", default={})
 
 _SECRET_FIELD = re.compile(
     r"(?<!has_)(api[_-]?secret|access-signature|bitbank_api_secret|authorization)",
@@ -38,6 +43,24 @@ class _RedactFilter(logging.Filter):
         return True
 
 
+def new_request_id() -> str:
+    return uuid.uuid4().hex[:12]
+
+
+def set_request_id(request_id: str) -> None:
+    _REQUEST_ID.set(request_id)
+
+
+def set_cycle_fields(**fields: Any) -> None:
+    current = dict(_CYCLE_FIELDS.get())
+    current.update(fields)
+    _CYCLE_FIELDS.set(current)
+
+
+def clear_cycle_fields() -> None:
+    _CYCLE_FIELDS.set({})
+
+
 def setup_logging(
     level: str = "INFO",
     log_dir: str = "logs",
@@ -55,21 +78,35 @@ def setup_logging(
         stream.setFormatter(formatter)
         stream.addFilter(_RedactFilter())
         root.addHandler(stream)
-    file_handler = logging.FileHandler(Path(log_dir) / "bot.log", encoding="utf-8")
+    file_handler = RotatingFileHandler(
+        Path(log_dir) / "bot.log",
+        maxBytes=5 * 1024 * 1024,
+        backupCount=5,
+        encoding="utf-8",
+    )
     file_handler.setFormatter(formatter)
     file_handler.addFilter(_RedactFilter())
     root.addHandler(file_handler)
     _CONFIGURED = True
 
 
-def slog(stage: str, message: str, *, level: int = logging.INFO, **fields: Any) -> None:
+def slog(stage: str, message: str = "", /, *, level: int = logging.INFO, **fields: Any) -> None:
     if not _CONFIGURED:
         setup_logging()
+    # Callers sometimes pass message=; never let that crash a trading loop.
+    extra_message = fields.pop("message", None)
     payload = {
         "ts": datetime.now(timezone.utc).isoformat(),
         "stage": stage,
         "msg": message,
     }
+    if extra_message is not None and extra_message != message:
+        payload["detail"] = extra_message
+    request_id = _REQUEST_ID.get()
+    if request_id:
+        payload["request_id"] = request_id
+    for key, value in _CYCLE_FIELDS.get().items():
+        payload.setdefault(key, value)
     for key, value in fields.items():
         if key.lower().startswith("has_"):
             payload[key] = value

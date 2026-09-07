@@ -12,7 +12,7 @@ from bitbank_bot.multi_timeframe import HtfVerdict
 from bitbank_bot.preflight import preflight
 from bitbank_bot.risk import RiskManager
 from bitbank_bot.strategy import Signal
-from tests.helpers import cfg
+from tests.helpers import cfg, live_cfg
 
 
 class FakeRest:
@@ -113,7 +113,8 @@ def test_engine_loop_continues_after_hold(tmp_path) -> None:
     rc = engine.run_forever(synthetic=True, max_cycles=3)
     assert rc == 0
     assert engine.cycles == 3
-    assert engine.strategy_evaluations >= 2
+    # Same closed 5m bar is evaluated once; later cycles heartbeat-skip.
+    assert engine.strategy_evaluations >= 1
     assert engine.last_watchdog == "NORMAL WAIT"
     assert fake.create_order_calls == 0
 
@@ -265,16 +266,12 @@ def test_htf_blocks_buy_without_placing(tmp_path) -> None:
 
 
 def test_pending_unfilled_is_persisted_and_polled(tmp_path) -> None:
-    c = cfg(
+    c = live_cfg(
         state_path=str(tmp_path / "state.json"),
         lock_path=str(tmp_path / "bot.lock"),
         log_dir=str(tmp_path / "logs"),
         enable_websocket=False,
         enable_htf_filter=False,
-        dry_run=False,
-        live_trading=True,
-        api_key="k",
-        api_secret="s",
         ma_period=3,
         short_ma_period=3,
         long_ma_period=5,
@@ -396,16 +393,12 @@ def test_dry_run_sell_uses_position_amount(tmp_path) -> None:
 
 
 def test_partial_fill_keeps_pending(tmp_path) -> None:
-    c = cfg(
+    c = live_cfg(
         state_path=str(tmp_path / "state.json"),
         lock_path=str(tmp_path / "bot.lock"),
         log_dir=str(tmp_path / "logs"),
         enable_websocket=False,
         enable_htf_filter=False,
-        dry_run=False,
-        live_trading=True,
-        api_key="k",
-        api_secret="s",
         ma_period=3,
         short_ma_period=3,
         long_ma_period=5,

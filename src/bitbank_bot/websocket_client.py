@@ -71,8 +71,13 @@ class BitbankWebsocket:
             return None
         try:
             value = D(self.last_ticker.get("last") or 0)
-        except Exception:
-            slog("WEBSOCKET", "bad ticker last; ignoring")
+        except Exception as exc:
+            slog(
+                "WEBSOCKET",
+                "bad ticker last; ignoring",
+                error=type(exc).__name__,
+                function="BitbankWebsocket.last_price",
+            )
             return None
         return value or None
 

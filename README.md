@@ -26,7 +26,7 @@ python3 run.py
 
 `python3 main.py` also works: it uses the full package when httpx is installed, otherwise the same stdlib `run.py`.
 
-Live trading stays **off** unless `.env` has `DRY_RUN=false` **and** `LIVE_TRADING=true` **and** both API keys.
+Live trading stays **off** unless `.env` has `TRADING_MODE=LIVE` **and** `LIVE_TRADING_CONFIRM=YES_I_ACCEPT_REAL_MONEY_RISK` **and** both API keys. Anything else is `DRY_RUN` or `LIVE_READY` (full pipeline, `WOULD_SUBMIT_ORDER`, no Bitbank POST).
 
 `--once --synthetic` is a one-cycle smoke test that **exits on purpose**. The launcher above does **not** use `--once`.
 
@@ -61,6 +61,7 @@ State-machine mapping: [docs/STRATEGY.md](docs/STRATEGY.md).
 - Copy `.env.example` to `.env` is done by `start.sh` when missing. **Never commit `.env`.**
 - If API keys were pasted into chat, **rotate them in the bitbank console**.
 - `DRY_RUN=true` and `LIVE_TRADING=true` are mutually exclusive.
+- Default `CANDLE_TYPE=5min`. Accidental synthetic candles never place orders.
 - Create `data/KILL` to halt new orders.
 
 ## Tests
