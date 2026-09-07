@@ -93,11 +93,15 @@ def setup_logging(
 def slog(stage: str, message: str, *, level: int = logging.INFO, **fields: Any) -> None:
     if not _CONFIGURED:
         setup_logging()
+    # Callers sometimes pass message=; never let that crash a trading loop.
+    extra_message = fields.pop("message", None)
     payload = {
         "ts": datetime.now(timezone.utc).isoformat(),
         "stage": stage,
         "msg": message,
     }
+    if extra_message is not None and extra_message != message:
+        payload["detail"] = extra_message
     request_id = _REQUEST_ID.get()
     if request_id:
         payload["request_id"] = request_id

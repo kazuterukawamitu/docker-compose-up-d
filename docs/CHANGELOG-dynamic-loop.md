@@ -28,6 +28,13 @@ Running add/remove review for this branch.
 
 - Nothing. Wiki HTML and `run.py` stdlib launcher kept.
 
+## Follow-up (test / slog hardening)
+
+- `logging_setup.py` — `slog(..., message=)` no longer crashes the loop; extra text goes to `detail`.
+- `self_healing.py` — error collector / task crash logs use `detail`.
+- `orders.py` — ignore non-dict `get_order` responses after uncertain POST.
+- Tests: candle fetch arg order, heartbeat-once evaluation, timeout recovery mock, public 5min today/yesterday.
+
 ## Not done (by design)
 
 - Did not flip `DRY_RUN`→`LIVE`.

@@ -85,7 +85,7 @@ class ErrorCollector:
             "ERROR",
             "collected",
             error=record.name,
-            message=record.message[:200],
+            detail=record.message[:200],
             function=record.function,
             classification=record.classification.value,
             pair=record.pair or None,
@@ -209,7 +209,7 @@ class TaskSupervisor:
             "ERROR",
             "task crash",
             error=type(exc).__name__,
-            message=str(exc)[:200],
+            detail=str(exc)[:200],
             function="trading_loop",
             retry=self.crashes,
         )

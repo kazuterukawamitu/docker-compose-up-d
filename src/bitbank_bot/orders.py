@@ -78,6 +78,9 @@ class OrderExecutor:
         except Exception as exc:
             slog("ERROR", "get_order failed", error=type(exc).__name__, order_id=order_id)
             return None
+        if not isinstance(data, dict):
+            slog("ERROR", "get_order returned non-object", order_id=order_id)
+            return None
         slog("ORDER_STATUS", "refreshed from GET /user/spot/order", order_id=order_id)
         return data
 

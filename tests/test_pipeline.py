@@ -79,12 +79,18 @@ def test_live_ready_does_not_post(tmp_path) -> None:
 
 def test_timeout_does_not_duplicate_when_order_found() -> None:
     client = MagicMock()
-    client.get_active_orders.side_effect = [
-        [],
-        [{"order_id": "7", "side": "buy", "executed_amount": "0", "average_price": "0"}],
-    ]
+    recovered = {
+        "order_id": "7",
+        "side": "buy",
+        "status": "UNFILLED",
+        "executed_amount": "0",
+        "average_price": "0",
+        "start_amount": "0.001",
+    }
+    client.get_active_orders.side_effect = [[], [recovered]]
     client.create_order.side_effect = RestUncertain("timeout")
     client.get_trade_history.return_value = []
+    client.get_order.return_value = recovered
     result = ExecutionEngine(live_cfg(), client).submit_order(
         Signal("BUY1", "buy", Decimal("0.03"), "t"), _plan()
     )

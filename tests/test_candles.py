@@ -31,7 +31,7 @@ def test_fetch_raises_when_all_days_fail() -> None:
         "boom", http_status=500, code=10000, endpoint="https://public.bitbank.cc/x"
     )
     with pytest.raises(BitbankAPIError):
-        fetch_candles(cfg(candle_type="5min", candle_lookback_days=2), rest)
+        fetch_candles(rest, cfg(candle_type="5min", candle_lookback_days=2))
 
 
 def test_fetch_keeps_partial_days() -> None:
@@ -45,5 +45,5 @@ def test_fetch_keeps_partial_days() -> None:
         return [["100", "101", "99", "100", "1", 1_700_000_000_000 + calls["n"]]]
 
     rest.get_candlestick.side_effect = _get
-    candles = fetch_candles(cfg(candle_type="5min", candle_lookback_days=3), rest)
+    candles = fetch_candles(rest, cfg(candle_type="5min", candle_lookback_days=3))
     assert len(candles) >= 1

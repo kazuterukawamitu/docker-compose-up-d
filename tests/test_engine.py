@@ -113,7 +113,8 @@ def test_engine_loop_continues_after_hold(tmp_path) -> None:
     rc = engine.run_forever(synthetic=True, max_cycles=3)
     assert rc == 0
     assert engine.cycles == 3
-    assert engine.strategy_evaluations >= 2
+    # Same closed 5m bar is evaluated once; later cycles heartbeat-skip.
+    assert engine.strategy_evaluations >= 1
     assert engine.last_watchdog == "NORMAL WAIT"
     assert fake.create_order_calls == 0
 
