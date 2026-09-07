@@ -10,7 +10,7 @@ Authority: [README.md](../README.md) percents and “buy possible amount / sell 
 - Price tick: 1 JPY
 - Buy size: possible amount (`free_amount` JPY × usage × fee buffer / price, quantized)
 - Sell size: all free BTC (quantized)
-- Primary candle: `1hour` SMA(20); golden cross SMA(20)/SMA(50)
+- Primary candle: `5min` SMA(20); golden cross SMA(20)/SMA(50). `CANDLE_TYPE` still accepts `1hour`.
 - Timezone: Japan (JST)
 
 ## README rules

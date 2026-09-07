@@ -52,10 +52,10 @@ def preflight(
     if cfg.dry_run and cfg.live_trading:
         slog("ERROR", "dry_run_and_live")
         return PreflightResult(False, "dry_run_and_live", checks=checks)
-    if not cfg.dry_run and not cfg.live_trading:
+    if cfg.trading_mode == "LIVE" and not cfg.live_trading_confirmed:
         slog("ERROR", "live_requires_dual_flag")
         return PreflightResult(False, "live_requires_dual_flag", checks=checks)
-    checks.append("mode_exclusive")
+    checks.append(f"mode={cfg.trading_mode}")
 
     for raw in (cfg.log_dir, Path(cfg.state_path).parent, Path(cfg.lock_path).parent):
         _ensure_dir(Path(raw))
@@ -89,9 +89,9 @@ def preflight(
             slog("PUBLIC_API", "spot status", status=status, min_amount=row.get("min_amount"))
             if status == "HALT":
                 slog("ERROR", "market_halt")
-                if cfg.live_trading:
+                if cfg.trading_mode == "LIVE":
                     return PreflightResult(False, "market_halt", last, status, checks)
-                slog("BOOT", "market HALT ignored in DRY_RUN")
+                slog("BOOT", "market HALT ignored outside LIVE")
             if row.get("min_amount"):
                 exch_min = D(row["min_amount"])
                 if exch_min > cfg.min_amount_btc:
@@ -113,17 +113,17 @@ def preflight(
             checks.append("private_assets")
         except Exception as exc:
             slog("ERROR", "private assets failed", error=type(exc).__name__)
-            if cfg.live_trading:
+            if cfg.trading_mode == "LIVE":
                 return PreflightResult(
                     False, f"private_assets:{type(exc).__name__}", last, status, checks
                 )
     else:
         slog("CONFIG", "no API keys; public + dry-run only")
         checks.append("no_keys_public_only")
-        if cfg.live_trading:
+        if cfg.trading_mode == "LIVE":
             slog("ERROR", "missing_keys_live")
             return PreflightResult(False, "missing_keys_live", last, status, checks)
-        slog("CONFIG", "DRY_RUN continues without private keys")
+        slog("CONFIG", f"{cfg.trading_mode} continues without private keys")
 
     slog("HEARTBEAT", "ORDER MANAGER OK")
     slog("HEARTBEAT", "RISK MANAGER OK")

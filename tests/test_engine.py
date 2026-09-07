@@ -12,7 +12,7 @@ from bitbank_bot.multi_timeframe import HtfVerdict
 from bitbank_bot.preflight import preflight
 from bitbank_bot.risk import RiskManager
 from bitbank_bot.strategy import Signal
-from tests.helpers import cfg
+from tests.helpers import cfg, live_cfg
 
 
 class FakeRest:
@@ -265,16 +265,12 @@ def test_htf_blocks_buy_without_placing(tmp_path) -> None:
 
 
 def test_pending_unfilled_is_persisted_and_polled(tmp_path) -> None:
-    c = cfg(
+    c = live_cfg(
         state_path=str(tmp_path / "state.json"),
         lock_path=str(tmp_path / "bot.lock"),
         log_dir=str(tmp_path / "logs"),
         enable_websocket=False,
         enable_htf_filter=False,
-        dry_run=False,
-        live_trading=True,
-        api_key="k",
-        api_secret="s",
         ma_period=3,
         short_ma_period=3,
         long_ma_period=5,
@@ -396,16 +392,12 @@ def test_dry_run_sell_uses_position_amount(tmp_path) -> None:
 
 
 def test_partial_fill_keeps_pending(tmp_path) -> None:
-    c = cfg(
+    c = live_cfg(
         state_path=str(tmp_path / "state.json"),
         lock_path=str(tmp_path / "bot.lock"),
         log_dir=str(tmp_path / "logs"),
         enable_websocket=False,
         enable_htf_filter=False,
-        dry_run=False,
-        live_trading=True,
-        api_key="k",
-        api_secret="s",
         ma_period=3,
         short_ma_period=3,
         long_ma_period=5,

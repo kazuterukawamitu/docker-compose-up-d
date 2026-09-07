@@ -10,6 +10,7 @@ from bitbank_bot.amounts import AmountPlan
 from bitbank_bot.config import Config
 from bitbank_bot.logging_setup import slog
 from bitbank_bot.money import D, ZERO, ensure_decimal, quantize_price
+from bitbank_bot.rest_client import OrderSubmitUncertain
 from bitbank_bot.strategy import Signal
 
 
@@ -37,6 +38,8 @@ class OrderClient(Protocol):
         *,
         live_confirmed: bool = False,
     ) -> dict[str, Any]: ...
+
+    def get_trade_history(self, pair: str) -> list[dict[str, Any]]: ...
 
 
 @dataclass
@@ -77,6 +80,10 @@ class OrderExecutor:
             return None
         slog("ORDER_STATUS", "refreshed from GET /user/spot/order", order_id=order_id)
         return data
+
+    def submit_order(self, signal: Signal, plan: AmountPlan) -> OrderResult:
+        """Single order path. Strategies must not call Bitbank APIs."""
+        return self.place(signal, plan)
 
     def place(self, signal: Signal, plan: AmountPlan) -> OrderResult:
         slog(
@@ -122,13 +129,23 @@ class OrderExecutor:
                 None,
             )
         if not self.cfg.may_place_live_orders:
+            mode = self.cfg.trading_mode
             slog(
-                "ORDER_INTENT",
-                "DRY_RUN: not calling Bitbank create_order",
+                "WOULD_SUBMIT_ORDER",
+                "full pipeline; not calling Bitbank create_order",
                 side=plan.side,
                 amount=str(plan.amount),
                 price=str(plan.price),
-                mode="DRY_RUN" if self.cfg.dry_run else "LIVE_BLOCKED",
+                mode=mode,
+                kind=signal.kind,
+            )
+            slog(
+                "ORDER_INTENT",
+                "not calling Bitbank create_order",
+                side=plan.side,
+                amount=str(plan.amount),
+                price=str(plan.price),
+                mode=mode if mode else ("DRY_RUN" if self.cfg.dry_run else "LIVE_BLOCKED"),
             )
             if self.cfg.dry_run and self.cfg.simulate_fill:
                 actual = plan.amount * plan.price
@@ -191,18 +208,46 @@ class OrderExecutor:
         if self.cfg.order_type == "limit":
             q = quantize_price(plan.price, self.cfg.price_tick)
             price_str = str(int(q)) if q == q.to_integral_value() else str(q)
-        raw = self.client.create_order(
-            pair=self.cfg.pair,
-            amount=str(plan.amount),
-            side=plan.side,
-            order_type=self.cfg.order_type,
-            price=price_str,
-            post_only=self.cfg.post_only if self.cfg.order_type == "limit" else None,
-            live_confirmed=True,
-        )
+        slog("ORDER_REQUESTED", "submitting live order", side=plan.side, amount=str(plan.amount))
+        try:
+            raw = self.client.create_order(
+                pair=self.cfg.pair,
+                amount=str(plan.amount),
+                side=plan.side,
+                order_type=self.cfg.order_type,
+                price=price_str,
+                post_only=self.cfg.post_only if self.cfg.order_type == "limit" else None,
+                live_confirmed=True,
+            )
+        except OrderSubmitUncertain as exc:
+            slog(
+                "ERROR",
+                "order POST uncertain; verify before resend",
+                error=type(exc).__name__,
+                function="OrderExecutor.place",
+            )
+            recovered = self._recover_after_uncertain_post(plan)
+            if recovered is not None:
+                raw = recovered
+            else:
+                return OrderResult(
+                    False,
+                    "unknown_order_status",
+                    False,
+                    False,
+                    None,
+                    "UNKNOWN",
+                    ZERO,
+                    ZERO,
+                    None,
+                    None,
+                )
         order_id = str(raw.get("order_id") or "")
         status = str(raw.get("status") or "")
         slog("ORDER_ACCEPTED", "order accepted", order_id=order_id, status=status)
+        if order_id:
+            slog("ORDER_ID_RECEIVED", "exchange order id", order_id=order_id)
+            slog("ORDER_ACTIVE", "order on book or filling", order_id=order_id, status=status)
         executed = D(raw.get("executed_amount") or 0)
         avg = D(raw.get("average_price") or 0)
         amount_ordered = D(raw.get("start_amount") or plan.amount)
@@ -229,6 +274,13 @@ class OrderExecutor:
             )
         actual = executed * avg
         reason = "partial_fill" if status == "PARTIALLY_FILLED" else "fill"
+        slog(
+            "PARTIALLY_FILLED" if reason == "partial_fill" else "FULLY_FILLED",
+            "fill state",
+            order_id=order_id,
+            executed_amount=str(executed),
+            remaining=str(amount_ordered - executed),
+        )
         slog(
             "FILL" if reason == "fill" else "ORDER_STATUS",
             "fill" if reason == "fill" else "partial fill; keep polling",
@@ -275,3 +327,71 @@ class OrderExecutor:
             status=status,
         )
         return OrderResult(True, reason, False, False, order_id, status, executed, avg, actual, raw)
+
+    def _recover_after_uncertain_post(self, plan: AmountPlan) -> dict[str, Any] | None:
+        """Verify open/history; resend only if confirmed absent."""
+        if self.client is None:
+            return None
+        try:
+            active = self.client.get_active_orders(self.cfg.pair)
+        except Exception as exc:
+            slog(
+                "ERROR",
+                "cannot verify open orders after uncertain POST",
+                error=type(exc).__name__,
+                function="OrderExecutor._recover_after_uncertain_post",
+            )
+            return None
+        for row in active:
+            if str(row.get("side") or "") == plan.side:
+                slog("ORDER_ACCEPTED", "recovered from active_orders", order_id=row.get("order_id"))
+                return row
+        try:
+            history: list[dict[str, Any]] = []
+            if hasattr(self.client, "get_trade_history"):
+                history = self.client.get_trade_history(self.cfg.pair)
+        except Exception as exec_hist:
+            slog(
+                "ERROR",
+                "trade history lookup failed",
+                error=type(exec_hist).__name__,
+                function="OrderExecutor._recover_after_uncertain_post",
+            )
+            return None
+        for row in history:
+            if str(row.get("side") or "") == plan.side:
+                slog("FULLY_FILLED", "recovered from trade_history", order_id=row.get("order_id"))
+                return {
+                    "order_id": row.get("order_id") or row.get("trade_id"),
+                    "status": "FULLY_FILLED",
+                    "executed_amount": row.get("amount") or plan.amount,
+                    "average_price": row.get("price") or plan.price,
+                    "start_amount": row.get("amount") or plan.amount,
+                }
+        slog("ORDER_STATUS", "uncertain POST confirmed absent; single resend")
+        try:
+            price_str = None
+            if self.cfg.order_type == "limit":
+                q = quantize_price(plan.price, self.cfg.price_tick)
+                price_str = str(int(q)) if q == q.to_integral_value() else str(q)
+            return self.client.create_order(
+                pair=self.cfg.pair,
+                amount=str(plan.amount),
+                side=plan.side,
+                order_type=self.cfg.order_type,
+                price=price_str,
+                post_only=self.cfg.post_only if self.cfg.order_type == "limit" else None,
+                live_confirmed=True,
+            )
+        except Exception as exc:
+            slog(
+                "ERROR",
+                "resend failed; no further POST",
+                error=type(exc).__name__,
+                function="OrderExecutor._recover_after_uncertain_post",
+            )
+            return None
+
+
+class ExecutionEngine(OrderExecutor):
+    """Canonical name for the single Bitbank order path."""

@@ -29,11 +29,19 @@ class BitbankAPIError(RuntimeError):
         code: int | None = None,
         http_status: int | None = None,
         body: Any = None,
+        endpoint: str | None = None,
+        retry_count: int = 0,
     ) -> None:
         super().__init__(message)
         self.code = code
         self.http_status = http_status
         self.body = body
+        self.endpoint = endpoint
+        self.retry_count = retry_count
+
+
+class OrderSubmitUncertain(BitbankAPIError):
+    """POST may have reached Bitbank; do not blindly resend."""
 
 
 def is_auth_error(exc: BitbankAPIError) -> bool:
@@ -126,6 +134,8 @@ class RestClient:
         self._owns_http = http is None
         self.http = http or httpx.Client(timeout=timeout_sec)
         self.limiter = limiter or RateLimiter(query_rps, update_rps)
+        self.last_latency_ms: float | None = None
+        self.last_ok_mono: float = 0.0
 
     def close(self) -> None:
         if self._owns_http:
@@ -146,9 +156,11 @@ class RestClient:
         headers: dict[str, str] | None = None,
         content: bytes | None = None,
         public: bool = False,
+        mutating: bool = False,
     ) -> Any:
         last_error: Exception | None = None
-        attempts = max(1, self.max_retries)
+        attempts = 1 if mutating else max(1, self.max_retries)
+        started = time.monotonic()
         for attempt in range(attempts):
             self.limiter.wait(kind)
             try:
@@ -157,26 +169,45 @@ class RestClient:
                 )
             except httpx.HTTPError as exc:
                 last_error = exc
-                slog("ERROR", "http transport error", error=type(exc).__name__)
+                slog(
+                    "ERROR",
+                    "http transport error",
+                    error=type(exc).__name__,
+                    function="RestClient._request",
+                    endpoint=url.split(".cc")[-1][:80],
+                    retry=attempt,
+                )
+                if mutating:
+                    raise OrderSubmitUncertain(
+                        f"order POST uncertain: {type(exc).__name__}",
+                        endpoint=url,
+                        retry_count=attempt,
+                    ) from exc
                 if attempt + 1 >= attempts:
                     break
                 time.sleep(_backoff_seconds(attempt))
                 continue
             if response.status_code == 429:
-                slog("ERROR", "HTTP 429 rate limited", attempt=attempt)
-                if attempt + 1 >= attempts:
+                slog("ERROR", "HTTP 429 rate limited", attempt=attempt, endpoint=url.split(".cc")[-1][:80])
+                if mutating or attempt + 1 >= attempts:
                     raise BitbankAPIError(
-                        "rate limited", http_status=429, body=response.text
+                        "rate limited",
+                        http_status=429,
+                        body=response.text,
+                        endpoint=url,
+                        retry_count=attempt,
                     )
                 time.sleep(_backoff_seconds(attempt))
                 continue
             if response.status_code >= 500:
                 slog("ERROR", "HTTP 5xx", status=response.status_code, attempt=attempt)
-                if attempt + 1 >= attempts:
+                if mutating or attempt + 1 >= attempts:
                     raise BitbankAPIError(
                         "server error",
                         http_status=response.status_code,
                         body=response.text,
+                        endpoint=url,
+                        retry_count=attempt,
                     )
                 time.sleep(_backoff_seconds(attempt))
                 continue
@@ -185,11 +216,15 @@ class RestClient:
                     f"http {response.status_code}",
                     http_status=response.status_code,
                     body=response.text,
+                    endpoint=url,
+                    retry_count=attempt,
                 )
             try:
                 payload = response.json()
             except json.JSONDecodeError as exc:
-                raise BitbankAPIError("invalid json", body=response.text) from exc
+                raise BitbankAPIError(
+                    "invalid json", body=response.text, endpoint=url, retry_count=attempt
+                ) from exc
             if payload.get("success") != 1:
                 data = payload.get("data") or {}
                 code = data.get("code") if isinstance(data, dict) else None
@@ -198,11 +233,24 @@ class RestClient:
                     code=code,
                     http_status=response.status_code,
                     body=payload,
+                    endpoint=url,
+                    retry_count=attempt,
                 )
+            self.last_latency_ms = (time.monotonic() - started) * 1000.0
+            self.last_ok_mono = time.monotonic()
             stage = "PUBLIC_API" if public else "PRIVATE_API"
-            slog(stage, f"{method} ok", url_path=url.split(".cc")[-1][:80])
+            slog(
+                stage,
+                f"{method} ok",
+                url_path=url.split(".cc")[-1][:80],
+                latency_ms=round(self.last_latency_ms, 1),
+            )
             return payload.get("data")
-        raise BitbankAPIError(f"request failed: {last_error}")
+        raise BitbankAPIError(
+            f"request failed: {last_error}",
+            endpoint=url,
+            retry_count=max(0, attempts - 1),
+        )
 
     def public_get(self, path: str) -> Any:
         if not path.startswith("/"):
@@ -216,11 +264,35 @@ class RestClient:
         return data
 
     def get_candlestick(self, pair: str, candle_type: str, date_key: str) -> list[list[Any]]:
-        data = self.public_get(f"/{pair}/candlestick/{candle_type}/{date_key}")
+        path = f"/{pair}/candlestick/{candle_type}/{date_key}"
+        endpoint = f"{self.public_url}{path}"
+        try:
+            data = self.public_get(path)
+        except BitbankAPIError as exc:
+            exc.endpoint = exc.endpoint or endpoint
+            slog(
+                "CANDLE_API_ERROR",
+                "public candlestick error",
+                pair=pair,
+                type=candle_type,
+                date=date_key,
+                http_status=exc.http_status,
+                bitbank_code=exc.code,
+                endpoint=endpoint,
+                retry_count=exc.retry_count,
+            )
+            raise
         sticks = data.get("candlestick") or []
-        if not sticks:
+        chosen = None
+        for stick in sticks:
+            if str(stick.get("type") or "") == candle_type:
+                chosen = stick
+                break
+        if chosen is None and sticks:
+            chosen = sticks[0]
+        if not chosen:
             return []
-        return list(sticks[0].get("ohlcv") or [])
+        return list(chosen.get("ohlcv") or [])
 
     def get_spot_status(self, pair: str | None = None) -> dict[str, Any] | None:
         url = self.private_url + "/spot/status"
@@ -273,6 +345,7 @@ class RestClient:
             kind=kind,
             headers=headers,
             content=raw.encode("utf-8"),
+            mutating=update,
         )
 
     def get_assets(self) -> dict[str, Any]:
@@ -320,7 +393,23 @@ class RestClient:
             body["price"] = price
         if post_only is not None:
             body["post_only"] = post_only
+        slog("ORDER_REQUESTED", "POST /user/spot/order", pair=pair, side=side)
         return self.private_post("/user/spot/order", body, update=True)
+
+    def cancel_order(
+        self,
+        pair: str,
+        order_id: str,
+        *,
+        live_confirmed: bool = False,
+    ) -> dict[str, Any]:
+        if not live_confirmed:
+            raise BitbankAPIError("refusing cancel_order without live_confirmed")
+        return self.private_post(
+            "/user/spot/cancel_order",
+            {"pair": pair, "order_id": order_id},
+            update=True,
+        )
 
     def get_active_orders(self, pair: str) -> list[dict[str, Any]]:
         data = self.private_get("/user/spot/active_orders", {"pair": pair})

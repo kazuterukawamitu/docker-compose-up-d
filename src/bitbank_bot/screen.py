@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import TextIO
 
+from bitbank_bot.logging_setup import slog
 from bitbank_bot.money import D, ZERO
 
 JST = timezone(timedelta(hours=9))
@@ -18,7 +19,13 @@ WIDTH = 72
 def _commas(value: object) -> str:
     try:
         number = D(value)
-    except Exception:
+    except Exception as exc:
+        slog(
+            "ERROR",
+            "screen number format failed",
+            error=type(exc).__name__,
+            function="screen._commas",
+        )
         return str(value)
     if number == number.to_integral_value():
         return f"{int(number):,}"
@@ -59,7 +66,12 @@ class ScreenView:
 
 
 def format_screen(view: ScreenView) -> str:
-    mode = "DRY_RUN  実注文なし" if not view.live_orders else "LIVE  実注文オン"
+    if view.live_orders:
+        mode = "LIVE  実注文オン"
+    elif view.mode == "LIVE_READY":
+        mode = "LIVE_READY  実注文なし"
+    else:
+        mode = "DRY_RUN  実注文なし"
     pos = "なし"
     if view.in_position:
         pos = (
@@ -125,7 +137,9 @@ class TradingScreen:
         try:
             self.stream.write(CLEAR + text + "\n")
             self.stream.flush()
-        except Exception:
+        except Exception as exc:
+            # stdout can close under the dashboard; keep the loop alive.
+            self.last_text = f"screen write failed: {type(exc).__name__}"
             return
 
 
@@ -154,7 +168,7 @@ def view_from_engine(
 ) -> ScreenView:
     return ScreenView(
         pair=pair,
-        mode="DRY_RUN" if dry_run else "LIVE",
+        mode="DRY_RUN" if dry_run else ("LIVE" if live_orders else "LIVE_READY"),
         live_orders=live_orders,
         price=str(price),
         public_last=str(public_last if public_last not in (None, "") else price),

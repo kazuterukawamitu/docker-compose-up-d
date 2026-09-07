@@ -48,7 +48,7 @@ def test_buy_below_min_rejected() -> None:
     )
     assert not plan.ok
     assert plan.amount == Decimal("0")
-    assert plan.reason == "below_min_amount"
+    assert plan.reason == "amount_below_minimum"
 
 
 def test_buy_invalid_price() -> None:

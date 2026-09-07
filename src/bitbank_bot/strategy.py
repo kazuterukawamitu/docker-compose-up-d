@@ -7,18 +7,24 @@ from decimal import Decimal
 from typing import Sequence
 
 from bitbank_bot.config import Config
+from bitbank_bot.logging_setup import slog
 from bitbank_bot.indicators import (
     Trend,
+    adx as adx_series,
+    atr as atr_series,
     crossed_down,
     crossed_up,
     crossover_price_bp,
     interpolate_crossover,
     is_dead_cross,
     is_golden_cross,
+    last_defined,
     ma_trend,
+    macd as macd_series,
     moving_average,
+    rsi as rsi_series,
 )
-from bitbank_bot.money import ONE, pct_offset
+from bitbank_bot.money import ONE, ZERO, pct_offset
 
 
 @dataclass
@@ -41,6 +47,11 @@ class MarketSnapshot:
     dead_cross: bool
     cross_price: Decimal | None
     crossover_price_bp: Decimal | None = None
+    rsi: Decimal | None = None
+    macd: Decimal | None = None
+    atr: Decimal | None = None
+    adx: Decimal | None = None
+    volume: Decimal | None = None
 
 
 @dataclass
@@ -65,12 +76,25 @@ class Signal:
     peak_price: Decimal | None = None
     origin_price: Decimal | None = None
     crossover_price_bp: Decimal | None = None
+    strategy_name: str = ""
+    signal_strength: int = 0
+    entry_reason: str = ""
 
     @staticmethod
     def hold(reason: str = "no_setup") -> "Signal":
         if not reason:
             raise ValueError("WAIT/HOLD requires an explicit reason")
         return Signal(kind="HOLD", side=None, tp_pct=None, reason=reason)
+
+    @staticmethod
+    def wait(reason: str) -> "Signal":
+        if not reason:
+            raise ValueError("WAIT/HOLD requires an explicit reason")
+        return Signal(kind="WAIT", side=None, tp_pct=None, reason=reason)
+
+    @property
+    def valid(self) -> bool:
+        return self.side in {"buy", "sell"} and bool(self.kind) and bool(self.reason)
 
 
 class Buy3Machine:
@@ -260,9 +284,15 @@ class Strategy:
         if position is not None and not same_entry:
             sell = self._sell_signal(snap)
             if sell.kind != "HOLD":
+                sell.strategy_name = sell.strategy_name or "ma_exit"
+                sell.entry_reason = sell.reason
+                sell.signal_strength = max(sell.signal_strength, 1)
                 return sell
             tp = self._tp_signal(snap, position)
             if tp.kind != "HOLD":
+                tp.strategy_name = "take_profit"
+                tp.entry_reason = tp.reason
+                tp.signal_strength = 1
                 return tp
             return Signal.hold("in_position_no_sell_or_tp")
         if position is not None and same_entry:
@@ -326,11 +356,44 @@ class Strategy:
         return Signal.hold("no_sell_setup")
 
     def _buy_signal(self, snap: MarketSnapshot) -> Signal:
-        if (
-            snap.prev_ma_trend == Trend.DOWN
-            and snap.ma_trend in {Trend.FLAT, Trend.UP}
-            and snap.crossed_up
-        ):
+        trend_left_down = snap.prev_ma_trend == Trend.DOWN and snap.ma_trend in {
+            Trend.FLAT,
+            Trend.UP,
+        }
+        pullback = self.buy3.phase in {"extended", "pullback"} or self._buy3
+        gates = {
+            "trend": trend_left_down or snap.ma_trend == Trend.UP,
+            "pullback": bool(pullback),
+            "crossed_up": snap.crossed_up,
+            "volume": snap.close > ZERO,
+        }
+        score = sum(1 for ok in gates.values() if ok)
+        slog(
+            "BUY_CHECK",
+            "granville gates",
+            trend=snap.ma_trend.value,
+            prev_trend=snap.prev_ma_trend.value,
+            pullback=gates["pullback"],
+            crossed_up=snap.crossed_up,
+            crossed_down=snap.crossed_down,
+            volume=str(snap.volume) if snap.volume is not None else "",
+            score=f"{score}/4",
+            ma=str(snap.ma),
+            rsi=str(snap.rsi) if snap.rsi is not None else None,
+            macd=str(snap.macd) if snap.macd is not None else None,
+            atr=str(snap.atr) if snap.atr is not None else None,
+            htf="pending",
+        )
+        slog(
+            "BUY_GATE",
+            "conditions",
+            trend=gates["trend"],
+            pullback=gates["pullback"],
+            crossed_up=gates["crossed_up"],
+            volume=gates["volume"],
+            score=f"{score}/4",
+        )
+        if trend_left_down and snap.crossed_up:
             return Signal(
                 "BUY1",
                 "buy",
@@ -339,6 +402,9 @@ class Strategy:
                 cross_price=snap.cross_price,
                 crossover_price_bp=snap.crossover_price_bp
                 or crossover_price_bp(snap.cross_price),
+                strategy_name="granville",
+                signal_strength=score,
+                entry_reason="MA left downtrend and price crossed above MA",
             )
         if snap.ma_trend == Trend.UP and snap.crossed_down:
             tp = self.cfg.buy2_golden_tp if snap.golden_cross else self.cfg.buy2_tp
@@ -351,6 +417,9 @@ class Strategy:
                 cross_price=snap.cross_price,
                 crossover_price_bp=snap.crossover_price_bp
                 or crossover_price_bp(snap.cross_price),
+                strategy_name="ema_pullback" if self.cfg.ma_kind == "ema" else "ma_pullback",
+                signal_strength=score,
+                entry_reason="MA uptrend and price crossed below MA",
             )
         if self._buy3:
             return Signal(
@@ -359,6 +428,9 @@ class Strategy:
                 self.cfg.buy3_tp,
                 "pullback then bounce above MA",
                 origin_price=self.buy3.origin,
+                strategy_name="breakout_pullback",
+                signal_strength=score,
+                entry_reason="pullback then bounce above MA",
             )
         if self._buy4:
             return Signal(
@@ -367,6 +439,9 @@ class Strategy:
                 self.cfg.buy4_tp,
                 "downtrend MA, price >=5% below, then rising",
                 origin_price=self.buy4.origin,
+                strategy_name="buy_the_dip",
+                signal_strength=score,
+                entry_reason="downtrend MA, price >=5% below, then rising",
             )
         return Signal.hold("no_buy_setup")
 
@@ -426,3 +501,24 @@ def build_snapshots(
         )
         prev_trend = trend
     return snaps
+
+
+def enrich_snapshots(snaps: list[MarketSnapshot], candles: Sequence[object], cfg: Config) -> None:
+    """Attach RSI/MACD/ATR/ADX/volume for diagnostics. Does not change gates."""
+    if not snaps or not candles:
+        return
+    closes = [c.close for c in candles]  # type: ignore[attr-defined]
+    highs = [c.high for c in candles]  # type: ignore[attr-defined]
+    lows = [c.low for c in candles]  # type: ignore[attr-defined]
+    volumes = [c.volume for c in candles]  # type: ignore[attr-defined]
+    rsis = rsi_series(closes, cfg.rsi_period)
+    macd_line, _sig, _hist = macd_series(closes, cfg.macd_fast, cfg.macd_slow, cfg.macd_signal)
+    atrs = atr_series(highs, lows, closes, cfg.atr_period)
+    adxs = adx_series(highs, lows, closes, cfg.adx_period)
+    for snap in snaps:
+        i = snap.index
+        snap.rsi = rsis[i] if i < len(rsis) else last_defined(rsis)
+        snap.macd = macd_line[i] if i < len(macd_line) else last_defined(macd_line)
+        snap.atr = atrs[i] if i < len(atrs) else last_defined(atrs)
+        snap.adx = adxs[i] if i < len(adxs) else last_defined(adxs)
+        snap.volume = volumes[i] if i < len(volumes) else None
