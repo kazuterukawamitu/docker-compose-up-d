@@ -59,7 +59,12 @@ class ScreenView:
 
 
 def format_screen(view: ScreenView) -> str:
-    mode = "DRY_RUN  実注文なし" if not view.live_orders else "LIVE  実注文オン"
+    if view.live_orders:
+        mode = "LIVE  実注文オン"
+    elif view.mode == "LIVE_READY":
+        mode = "LIVE_READY  WOULD_SUBMIT"
+    else:
+        mode = "DRY_RUN  実注文なし"
     pos = "なし"
     if view.in_position:
         pos = (
@@ -151,10 +156,12 @@ def view_from_engine(
     block_reason: str = "",
     error: str = "",
     candle_type: str = "1hour",
+    trading_mode: str = "dry_run",
 ) -> ScreenView:
+    mode_label = trading_mode.upper() if trading_mode else ("DRY_RUN" if dry_run else "LIVE")
     return ScreenView(
         pair=pair,
-        mode="DRY_RUN" if dry_run else "LIVE",
+        mode=mode_label,
         live_orders=live_orders,
         price=str(price),
         public_last=str(public_last if public_last not in (None, "") else price),

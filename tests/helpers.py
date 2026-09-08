@@ -11,6 +11,14 @@ def cfg(**overrides: object) -> Config:
     base = Config()
     for key, value in overrides.items():
         setattr(base, key, value)
+    if base.live_trading and not base.dry_run:
+        if "trading_mode" not in overrides:
+            base.trading_mode = "live"
+        if "live_confirm" not in overrides:
+            base.live_confirm = True
+    elif not base.dry_run and not base.live_trading:
+        if "trading_mode" not in overrides:
+            base.trading_mode = "live_ready"
     return base
 
 

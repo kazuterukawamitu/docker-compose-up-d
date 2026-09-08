@@ -36,16 +36,27 @@ def test_pair_normalize_and_reject() -> None:
 
 
 def test_dual_flag_required_for_live() -> None:
-    with pytest.raises(ConfigError, match="dual confirmation"):
-        load_config(environ={"DRY_RUN": "false"}, load_default_dotenv=False)
+    ready = load_config(environ={"DRY_RUN": "false"}, load_default_dotenv=False)
+    assert ready.trading_mode == "live_ready"
+    assert ready.may_place_live_orders is False
     with pytest.raises(ConfigError, match="cannot both"):
         load_config(
             environ={"DRY_RUN": "true", "LIVE_TRADING": "true"},
             load_default_dotenv=False,
         )
-    with pytest.raises(ConfigError, match="requires BITBANK_API"):
+    unconfirmed = load_config(
+        environ={"DRY_RUN": "false", "LIVE_TRADING": "true"},
+        load_default_dotenv=False,
+    )
+    assert unconfirmed.trading_mode == "live_ready"
+    assert unconfirmed.may_place_live_orders is False
+    with pytest.raises(ConfigError, match="requires BITBANK_API|LIVE requires"):
         load_config(
-            environ={"DRY_RUN": "false", "LIVE_TRADING": "true"},
+            environ={
+                "DRY_RUN": "false",
+                "LIVE_TRADING": "true",
+                "LIVE_TRADING_CONFIRM": "YES_I_ACCEPT_REAL_MONEY_RISK",
+            },
             load_default_dotenv=False,
         )
 

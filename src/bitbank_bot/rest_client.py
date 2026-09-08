@@ -29,11 +29,24 @@ class BitbankAPIError(RuntimeError):
         code: int | None = None,
         http_status: int | None = None,
         body: Any = None,
+        *,
+        endpoint: str | None = None,
+        pair: str | None = None,
+        candle_type: str | None = None,
+        date_key: str | None = None,
+        retry_count: int = 0,
+        unknown_submit: bool = False,
     ) -> None:
         super().__init__(message)
         self.code = code
         self.http_status = http_status
         self.body = body
+        self.endpoint = endpoint
+        self.pair = pair
+        self.candle_type = candle_type
+        self.date_key = date_key
+        self.retry_count = retry_count
+        self.unknown_submit = unknown_submit
 
 
 def is_auth_error(exc: BitbankAPIError) -> bool:
@@ -146,9 +159,13 @@ class RestClient:
         headers: dict[str, str] | None = None,
         content: bytes | None = None,
         public: bool = False,
+        retries: int | None = None,
+        endpoint: str | None = None,
     ) -> Any:
         last_error: Exception | None = None
-        attempts = max(1, self.max_retries)
+        attempts = self.max_retries if retries is None else retries
+        attempts = max(1, attempts)
+        path_hint = endpoint or url.split(".cc")[-1][:80]
         for attempt in range(attempts):
             self.limiter.wait(kind)
             try:
@@ -157,26 +174,45 @@ class RestClient:
                 )
             except httpx.HTTPError as exc:
                 last_error = exc
-                slog("ERROR", "http transport error", error=type(exc).__name__)
+                slog(
+                    "ERROR",
+                    "http transport error",
+                    error=type(exc).__name__,
+                    endpoint=path_hint,
+                    retry_count=attempt,
+                    method=method,
+                )
                 if attempt + 1 >= attempts:
-                    break
+                    raise BitbankAPIError(
+                        f"request failed: {type(exc).__name__}",
+                        endpoint=path_hint,
+                        retry_count=attempt + 1,
+                        unknown_submit=(method.upper() == "POST"),
+                    ) from exc
                 time.sleep(_backoff_seconds(attempt))
                 continue
             if response.status_code == 429:
-                slog("ERROR", "HTTP 429 rate limited", attempt=attempt)
+                slog("ERROR", "HTTP 429 rate limited", attempt=attempt, endpoint=path_hint)
                 if attempt + 1 >= attempts:
                     raise BitbankAPIError(
-                        "rate limited", http_status=429, body=response.text
+                        "rate limited",
+                        http_status=429,
+                        body=response.text,
+                        endpoint=path_hint,
+                        retry_count=attempt + 1,
                     )
                 time.sleep(_backoff_seconds(attempt))
                 continue
             if response.status_code >= 500:
-                slog("ERROR", "HTTP 5xx", status=response.status_code, attempt=attempt)
+                slog("ERROR", "HTTP 5xx", status=response.status_code, attempt=attempt, endpoint=path_hint)
                 if attempt + 1 >= attempts:
                     raise BitbankAPIError(
                         "server error",
                         http_status=response.status_code,
                         body=response.text,
+                        endpoint=path_hint,
+                        retry_count=attempt + 1,
+                        unknown_submit=(method.upper() == "POST"),
                     )
                 time.sleep(_backoff_seconds(attempt))
                 continue
@@ -185,11 +221,15 @@ class RestClient:
                     f"http {response.status_code}",
                     http_status=response.status_code,
                     body=response.text,
+                    endpoint=path_hint,
+                    retry_count=attempt,
                 )
             try:
                 payload = response.json()
             except json.JSONDecodeError as exc:
-                raise BitbankAPIError("invalid json", body=response.text) from exc
+                raise BitbankAPIError(
+                    "invalid json", body=response.text, endpoint=path_hint
+                ) from exc
             if payload.get("success") != 1:
                 data = payload.get("data") or {}
                 code = data.get("code") if isinstance(data, dict) else None
@@ -198,11 +238,13 @@ class RestClient:
                     code=code,
                     http_status=response.status_code,
                     body=payload,
+                    endpoint=path_hint,
+                    retry_count=attempt,
                 )
             stage = "PUBLIC_API" if public else "PRIVATE_API"
-            slog(stage, f"{method} ok", url_path=url.split(".cc")[-1][:80])
+            slog(stage, f"{method} ok", url_path=path_hint)
             return payload.get("data")
-        raise BitbankAPIError(f"request failed: {last_error}")
+        raise BitbankAPIError(f"request failed: {last_error}", endpoint=path_hint)
 
     def public_get(self, path: str) -> Any:
         if not path.startswith("/"):
@@ -216,7 +258,26 @@ class RestClient:
         return data
 
     def get_candlestick(self, pair: str, candle_type: str, date_key: str) -> list[list[Any]]:
-        data = self.public_get(f"/{pair}/candlestick/{candle_type}/{date_key}")
+        endpoint = f"/{pair}/candlestick/{candle_type}/{date_key}"
+        try:
+            data = self.public_get(endpoint)
+        except BitbankAPIError as exc:
+            exc.endpoint = endpoint
+            exc.pair = pair
+            exc.candle_type = candle_type
+            exc.date_key = date_key
+            slog(
+                "CANDLE_API_ERROR",
+                "candlestick failed",
+                pair=pair,
+                type=candle_type,
+                date=date_key,
+                http_status=exc.http_status,
+                bitbank_code=exc.code,
+                endpoint=endpoint,
+                retry_count=exc.retry_count,
+            )
+            raise
         sticks = data.get("candlestick") or []
         if not sticks:
             return []
@@ -273,6 +334,8 @@ class RestClient:
             kind=kind,
             headers=headers,
             content=raw.encode("utf-8"),
+            retries=1,
+            endpoint=path,
         )
 
     def get_assets(self) -> dict[str, Any]:
@@ -305,6 +368,7 @@ class RestClient:
         order_type: str,
         price: str | None = None,
         post_only: bool | None = None,
+        identifier: str | None = None,
         *,
         live_confirmed: bool = False,
     ) -> dict[str, Any]:
@@ -320,6 +384,8 @@ class RestClient:
             body["price"] = price
         if post_only is not None:
             body["post_only"] = post_only
+        if identifier:
+            body["identifier"] = identifier
         return self.private_post("/user/spot/order", body, update=True)
 
     def get_active_orders(self, pair: str) -> list[dict[str, Any]]:

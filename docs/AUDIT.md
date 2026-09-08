@@ -7,7 +7,13 @@ runnable bot lives in `src/bitbank_bot/`. This branch is Bitbank `btc_jpy` only.
 
 | Area | Where | Role |
 | --- | --- | --- |
-| Config / dual live flags | `config.py` | `DRY_RUN` default; live needs `DRY_RUN=false` and `LIVE_TRADING=true` and keys |
+| Config / trading modes | `config.py` | `dry_run` / `live_ready` / `live`; live needs confirm phrase + keys |
+| RateEngine | `rate_engine.py` | FIXED (BUY1–4 TPs) / DYNAMIC (ATR/ADX) / AUTO |
+| Execution gate | `execution_gate.py`, `trade_signal_executor.py` | Blocks synthetic LIVE; WOULD_SUBMIT in LIVE_READY |
+| Connection health | `connection_manager.py` | REST/WS score; heartbeat no longer always logs REST OK |
+| Self-healing | `self_healing.py` | Classify errors; GET retry; POST is not retried |
+| Reconciliation | `reconciliation.py` | Bitbank balances/open orders vs bot state |
+| Execution monitor | `execution_monitor.py` | Poll UNFILLED / PARTIAL / FULL |
 | Public + private REST | `rest_client.py` | HMAC `ACCESS-TIME-WINDOW`; `create_order` requires `live_confirmed` |
 | README MA rules | `strategy.py`, `docs/STRATEGY.md` | BUY1–4 / SELL1–4; HOLD always has a reason |
 | Size | `amounts.py` | Only place that sets quantity; TARGET vs PLANNED; ACTUAL unset until fill |
@@ -35,9 +41,31 @@ bitFlyer, Coincheck, and GMO are not imported and are not executed.
 
 ## Order-path gaps this branch closes
 
-1. **Accidental synthetic fallback.** If the public candle API fails, the loop
-   used to evaluate *and execute* against generated bars. Execution is now off
-   unless `--synthetic` was requested. Watchdog is `FAIL` / `synthetic_fallback_no_orders`.
+1. **False synthetic fallback with a warm cache.** After the first successful
+   history load, a failed or empty *latest-only* candle fetch used to set
+   `synthetic_fallback_no_orders` and disable execution while still showing
+   thousands of cached bars (`candles loaded count=0` then `3922` closed).
+   Latest-only now keeps the real cache (and fetches today+yesterday for short
+   candles). Synthetic fallback remains only when there is **no** real cache.
+2. **Candle API errors swallowed.** `CANDLE_API_ERROR` logs pair, type, date,
+   HTTP status, and Bitbank code (never the API secret).
+3. **Unconditional HEARTBEAT REST/MARKET OK.** Heartbeat now reports
+   `connection_state` and `health_score` from actual REST/WS timestamps.
+4. **POST `/user/spot/order` retries.** Side-effecting private POSTs no longer
+   share GET exponential retry. Timeouts search open orders by `identifier`
+   before any resend.
+5. **LIVE_READY.** `DRY_RUN=false` without
+   `LIVE_TRADING_CONFIRM=YES_I_ACCEPT_REAL_MONEY_RISK` does not POST; it logs
+   `WOULD_SUBMIT_ORDER`.
+6. **BUY_GATE.** HOLD/`no_buy_setup` logs which Granville/MA conditions failed.
+   Conditions were not relaxed.
+7. **Rate modes.** FIXED keeps BUY1 +3%, BUY2 +5%/+8% golden, BUY3 +4%, BUY4 +5%.
+   DYNAMIC/AUTO clamp TP/SL/risk; abnormal ATR cannot place DYNAMIC orders.
+
+Previously closed gaps (still true):
+
+1. **Accidental synthetic fallback.** If the public candle API fails *and the
+   cache is empty*, execution stays off unless `--synthetic` was requested.
 2. **15-minute HOLD.** Healthy no-trade is `LONG_WAIT`, not a crashed bot.
 3. **Live UNFILLED limits.** `accepted_unfilled` is stored in `state.pending`
    and polled via `GET /user/spot/order`. New signals wait until that order

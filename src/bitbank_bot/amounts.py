@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 
 from bitbank_bot.config import Config
+from bitbank_bot.logging_setup import slog
 from bitbank_bot.money import D, ONE, ZERO, meets_min_amount, truncate
 from bitbank_bot.risk import RiskManager
 
@@ -38,6 +39,9 @@ def plan_buy(
     cfg: Config,
     risk: RiskManager,
     target_jpy: Decimal | None = None,
+    risk_pct: Decimal | None = None,
+    stop_loss_pct: Decimal | None = None,
+    size_multiplier: Decimal | None = None,
 ) -> AmountPlan:
     available_jpy = D(available_jpy)
     available_btc = D(available_btc)
@@ -64,6 +68,23 @@ def plan_buy(
         target_jpy = D(target_jpy)
     usable_jpy = min(target_jpy, max_usable_jpy)
     balance_btc = usable_jpy / price
+    if (
+        risk_pct is not None
+        and stop_loss_pct is not None
+        and D(risk_pct) > ZERO
+        and D(stop_loss_pct) > ZERO
+    ):
+        equity = available_jpy + available_btc * price
+        risk_jpy = equity * D(risk_pct)
+        loss_per_btc = price * D(stop_loss_pct)
+        if loss_per_btc > ZERO:
+            risk_size = risk_jpy / loss_per_btc
+            balance_btc = min(balance_btc, risk_size)
+    if size_multiplier is not None and D(size_multiplier) > ZERO:
+        balance_btc = balance_btc * D(size_multiplier)
+    notional = balance_btc * price
+    if notional > usable_jpy:
+        balance_btc = usable_jpy / price
     decision = risk.check_buy(available_btc, balance_btc)
     raw = min(balance_btc, decision.capped_btc) if decision.allowed else ZERO
     amount = truncate(raw, cfg.amount_precision)
@@ -77,6 +98,14 @@ def plan_buy(
         reason = "below_min_amount"
     else:
         reason = "insufficient"
+    if not ok:
+        slog(
+            "ORDER_BLOCKED",
+            f"reason={reason}",
+            side="buy",
+            amount=str(amount),
+            available_jpy=str(available_jpy),
+        )
     return AmountPlan(
         side="buy",
         amount=amount if ok else ZERO,
@@ -122,6 +151,14 @@ def plan_sell(
         reason = "below_min_amount"
     else:
         reason = "insufficient"
+    if not ok:
+        slog(
+            "ORDER_BLOCKED",
+            f"reason={reason}",
+            side="sell",
+            amount=str(amount),
+            available_btc=str(available_btc),
+        )
     return AmountPlan(
         side="sell",
         amount=amount if ok else ZERO,
@@ -152,6 +189,9 @@ class PositionSizer:
         available_btc: Decimal,
         price: Decimal,
         target_jpy: Decimal | None = None,
+        risk_pct: Decimal | None = None,
+        stop_loss_pct: Decimal | None = None,
+        size_multiplier: Decimal | None = None,
     ) -> AmountPlan:
         return plan_buy(
             available_jpy=available_jpy,
@@ -160,6 +200,9 @@ class PositionSizer:
             cfg=self.cfg,
             risk=self.risk,
             target_jpy=target_jpy,
+            risk_pct=risk_pct,
+            stop_loss_pct=stop_loss_pct,
+            size_multiplier=size_multiplier,
         )
 
     def plan_sell(
