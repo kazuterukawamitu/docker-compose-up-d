@@ -46,7 +46,15 @@ def _fetch_type(client: RestClient, pair: str, candle_type: str) -> list[Candle]
         try:
             rows = client.get_candlestick(pair, candle_type, key)
         except Exception as exc:
-            slog("MARKET", "htf fetch skipped", candle_type=candle_type, error=type(exc).__name__)
+            slog(
+                "CANDLE_API_ERROR",
+                "htf fetch skipped",
+                candle_type=candle_type,
+                pair=pair,
+                error=type(exc).__name__,
+                http_status=getattr(exc, "http_status", None),
+                bitbank_code=getattr(exc, "code", None),
+            )
             continue
         for row in rows:
             try:

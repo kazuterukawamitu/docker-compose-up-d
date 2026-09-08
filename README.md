@@ -26,7 +26,9 @@ python3 run.py
 
 `python3 main.py` also works: it uses the full package when httpx is installed, otherwise the same stdlib `run.py`.
 
-Live trading stays **off** unless `.env` has `DRY_RUN=false` **and** `LIVE_TRADING=true` **and** both API keys.
+Live trading stays **off** unless `.env` has `TRADING_MODE=live` **and**
+`LIVE_TRADING_CONFIRM=YES_I_ACCEPT_REAL_MONEY_RISK` **and** both API keys.
+`DRY_RUN=false` without that confirm phrase is `LIVE_READY` (WOULD_SUBMIT_ORDER only).
 
 `--once --synthetic` is a one-cycle smoke test that **exits on purpose**. The launcher above does **not** use `--once`.
 

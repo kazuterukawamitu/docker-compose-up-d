@@ -8,7 +8,7 @@ import sys
 from bitbank_bot.config import ConfigError, load_config
 from bitbank_bot.engine import Engine, install_signal_handlers
 from bitbank_bot.instance_lock import InstanceLock, InstanceLockError
-from bitbank_bot.logging_setup import setup_logging, slog
+from bitbank_bot.logging_setup import init_sentry, setup_logging, slog
 from bitbank_bot.preflight import preflight
 from bitbank_bot.rest_client import RestClient
 from bitbank_bot.screen import TradingScreen, should_use_screen
@@ -70,8 +70,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.dry_run:
         cfg.dry_run = True
         cfg.live_trading = False
+        cfg.live_confirm = False
+        cfg.trading_mode = "dry_run"
     use_screen = should_use_screen(args, sys.stdout)
     setup_logging(cfg.log_level, cfg.log_dir, console=not use_screen)
+    init_sentry(cfg.sentry_dsn)
     slog("BOOT", "starting", **cfg.safe_dict())
     slog(
         "BOOT",

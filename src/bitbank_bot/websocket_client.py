@@ -31,8 +31,17 @@ class BitbankWebsocket:
         self._thread: threading.Thread | None = None
         self._lock = threading.Lock()
         self._last_event_mono = 0.0
+        self._last_message_mono = 0.0
         self._connected = False
         self.last_ticker: dict[str, Any] | None = None
+
+    @property
+    def last_ticker_mono(self) -> float:
+        return self._last_event_mono
+
+    @property
+    def last_message_mono(self) -> float:
+        return self._last_message_mono
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -64,7 +73,11 @@ class BitbankWebsocket:
         return (time.monotonic() - self._last_event_mono) > self.stale_sec
 
     def is_connected(self) -> bool:
-        return self._connected and not self.is_stale()
+        if not self._connected:
+            return False
+        if self._last_message_mono <= 0:
+            return True
+        return (time.monotonic() - self._last_message_mono) <= max(self.stale_sec * 2, 90.0)
 
     def last_price(self) -> Any:
         if not self.last_ticker:
@@ -122,9 +135,13 @@ class BitbankWebsocket:
                     continue
                 if raw == "2":
                     ws.send("3")
+                    with self._lock:
+                        self._last_message_mono = time.monotonic()
                     continue
                 if raw.startswith("40"):
                     self._connected = True
+                    with self._lock:
+                        self._last_message_mono = time.monotonic()
                     for room in self.rooms:
                         ws.send(f'42["join-room","{room}"]')
                     slog("WEBSOCKET", "joined rooms", rooms=",".join(self.rooms))
@@ -148,7 +165,9 @@ class BitbankWebsocket:
         if not isinstance(inner, dict):
             inner = {}
         with self._lock:
-            self._last_event_mono = time.monotonic()
+            now = time.monotonic()
+            self._last_event_mono = now
+            self._last_message_mono = now
             if room.startswith("ticker_"):
                 self.last_ticker = inner
         if self.on_message:

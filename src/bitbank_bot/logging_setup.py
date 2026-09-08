@@ -7,6 +7,7 @@ import logging
 import re
 import sys
 from datetime import datetime, timezone
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any
 
@@ -55,11 +56,44 @@ def setup_logging(
         stream.setFormatter(formatter)
         stream.addFilter(_RedactFilter())
         root.addHandler(stream)
-    file_handler = logging.FileHandler(Path(log_dir) / "bot.log", encoding="utf-8")
+    file_handler = RotatingFileHandler(
+        Path(log_dir) / "bot.log",
+        maxBytes=10 * 1024 * 1024,
+        backupCount=5,
+        encoding="utf-8",
+    )
     file_handler.setFormatter(formatter)
     file_handler.addFilter(_RedactFilter())
     root.addHandler(file_handler)
     _CONFIGURED = True
+
+
+def init_sentry(dsn: str, release: str = "bitbank-bot@0.1.0") -> None:
+    if not dsn:
+        return
+    try:
+        import sentry_sdk
+    except ImportError:
+        slog("BOOT", "sentry sdk not installed; continuing without it")
+        return
+
+    def before_send(event: dict[str, Any], _hint: dict[str, Any]) -> dict[str, Any] | None:
+        text = json.dumps(event, default=str)
+        if _SECRET_FIELD.search(text) or _HEX_SECRET.search(text):
+            slog("ERROR", "sentry event dropped; contained secret-like field")
+            return None
+        event.setdefault("tags", {})
+        event["tags"].update({"exchange": "bitbank", "pair": "btc_jpy"})
+        return event
+
+    sentry_sdk.init(
+        dsn=dsn,
+        send_default_pii=False,
+        release=release,
+        environment="bitbank-bot",
+        before_send=before_send,
+    )
+    slog("BOOT", "sentry enabled", release=release)
 
 
 def slog(stage: str, message: str, *, level: int = logging.INFO, **fields: Any) -> None:
