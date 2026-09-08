@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
 # Bitbank BTC/JPY launcher — opens the iTerm 取引画面 (trading screen).
 #
-# Paste this ONE line in iTerm (zsh is fine; this wraps bash):
-#   bash -lc 'REPO="$HOME/docker-compose-up-d"; set -euo pipefail; if [ ! -d "$REPO/.git" ]; then git clone https://github.com/kazuterukawamitu/docker-compose-up-d.git "$REPO"; fi; cd "$REPO"; git fetch origin cursor/bitbank-audit-unify-f5fd; git checkout -B cursor/bitbank-audit-unify-f5fd origin/cursor/bitbank-audit-unify-f5fd; exec bash ./start.sh --screen'
+# Paste this ONE line in iTerm from ANY directory, including ~ (zsh is fine):
+#   bash -lc 'REPO="$HOME/docker-compose-up-d"; set -euo pipefail; if [ ! -d "$REPO/.git" ]; then git clone https://github.com/kazuterukawamitu/docker-compose-up-d.git "$REPO"; fi; cd "$REPO"; git fetch origin cursor/bitbank-closed-loop-execution-dee2; git checkout -B cursor/bitbank-closed-loop-execution-dee2 origin/cursor/bitbank-closed-loop-execution-dee2; exec bash ./start.sh --screen'
 #
-# That line clones if needed, checks out the bot branch (main is wiki HTML only),
-# then opens the trading dashboard. Do not paste python3 main.py. Do not use !.
+# If the repo is already at ~/docker-compose-up-d:
+#   bash "$HOME/docker-compose-up-d/start.sh" --screen
+#
+# That clones if needed, checks out the bot branch (GitHub main is wiki HTML only),
+# then opens the trading dashboard. Never run `python3 main.py` from ~ — main.py
+# is not in your home folder. Do not use !.
 
 if [ -z "${BASH_VERSION:-}" ]; then
   exec /usr/bin/env bash "$0" "$@"
@@ -20,7 +24,7 @@ export PYTHONIOENCODING=utf-8
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT"
 
-BOT_BRANCH="cursor/bitbank-audit-unify-f5fd"
+BOT_BRANCH="cursor/bitbank-closed-loop-execution-dee2"
 
 ensure_bot_source() {
   if [[ -f "$ROOT/src/bitbank_bot/__init__.py" && -f "$ROOT/main.py" ]]; then

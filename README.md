@@ -2,35 +2,90 @@
 
 Bitbank-only `btc_jpy` bot. Default is a **continuous DRY_RUN loop** with an iTerm **取引画面** (trading dashboard). HOLD/WAIT on a bar is normal. JSON lines are written to `logs/bot.log`, not the dashboard.
 
-`main` on GitHub is still wiki HTML. The runnable bot is branch `cursor/bitbank-audit-unify-f5fd`.
+`main` on GitHub is still wiki HTML. The runnable bot is branch `cursor/bitbank-closed-loop-execution-dee2`.
 
 HOLD for 15 minutes while market data and strategy are healthy is `LONG_WAIT`, not a crash. Public-API fallback candles never place orders. Live UNFILLED limits are persisted and polled. New BUY is blocked when both 4h and 1d SMA slopes are down (`ENABLE_HTF_FILTER`).
 
 ## Start (this is the program)
 
-`main` on GitHub is wiki HTML. You do **not** need pip, venv, or `start.sh` for the bot to run.
+`main` on GitHub is wiki HTML. The runnable bot is on a `cursor/…` branch (see commands below).
 
-Paste **this one line** in iTerm. It downloads `run.py` and starts a DRY_RUN 取引画面 (no orders):
+### If you see `can't open file '.../main.py'`
+
+iTerm2 opened in your **home folder** (`~` in the prompt). `python3 main.py` then looks for `/Users/<you>/main.py`, which does not exist. `main.py` is inside the cloned repo, not in `~`.
+
+**Wrong** (prompt is `~ %`):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/kazuterukawamitu/docker-compose-up-d/cursor/bitbank-audit-unify-f5fd/run.py -o "$HOME/bitbank_run.py" && python3 "$HOME/bitbank_run.py"
+python3 main.py --once --skip-lock --no-screen
 ```
 
-You should see `Bitbank  BTC/JPY  取引画面`. HOLD/待機 is normal. Stop with Ctrl-C.
+**Right** — `cd` into the clone first, or call `start.sh` by full path (both work while the prompt still says `~ %`):
 
-If this repo is already checked out on this branch:
+```bash
+cd "$HOME/docker-compose-up-d" && bash ./start.sh --screen
+```
+
+```bash
+bash "$HOME/docker-compose-up-d/start.sh" --screen
+```
+
+Find the clone if it is not at `~/docker-compose-up-d`:
+
+```bash
+ls "$HOME/docker-compose-up-d/main.py"
+find "$HOME" -name main.py -path '*docker-compose-up-d*' 2>/dev/null
+```
+
+### Continuous DRY_RUN 取引画面 (normal startup)
+
+This keeps the program running. HOLD/待機 is normal. Stop with Ctrl-C. No live orders.
+
+**Already cloned** at `~/docker-compose-up-d`:
+
+```bash
+bash "$HOME/docker-compose-up-d/scripts/iterm2-from-home.sh"
+```
+
+**First time on this Mac** (clone if needed, then start):
+
+```bash
+bash -lc 'REPO="$HOME/docker-compose-up-d"; set -euo pipefail; if [ ! -d "$REPO/.git" ]; then git clone https://github.com/kazuterukawamitu/docker-compose-up-d.git "$REPO"; fi; cd "$REPO"; git fetch origin cursor/bitbank-closed-loop-execution-dee2; git checkout -B cursor/bitbank-closed-loop-execution-dee2 origin/cursor/bitbank-closed-loop-execution-dee2; exec bash ./start.sh --screen'
+```
+
+**No git clone** (stdlib dashboard only; writes `~/bitbank_run.py`):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kazuterukawamitu/docker-compose-up-d/cursor/bitbank-closed-loop-execution-dee2/run.py -o "$HOME/bitbank_run.py" && python3 "$HOME/bitbank_run.py"
+```
+
+You should see `Bitbank  BTC/JPY  取引画面`.
+
+If you are already inside the repo folder (`ls main.py` works):
 
 ```bash
 python3 run.py
 ```
 
-`python3 main.py` also works: it uses the full package when httpx is installed, otherwise the same stdlib `run.py`.
+`python3 main.py` also works **from that folder**: full package when httpx is installed, otherwise the same stdlib `run.py`.
+
+### One-cycle smoke test (exits on purpose)
+
+Use this only to check that Python can load the bot. It is **not** the normal startup; `--once` exits after one cycle.
+
+```bash
+cd "$HOME/docker-compose-up-d" && DRY_RUN=true LIVE_TRADING=false ENABLE_WEBSOCKET=false python3 main.py --once --skip-lock --no-screen
+```
+
+Or without `cd`, from `~`:
+
+```bash
+DRY_RUN=true LIVE_TRADING=false ENABLE_WEBSOCKET=false bash "$HOME/docker-compose-up-d/start.sh" --once --skip-lock --no-screen
+```
 
 Live trading stays **off** unless `.env` has `TRADING_MODE=live` **and**
 `LIVE_TRADING_CONFIRM=YES_I_ACCEPT_REAL_MONEY_RISK` **and** both API keys.
 `DRY_RUN=false` without that confirm phrase is `LIVE_READY` (WOULD_SUBMIT_ORDER only).
-
-`--once --synthetic` is a one-cycle smoke test that **exits on purpose**. The launcher above does **not** use `--once`.
 
 
 ## Strategy (from original README)

@@ -1,8 +1,15 @@
 #!/usr/bin/env python3
 """Repo-root launcher. Prefers the full package; falls back to stdlib run.py.
 
+Run from this directory (the clone), not from ~ :
+
+    cd /path/to/docker-compose-up-d
     python3 main.py
     python3 run.py
+
+From home (~) on a Mac, use a full path instead:
+
+    bash "$HOME/docker-compose-up-d/start.sh" --screen
 
 Both stay DRY_RUN. Neither places a Bitbank order.
 """
