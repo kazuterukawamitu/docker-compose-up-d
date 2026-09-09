@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from logging.handlers import RotatingFileHandler
 import re
 import sys
 from datetime import datetime, timezone
@@ -43,6 +44,8 @@ def setup_logging(
     log_dir: str = "logs",
     *,
     console: bool = True,
+    max_bytes: int = 10_485_760,
+    backup_count: int = 5,
 ) -> None:
     global _CONFIGURED
     Path(log_dir).mkdir(parents=True, exist_ok=True)
@@ -55,7 +58,12 @@ def setup_logging(
         stream.setFormatter(formatter)
         stream.addFilter(_RedactFilter())
         root.addHandler(stream)
-    file_handler = logging.FileHandler(Path(log_dir) / "bot.log", encoding="utf-8")
+    file_handler = RotatingFileHandler(
+        Path(log_dir) / "bot.log",
+        maxBytes=max(1024, int(max_bytes)),
+        backupCount=max(1, int(backup_count)),
+        encoding="utf-8",
+    )
     file_handler.setFormatter(formatter)
     file_handler.addFilter(_RedactFilter())
     root.addHandler(file_handler)

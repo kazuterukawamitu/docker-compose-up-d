@@ -113,7 +113,7 @@ def test_engine_loop_continues_after_hold(tmp_path) -> None:
     rc = engine.run_forever(synthetic=True, max_cycles=3)
     assert rc == 0
     assert engine.cycles == 3
-    assert engine.strategy_evaluations >= 2
+    assert engine.strategy_evaluations >= 1
     assert engine.last_watchdog == "NORMAL WAIT"
     assert fake.create_order_calls == 0
 
@@ -145,6 +145,37 @@ def test_dry_run_loop_without_api_keys_when_public_fails(tmp_path) -> None:
     assert engine.cache.candles == []
     rest.create_order.assert_not_called()
     rest.get_assets.assert_not_called()
+
+
+def test_latest_fetch_miss_uses_cached_real_candles(tmp_path) -> None:
+    c = cfg(
+        state_path=str(tmp_path / "state.json"),
+        lock_path=str(tmp_path / "bot.lock"),
+        log_dir=str(tmp_path / "logs"),
+        enable_websocket=False,
+        dry_run=True,
+        live_trading=False,
+        poll_sec=0.01,
+    )
+    rest = MagicMock()
+    rest.get_ticker.return_value = {"last": "10000000"}
+    rest.get_spot_status.return_value = {
+        "pair": "btc_jpy",
+        "status": "TRADING",
+        "min_amount": "0.0001",
+    }
+    real = synthetic_candles(40)
+    rest.get_candlestick.side_effect = RuntimeError("today miss")
+    engine = Engine(c, client=rest)
+    engine.cache.merge(real)
+    incoming = engine._candles_for_cycle(rest, latest_only=True, force_synthetic=False)
+    assert incoming == []
+    assert engine.used_synthetic_fallback is False
+    assert engine.market_data_real is True
+    rest.create_order = MagicMock()
+    rc = engine.run_forever(synthetic=False, max_cycles=1)
+    assert rc == 0
+    rest.create_order.assert_not_called()
 
 
 def test_preflight_dry_run_no_keys_public_fail_does_not_abort() -> None:

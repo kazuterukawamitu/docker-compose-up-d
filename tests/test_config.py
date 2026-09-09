@@ -11,6 +11,8 @@ def test_default_is_dry_run() -> None:
     cfg = load_config(environ={}, load_default_dotenv=False)
     assert cfg.dry_run is True
     assert cfg.live_trading is False
+    assert cfg.trading_mode == "DRY_RUN"
+    assert cfg.rate_mode == "fixed"
     assert cfg.may_place_live_orders is False
     assert cfg.daily_pnl_floor == Decimal("0")
     assert cfg.pair == PAIR
@@ -36,16 +38,49 @@ def test_pair_normalize_and_reject() -> None:
 
 
 def test_dual_flag_required_for_live() -> None:
-    with pytest.raises(ConfigError, match="dual confirmation"):
-        load_config(environ={"DRY_RUN": "false"}, load_default_dotenv=False)
+    ready = load_config(environ={"DRY_RUN": "false"}, load_default_dotenv=False)
+    assert ready.trading_mode == "LIVE_READY"
+    assert ready.may_place_live_orders is False
     with pytest.raises(ConfigError, match="cannot both"):
         load_config(
             environ={"DRY_RUN": "true", "LIVE_TRADING": "true"},
             load_default_dotenv=False,
         )
-    with pytest.raises(ConfigError, match="requires BITBANK_API"):
+    demoted = load_config(
+        environ={"DRY_RUN": "false", "LIVE_TRADING": "true"},
+        load_default_dotenv=False,
+    )
+    assert demoted.trading_mode == "LIVE_READY"
+    assert demoted.may_place_live_orders is False
+
+
+def test_live_requires_confirm_phrase_and_keys() -> None:
+    demoted = load_config(
+        environ={
+            "TRADING_MODE": "live",
+            "BITBANK_API_KEY": "k",
+            "BITBANK_API_SECRET": "s" * 16,
+        },
+        load_default_dotenv=False,
+    )
+    assert demoted.trading_mode == "LIVE_READY"
+    live = load_config(
+        environ={
+            "TRADING_MODE": "live",
+            "LIVE_TRADING_CONFIRM": "YES_I_ACCEPT_REAL_MONEY_RISK",
+            "BITBANK_API_KEY": "k",
+            "BITBANK_API_SECRET": "s" * 16,
+        },
+        load_default_dotenv=False,
+    )
+    assert live.trading_mode == "LIVE"
+    assert live.may_place_live_orders is True
+    with pytest.raises(ConfigError, match="LIVE requires BITBANK_API"):
         load_config(
-            environ={"DRY_RUN": "false", "LIVE_TRADING": "true"},
+            environ={
+                "TRADING_MODE": "live",
+                "LIVE_TRADING_CONFIRM": "YES_I_ACCEPT_REAL_MONEY_RISK",
+            },
             load_default_dotenv=False,
         )
 

@@ -1,0 +1,14 @@
+repos:
+  - repo: local
+    hooks:
+      - id: compileall
+        name: compileall
+        language: system
+        entry: python -m compileall -q src main.py diagnostics.py
+        pass_filenames: false
+      - id: pytest
+        name: pytest
+        language: system
+        entry: env PYTHONPATH=src python -m pytest -q
+        pass_filenames: false
+        always_run: true

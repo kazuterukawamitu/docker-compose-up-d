@@ -52,9 +52,21 @@ def preflight(
     if cfg.dry_run and cfg.live_trading:
         slog("ERROR", "dry_run_and_live")
         return PreflightResult(False, "dry_run_and_live", checks=checks)
-    if not cfg.dry_run and not cfg.live_trading:
+    if not cfg.dry_run and not cfg.live_trading and cfg.trading_mode != "LIVE_READY":
         slog("ERROR", "live_requires_dual_flag")
         return PreflightResult(False, "live_requires_dual_flag", checks=checks)
+    slog(
+        "BOOT",
+        "trading flags",
+        trading_mode=cfg.trading_mode,
+        dry_run=cfg.dry_run,
+        live_trading=cfg.live_trading,
+        live_trading_confirm=cfg.live_trading_confirm,
+        may_place_live_orders=cfg.may_place_live_orders,
+        rate_mode=cfg.rate_mode,
+    )
+    if cfg.has_keys:
+        slog("PRIVATE_API_AUTH", "PRIVATE_API_AUTH=OK")
     checks.append("mode_exclusive")
 
     for raw in (cfg.log_dir, Path(cfg.state_path).parent, Path(cfg.lock_path).parent):

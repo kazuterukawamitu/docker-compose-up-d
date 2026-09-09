@@ -35,6 +35,7 @@ def main() -> int:
         "cwd": str(Path.cwd()),
         "project_root": str(ROOT),
         "has_main_py": (ROOT / "main.py").is_file(),
+        "has_bitbank_bot": (ROOT / "bitbank-bot").is_file() and os.access(ROOT / "bitbank-bot", os.X_OK),
         "has_bot_package": (ROOT / "src" / "bitbank_bot" / "__init__.py").is_file(),
         "has_env_file": (ROOT / ".env").is_file(),
         "has_api_key": bool(os.environ.get("BITBANK_API_KEY", "").strip()),

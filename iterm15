@@ -1,0 +1,99 @@
+#!/usr/bin/env python3
+"""iTerm / iTerm2 / iTerm15 Bitbank BTC/JPY DRY_RUN launcher.
+
+Works from the home directory (~). Needs only python3.
+Never places a Bitbank order. Never enables LIVE.
+
+Paste this ONE line in iTerm (zsh is fine). Do not type ./bitbank-bot from ~.
+
+  curl -fsSL https://raw.githubusercontent.com/kazuterukawamitu/docker-compose-up-d/cursor/closed-loop-runtime-hardening/iterm15 -o "$HOME/iterm15" && python3 "$HOME/iterm15"
+
+After that file exists:
+
+  python3 "$HOME/iterm15"
+"""
+
+from __future__ import annotations
+
+import os
+import runpy
+import ssl
+import sys
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+RUN_URL = (
+    "https://raw.githubusercontent.com/kazuterukawamitu/docker-compose-up-d/"
+    "cursor/closed-loop-runtime-hardening/run.py"
+)
+
+
+def _candidates() -> list[Path]:
+    env = os.environ.get("BITBANK_RUN_PY", "").strip()
+    here = Path(__file__).resolve().parent
+    home = Path.home()
+    paths = [
+        Path(env) if env else None,
+        here / "run.py",
+        home / "docker-compose-up-d" / "run.py",
+        home / "bitbank_run.py",
+    ]
+    return [p for p in paths if p is not None]
+
+
+def find_run_py() -> Path | None:
+    for path in _candidates():
+        if path.is_file():
+            return path
+    return None
+
+
+def download_run_py() -> Path:
+    dest = Path.home() / "bitbank_run.py"
+    ctx = ssl.create_default_context()
+    req = urllib.request.Request(RUN_URL, headers={"User-Agent": "bitbank-iterm15"})
+    with urllib.request.urlopen(req, timeout=30, context=ctx) as resp:
+        data = resp.read()
+    if b"def main(" not in data or b"/user/spot/order" in data:
+        raise RuntimeError("downloaded run.py failed safety check")
+    dest.write_bytes(data)
+    return dest
+
+
+def main() -> int:
+    if hasattr(sys.stdout, "reconfigure"):
+        try:
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+    path = find_run_py()
+    if path is None:
+        try:
+            path = download_run_py()
+            sys.stderr.write(f"downloaded DRY_RUN program to {path}\n")
+        except (urllib.error.URLError, OSError, RuntimeError) as exc:
+            sys.stderr.write(
+                "iTerm はホームディレクトリ (~) で開きます。"
+                " ./bitbank-bot はそこに無いので失敗します。\n"
+                f"run.py を見つけられず、ダウンロードも失敗しました: {exc}\n"
+                "次を実行してください:\n"
+                "  curl -fsSL "
+                f"{RUN_URL} -o \"$HOME/bitbank_run.py\" && python3 \"$HOME/bitbank_run.py\"\n"
+            )
+            return 2
+    sys.stderr.write(f"starting Bitbank DRY_RUN from {path} (cwd={Path.cwd()})\n")
+    try:
+        runpy.run_path(str(path), run_name="__main__")
+    except SystemExit as exc:
+        code = exc.code
+        if code is None:
+            return 0
+        if isinstance(code, int):
+            return code
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -2,33 +2,46 @@
 
 Bitbank-only `btc_jpy` bot. Default is a **continuous DRY_RUN loop** with an iTerm **取引画面** (trading dashboard). HOLD/WAIT on a bar is normal. JSON lines are written to `logs/bot.log`, not the dashboard.
 
-`main` on GitHub is still wiki HTML. The runnable bot is branch `cursor/bitbank-audit-unify-f5fd`.
+`main` on GitHub is still wiki HTML. The runnable bot is this checkout (`src/bitbank_bot/`).
 
 HOLD for 15 minutes while market data and strategy are healthy is `LONG_WAIT`, not a crash. Public-API fallback candles never place orders. Live UNFILLED limits are persisted and polled. New BUY is blocked when both 4h and 1d SMA slopes are down (`ENABLE_HTF_FILTER`).
 
-## Start (this is the program)
+## Start (paste this ONE line in iTerm)
 
-`main` on GitHub is wiki HTML. You do **not** need pip, venv, or `start.sh` for the bot to run.
+iTerm / iTerm2 / iTerm15 opens in your **home directory** (`~`).
+`./bitbank-bot` is not in `~`, so zsh prints `no such file or directory`.
+A long `bash -lc` line also breaks when iTerm wraps the paste.
 
-Paste **this one line** in iTerm. It downloads `run.py` and starts a DRY_RUN 取引画面 (no orders):
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/kazuterukawamitu/docker-compose-up-d/cursor/bitbank-audit-unify-f5fd/run.py -o "$HOME/bitbank_run.py" && python3 "$HOME/bitbank_run.py"
-```
-
-You should see `Bitbank  BTC/JPY  取引画面`. HOLD/待機 is normal. Stop with Ctrl-C.
-
-If this repo is already checked out on this branch:
+Paste **this one line** only. It works from `~`. It needs `curl` and `python3`.
 
 ```bash
-python3 run.py
+curl -fsSL https://raw.githubusercontent.com/kazuterukawamitu/docker-compose-up-d/cursor/closed-loop-runtime-hardening/iterm15 -o "$HOME/iterm15" && python3 "$HOME/iterm15"
 ```
 
-`python3 main.py` also works: it uses the full package when httpx is installed, otherwise the same stdlib `run.py`.
+That saves the DRY_RUN program to `~/iterm15` and starts the 取引画面.
+HOLD/待機 is normal. Stop with Ctrl-C. No Bitbank order is sent.
 
-Live trading stays **off** unless `.env` has `DRY_RUN=false` **and** `LIVE_TRADING=true` **and** both API keys.
+Next time, from any directory including `~`:
 
-`--once --synthetic` is a one-cycle smoke test that **exits on purpose**. The launcher above does **not** use `--once`.
+```bash
+python3 "$HOME/iterm15"
+```
+
+`--once --synthetic` is a smoke test that **exits on purpose**. Do not add it
+to the iTerm start line.
+
+After the repo exists, the full package (still DRY_RUN by default) is:
+
+```bash
+bash "$HOME/docker-compose-up-d/scripts/iterm-launch.sh" --screen
+```
+
+`./bitbank-bot` only works after `cd` into that folder. Do not type it from `~`.
+
+Live trading stays **off** unless `.env` has `TRADING_MODE=live` **and**
+`LIVE_TRADING_CONFIRM=YES_I_ACCEPT_REAL_MONEY_RISK` **and** both API keys.
+`DRY_RUN=false` without that confirm phrase is `LIVE_READY` (full path,
+`WOULD_SUBMIT_ORDER`, no Bitbank POST). Default remains `DRY_RUN`.
 
 
 ## Strategy (from original README)
@@ -58,7 +71,7 @@ State-machine mapping: [docs/STRATEGY.md](docs/STRATEGY.md).
 
 ## Security
 
-- Copy `.env.example` to `.env` is done by `start.sh` when missing. **Never commit `.env`.**
+- Copy `.env.example` to `.env` is done by `./bitbank-bot` (and `start.sh`) when missing. **Never commit `.env`.**
 - If API keys were pasted into chat, **rotate them in the bitbank console**.
 - `DRY_RUN=true` and `LIVE_TRADING=true` are mutually exclusive.
 - Create `data/KILL` to halt new orders.
@@ -66,7 +79,7 @@ State-machine mapping: [docs/STRATEGY.md](docs/STRATEGY.md).
 ## Tests
 
 ```bash
-bash ~/docker-compose-up-d/start.sh --once --synthetic --skip-lock
+python3 "$HOME/iterm15" --once --synthetic --no-screen
 PYTHONPATH=src .venv/bin/python -m pytest -q
 ```
 

@@ -122,6 +122,8 @@ class BitbankWebsocket:
                     continue
                 if raw == "2":
                     ws.send("3")
+                    with self._lock:
+                        self._last_event_mono = time.monotonic()
                     continue
                 if raw.startswith("40"):
                     self._connected = True
