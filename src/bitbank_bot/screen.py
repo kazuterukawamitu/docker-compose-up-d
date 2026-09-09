@@ -55,11 +55,18 @@ class ScreenView:
     block_reason: str
     error: str
     candle_type: str
+    trading_mode: str = "dry_run"
+    rate_mode: str = "fixed"
     note: str = "HOLD/待機は正常です。Ctrl-C で停止"
 
 
 def format_screen(view: ScreenView) -> str:
-    mode = "DRY_RUN  実注文なし" if not view.live_orders else "LIVE  実注文オン"
+    if view.live_orders:
+        mode = "LIVE  実注文オン"
+    elif (view.trading_mode or "").lower() == "live_ready":
+        mode = "LIVE_READY  WOULD_SUBMIT のみ"
+    else:
+        mode = "DRY_RUN  実注文なし"
     pos = "なし"
     if view.in_position:
         pos = (
@@ -74,7 +81,7 @@ def format_screen(view: ScreenView) -> str:
     lines = [
         bar,
         "  Bitbank  BTC/JPY  取引画面",
-        f"  {view.pair}   {mode}   稼働中  cycles={view.cycles}  up {view.uptime_sec}s",
+        f"  {view.pair}   {mode}   RATE {view.rate_mode.upper()}   cycles={view.cycles}  up {view.uptime_sec}s",
         bar,
         f"  公開約定     {_commas(view.public_last)} JPY",
         f"  戦略価格     {_commas(view.price)} JPY    足 {view.candle_type}",
@@ -151,10 +158,13 @@ def view_from_engine(
     block_reason: str = "",
     error: str = "",
     candle_type: str = "1hour",
+    trading_mode: str = "",
+    rate_mode: str = "fixed",
 ) -> ScreenView:
+    resolved = trading_mode or ("dry_run" if dry_run else "live")
     return ScreenView(
         pair=pair,
-        mode="DRY_RUN" if dry_run else "LIVE",
+        mode=resolved.upper(),
         live_orders=live_orders,
         price=str(price),
         public_last=str(public_last if public_last not in (None, "") else price),
@@ -173,6 +183,8 @@ def view_from_engine(
         block_reason=block_reason,
         error=error,
         candle_type=candle_type,
+        trading_mode=resolved,
+        rate_mode=rate_mode,
     )
 
 

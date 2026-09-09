@@ -15,7 +15,7 @@ from bitbank_bot.config import (
 )
 from bitbank_bot.logging_setup import slog
 from bitbank_bot.money import D
-from bitbank_bot.rest_client import RestClient
+from bitbank_bot.rest_client import BitbankAPIError, RestClient
 
 JST = timezone(timedelta(hours=9))
 
@@ -85,10 +85,38 @@ def fetch_candles(
     seen: set[int] = set()
     candles: list[Candle] = []
     for key in keys:
-        try:
-            rows = client.get_candlestick(cfg.pair, cfg.candle_type, key)
-        except Exception as exc:
-            slog("MARKET", "candlestick fetch skipped", date_key=key, error=type(exc).__name__)
+        rows: list[list[object]] = []
+        last_error: Exception | None = None
+        for attempt in range(2):
+            try:
+                rows = client.get_candlestick(cfg.pair, cfg.candle_type, key)
+                last_error = None
+                break
+            except BitbankAPIError as exc:
+                last_error = exc
+                slog(
+                    "CANDLE_API_ERROR",
+                    "fetch retry" if attempt == 0 else "fetch failed",
+                    pair=cfg.pair,
+                    candle_type=cfg.candle_type,
+                    date=key,
+                    endpoint=exc.endpoint,
+                    http_status=exc.http_status,
+                    bitbank_code=exc.code,
+                    retry_count=attempt + 1,
+                )
+            except Exception as exc:
+                last_error = exc
+                slog(
+                    "CANDLE_API_ERROR",
+                    "candlestick fetch skipped",
+                    pair=cfg.pair,
+                    candle_type=cfg.candle_type,
+                    date=key,
+                    error=type(exc).__name__,
+                    retry_count=attempt + 1,
+                )
+        if last_error is not None:
             continue
         for row in rows:
             try:

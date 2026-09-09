@@ -7,13 +7,16 @@ runnable bot lives in `src/bitbank_bot/`. This branch is Bitbank `btc_jpy` only.
 
 | Area | Where | Role |
 | --- | --- | --- |
-| Config / dual live flags | `config.py` | `DRY_RUN` default; live needs `DRY_RUN=false` and `LIVE_TRADING=true` and keys |
-| Public + private REST | `rest_client.py` | HMAC `ACCESS-TIME-WINDOW`; `create_order` requires `live_confirmed` |
-| README MA rules | `strategy.py`, `docs/STRATEGY.md` | BUY1–4 / SELL1–4; HOLD always has a reason |
-| Size | `amounts.py` | Only place that sets quantity; TARGET vs PLANNED; ACTUAL unset until fill |
+| Config / modes | `config.py` | `DRY_RUN` / `LIVE_READY` / `LIVE`; LIVE also needs confirm string + keys |
+| Public + private REST | `rest_client.py` | HMAC `ACCESS-TIME-WINDOW`; order POST is not retried; candle errors logged |
+| README MA rules | `strategy.py`, `docs/STRATEGY.md` | BUY1–4 / SELL1–4; HOLD always has a reason; `BUY_GATE` / `SELL_GATE` |
+| RateEngine | `rate_engine.py` | `RATE_MODE=fixed\|dynamic\|auto`; strategy TPs preserved in FIXED |
+| Size | `amounts.py` | Only place that sets quantity; DYNAMIC uses risk/SL distance |
 | Risk | `risk.py` | Kill switch, daily loss, position cap, circuit breaker |
-| Orders | `orders.py` | DRY_RUN never calls `create_order`; live unfilled is polled |
-| Loop | `engine.py` | Candles → signal → size → order; state in `data/state.json` |
+| Execution gate | `execution_gate.py`, `trade_signal_executor.py` | Single path; `EXECUTION_BLOCKED` / `WOULD_SUBMIT_ORDER` |
+| Orders | `orders.py` | DRY_RUN never calls `create_order`; live unfilled is polled; no blind POST retry |
+| Reconcile / heal | `reconciliation.py`, `self_healing.py` | Bitbank snapshot vs bot state; circuit breaker; error class |
+| Loop | `engine.py` | Candles → signal → rate → gate → size → order; cache miss ≠ synthetic |
 | Screen | `screen.py` | iTerm 取引画面; JSON stays in `logs/bot.log` |
 | 4h+1d filter | `multi_timeframe.py` | Hard BUY block when both HTF SMAs slope down, or HTF data missing |
 | Watchdog | `watchdog.py` | HOLD past 15 minutes is `LONG_WAIT`, not `FAIL` |
@@ -57,13 +60,23 @@ bitFlyer, Coincheck, and GMO are not imported and are not executed.
 10. **Partial fills.** `PARTIALLY_FILLED` stays in `state.pending` and is polled
     until the remainder fills.
 11. **Kill file.** `data/KILL` blocks sells as well as buys.
+12. **Latest candle miss used synthetic even with a real cache.** A failed
+    `latest_only` public fetch no longer injects synthetic bars when the cache
+    already holds real candles. Accidental synthetic still blocks orders.
+13. **Candle errors were swallowed.** Failures now log `CANDLE_API_ERROR` with
+    pair, type, date, HTTP status, Bitbank code, and retry count (never secrets).
+14. **LIVE_READY.** Dual live flags without `LIVE_TRADING_CONFIRM` rehearse the
+    full path and log `WOULD_SUBMIT_ORDER` instead of calling `create_order`.
+15. **Order POST retry.** `POST /user/spot/order` is not retried on timeout;
+    the bot reconciles open orders instead of sending a second BUY/SELL.
 
 ## What this bot does not do
 
 - Does not SSH to a VPS or install systemd for you.
 - Does not implement quantum / multi-exchange / guaranteed fills or profits.
 - Does not log API keys or secrets (`safe_dict` / `Config.__repr__`).
-- Does not place a live order unless both flags and keys are set.
+- Does not place a live order unless `TRADING_MODE=live` (or dual flags) **and**
+  `LIVE_TRADING_CONFIRM=YES_I_ACCEPT_REAL_MONEY_RISK` **and** keys are set.
 
 If keys were pasted into chat, rotate them in the bitbank console. Do not put
 them in git, screenshots, or logs.

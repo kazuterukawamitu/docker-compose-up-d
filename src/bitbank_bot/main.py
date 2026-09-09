@@ -80,8 +80,22 @@ def main(argv: list[str] | None = None) -> int:
         synthetic=bool(args.synthetic),
         loop=not args.once,
         dry_run=cfg.dry_run,
+        DRY_RUN=cfg.dry_run,
+        LIVE_TRADING=cfg.live_trading,
+        LIVE_TRADING_CONFIRM=cfg.live_trading_confirm,
+        TRADING_MODE=cfg.resolved_trading_mode(),
+        RATE_MODE=cfg.rate_mode,
+        SIGNAL_ONLY=cfg.signal_only,
+        may_place_live_orders=cfg.may_place_live_orders,
         screen=use_screen,
     )
+    if cfg.sentry_dsn:
+        try:
+            from bitbank_bot.sentry_setup import init_sentry
+
+            init_sentry(cfg.sentry_dsn)
+        except Exception as exc:
+            slog("BOOT", "sentry skipped", error=type(exc).__name__)
     rest = RestClient(
         public_url=cfg.public_url,
         private_url=cfg.private_url,

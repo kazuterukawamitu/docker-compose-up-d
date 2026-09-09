@@ -94,6 +94,16 @@ def test_hold_requires_reason() -> None:
     assert Signal.hold("no_buy_setup").reason == "no_buy_setup"
 
 
+def test_buy_gate_logs_unmet_conditions(caplog) -> None:
+    closes = [D("100")] * 12
+    snaps, c = _snaps_from_closes(closes)
+    with caplog.at_level("INFO", logger="bitbank_bot"):
+        sig = Strategy(c).evaluate(snaps[-1], None, log_gates=True)
+    assert sig.kind == "HOLD"
+    assert "BUY_GATE" in caplog.text
+    assert "granville_turn_cross_up" in caplog.text
+
+
 def test_sell3_on_upcross_in_downtrend() -> None:
     # Bounce just through a still-falling SMA so trend stays DOWN (a large
     # bounce would flip SMA to UP and would not be SELL3).

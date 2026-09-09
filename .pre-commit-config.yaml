@@ -1,0 +1,14 @@
+repos:
+  - repo: local
+    hooks:
+      - id: compileall
+        name: compileall
+        entry: python -m compileall -q src main.py run.py
+        language: system
+        pass_filenames: false
+      - id: pytest
+        name: pytest
+        entry: python -m pytest -q
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
