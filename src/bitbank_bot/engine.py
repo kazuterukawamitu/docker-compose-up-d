@@ -754,6 +754,8 @@ class Engine:
                 )
                 self.cycles += 1
                 self.healing.health.mark("last_loop_at")
+                self.healing.health.mark("last_order_check_at")
+                self.healing.health.mark("last_balance_at")
                 self._maybe_reconcile(state)
                 self._heartbeat(state, signal, last)
                 if max_cycles is not None and self.cycles >= max_cycles:
