@@ -887,7 +887,7 @@ class Engine:
         self.healing.health.ws_ok = ws_ok
         if ws_ok:
             self.healing.health.mark("last_ws_at")
-        score = self.healing.health.refresh_score(
+        self.healing.health.refresh_score(
             market_real=self.market_data_real and not self.used_synthetic_fallback,
             ws_enabled=self.cfg.enable_websocket,
         )
@@ -917,7 +917,6 @@ class Engine:
                 if self.healing.health.rest_ok and ws_ok
                 else "degraded"
             ),
-            health_score=score,
             order_allowed=live and not self.last_block_reason,
             block_reason=self.last_block_reason,
             utc=datetime.now(timezone.utc).isoformat(),

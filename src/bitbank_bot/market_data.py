@@ -74,7 +74,10 @@ def fetch_candles(
     now = datetime.now(JST)
     keys: list[str] = []
     if cfg.candle_type in SHORT_CANDLE_TYPES:
-        days = 1 if latest_only else cfg.candle_lookback_days
+        # Bitbank returns HTTP 404 / code 10000 for today's YYYYMMDD until that
+        # date file exists. Always include yesterday on latest_only so a new
+        # JST day does not empty the book and trip synthetic fallback.
+        days = 2 if latest_only else cfg.candle_lookback_days
         for i in range(days):
             keys.append(candle_date_key(cfg.candle_type, now - timedelta(days=i)))
     else:
@@ -94,9 +97,10 @@ def fetch_candles(
                 break
             except BitbankAPIError as exc:
                 last_error = exc
+                missing = exc.http_status == 404 or exc.code == 10000
                 slog(
                     "CANDLE_API_ERROR",
-                    "fetch retry" if attempt == 0 else "fetch failed",
+                    "date file missing" if missing else ("fetch retry" if attempt == 0 else "fetch failed"),
                     pair=cfg.pair,
                     candle_type=cfg.candle_type,
                     date=key,
@@ -105,6 +109,8 @@ def fetch_candles(
                     bitbank_code=exc.code,
                     retry_count=attempt + 1,
                 )
+                if missing:
+                    break
             except Exception as exc:
                 last_error = exc
                 slog(

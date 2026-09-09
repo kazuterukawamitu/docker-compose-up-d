@@ -222,6 +222,35 @@ def test_executor_live_submits_when_gates_pass() -> None:
     client.create_order.assert_called_once()
 
 
+def test_latest_only_uses_yesterday_when_today_404() -> None:
+    from datetime import datetime, timedelta, timezone
+
+    from bitbank_bot.market_data import JST
+
+    today = datetime.now(JST).strftime("%Y%m%d")
+    yesterday = (datetime.now(JST) - timedelta(days=1)).strftime("%Y%m%d")
+    rest = MagicMock()
+
+    def _candles(pair, candle_type, date_key):
+        if date_key == today:
+            raise BitbankAPIError(
+                "not found",
+                code=10000,
+                http_status=404,
+                endpoint=f"/btc_jpy/candlestick/1hour/{today}",
+            )
+        if date_key == yesterday:
+            ts = 1_700_000_000_000
+            return [[100, 110, 90, 105, 1, ts]]
+        return []
+
+    rest.get_candlestick.side_effect = _candles
+    c = cfg(candle_type="1hour", candle_lookback_days=14)
+    candles = fetch_candles(rest, c, latest_only=True)
+    assert len(candles) == 1
+    assert candles[0].close == Decimal("105")
+
+
 def test_fetch_candles_logs_api_error(caplog) -> None:
     rest = MagicMock()
     rest.get_candlestick.side_effect = BitbankAPIError(

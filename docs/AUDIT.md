@@ -65,6 +65,9 @@ bitFlyer, Coincheck, and GMO are not imported and are not executed.
     already holds real candles. Accidental synthetic still blocks orders.
 13. **Candle errors were swallowed.** Failures now log `CANDLE_API_ERROR` with
     pair, type, date, HTTP status, Bitbank code, and retry count (never secrets).
+    Bitbank returns HTTP 404 / code 10000 for *today's* `YYYYMMDD` until that
+    date file exists (observed for `5min` and `1hour` on a new JST day).
+    Latest-only fetches now also request yesterday so the book is not emptied.
 14. **LIVE_READY.** Dual live flags without `LIVE_TRADING_CONFIRM` rehearse the
     full path and log `WOULD_SUBMIT_ORDER` instead of calling `create_order`.
 15. **Order POST retry.** `POST /user/spot/order` is not retried on timeout;

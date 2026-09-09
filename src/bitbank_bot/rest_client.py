@@ -203,10 +203,21 @@ class RestClient:
                 time.sleep(_backoff_seconds(attempt))
                 continue
             if response.status_code >= 400:
+                body: Any = response.text
+                code = None
+                try:
+                    parsed = response.json()
+                    body = parsed
+                    data = parsed.get("data") if isinstance(parsed, dict) else None
+                    if isinstance(data, dict):
+                        code = data.get("code")
+                except Exception:
+                    pass
                 raise BitbankAPIError(
                     f"http {response.status_code}",
+                    code=code,
                     http_status=response.status_code,
-                    body=response.text,
+                    body=body,
                     endpoint=endpoint,
                     retry_count=attempt,
                 )
