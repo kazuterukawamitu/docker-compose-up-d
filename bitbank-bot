@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
-# Bitbank BTC/JPY launcher — opens the iTerm 取引画面 (trading screen).
+# Bitbank BTC/JPY — the executable that runs this application.
 #
-# Prefer the repo-root executable (no git checkout):
 #   ./bitbank-bot
+#   ./bitbank-bot --screen
+#   ./bitbank-bot --once --synthetic --dry-run --skip-lock --no-screen
 #
-# This script still works. It only fetches a bot branch when src/bitbank_bot
-# is missing (wiki-only main). If the Python package is already here, it
-# starts immediately.
+# Default: continuous DRY_RUN loop. Never enables LIVE. Never checks out a git
+# branch. Forwards every CLI flag to the bot. On a TTY, opens the 取引画面
+# unless you pass --no-screen / --once / --check-config / --preflight / --backtest.
 
 if [ -z "${BASH_VERSION:-}" ]; then
   exec /usr/bin/env bash "$0" "$@"
@@ -21,28 +22,11 @@ export PYTHONIOENCODING=utf-8
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT"
 
-BOT_BRANCH="cursor/bitbank-audit-unify-f5fd"
-
-ensure_bot_source() {
-  if [[ -f "$ROOT/src/bitbank_bot/__init__.py" && -f "$ROOT/main.py" ]]; then
-    return 0
-  fi
-  echo "bot source not found at $ROOT (this clone is probably still on main / wiki dump)" >&2
-  if [[ ! -d "$ROOT/.git" ]]; then
-    echo "Paste this ONE line in iTerm:" >&2
-    echo "  bash -lc 'git clone https://github.com/kazuterukawamitu/docker-compose-up-d.git \"\$HOME/docker-compose-up-d\" && bash \"\$HOME/docker-compose-up-d/start.sh\" --screen'" >&2
-    exit 2
-  fi
-  echo "fetching $BOT_BRANCH so the trading screen can start" >&2
-  git fetch origin "$BOT_BRANCH"
-  git checkout -B "$BOT_BRANCH" "origin/$BOT_BRANCH"
-  if [[ ! -f "$ROOT/src/bitbank_bot/__init__.py" || ! -f "$ROOT/main.py" ]]; then
-    echo "still no bitbank_bot after checkout; branch may not be fetched" >&2
-    exit 2
-  fi
-}
-
-ensure_bot_source
+if [[ ! -f "$ROOT/src/bitbank_bot/__init__.py" || ! -f "$ROOT/main.py" ]]; then
+  echo "bot source missing at $ROOT (need src/bitbank_bot and main.py)" >&2
+  echo "check out a branch that contains the Python bot; this launcher does not switch git branches." >&2
+  exit 2
+fi
 
 pick_python() {
   local c
@@ -91,12 +75,10 @@ if [[ ! -x "$VPY" ]]; then
     "$PY" -m venv --without-pip "$VENV"
     set -e
   fi
-  if [[ ! -x "$VPY" ]]; then
-    echo "venv python missing; using $PY directly" >&2
+  if [[ ! -x "$VPY" || "$venv_rc" -ne 0 ]]; then
+    echo "venv create failed or incomplete; using $PY directly" >&2
     VPY="$PY"
     VPIP=""
-  elif [[ "$venv_rc" -ne 0 ]]; then
-    echo "note: python -m venv reported an error (often missing ensurepip); continuing."
   fi
 fi
 
@@ -174,10 +156,21 @@ if [[ "$want_screen" -eq 1 ]]; then
   fi
 fi
 
-echo "opening Bitbank BTC/JPY 取引画面 (Ctrl-C to stop)"
-echo "HOLD/WAIT is normal. JSON detail is logs/bot.log"
-echo "using $VPY"
+show_banner=1
+for a in "$@"; do
+  case "$a" in
+    -h|--help)
+      show_banner=0
+      ;;
+  esac
+done
+if [[ "$show_banner" -eq 1 ]]; then
+  echo "starting Bitbank BTC/JPY (DRY_RUN unless .env already confirms LIVE)"
+  echo "HOLD/WAIT is normal. JSON detail is logs/bot.log"
+  echo "using $VPY"
+  echo "Ctrl-C to stop"
+fi
 
-# Default (no extra args): continuous loop + trading screen on a TTY.
-# Do not pass --once here.
+# Default (no extra args): continuous loop. Do not pass --once here.
+# Live orders stay gated inside Python (TRADING_MODE + confirm phrase + keys).
 exec "$VPY" "$ROOT/main.py" "${SCREEN_ARGS[@]}" "$@"
