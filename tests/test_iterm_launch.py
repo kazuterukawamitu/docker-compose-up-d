@@ -28,14 +28,14 @@ def test_iterm_launch_is_executable_and_safe() -> None:
     assert 'BOT_BRANCH="cursor/closed-loop-runtime-hardening"' in text
     after_exec = text.rsplit("exec", 1)[-1]
     assert "--once" not in after_exec
-    assert "bitbank-bot" in after_exec or "start.sh" in after_exec
+    assert "bitbank-bot" in after_exec or "start.sh" in after_exec or "run.py" in after_exec
 
 
 def test_readme_has_home_safe_one_liner() -> None:
     text = (_root() / "README.md").read_text(encoding="utf-8")
     assert "no such file or directory" in text
     assert "scripts/iterm-launch.sh" in text
-    assert 'cd "$HOME/docker-compose-up-d" && ./bitbank-bot --screen' in text
+    assert "python3 \"$HOME/iterm15\"" in text
     assert "Paste **this one line**" in text
 
 

@@ -25,11 +25,10 @@ runnable bot lives in `src/bitbank_bot/`. This branch is Bitbank `btc_jpy` only.
 | Self-healing | `self_healing.py` | GET retry + classify; POST orders are never blindly retried |
 | Read-only audit | `scripts/bitbank_execution_audit.py` | ticker / assets / active_orders / trade_history |
 
-`./bitbank-bot` is the repo-root executable and only works after `cd` into
-the clone. From `~`, paste the iTerm one-liner in the README (or run
-`scripts/iterm-launch.sh`). That script clones `~/docker-compose-up-d` if
-needed and only checks out a branch when `src/bitbank_bot` is missing.
-It never enables LIVE. `run.py` is the no-pip DRY_RUN 取引画面 and never
+`iterm15` is the iTerm / iTerm2 / iTerm15 program. It works from `~` with
+only `python3` (downloads or finds `run.py`). `./bitbank-bot` only works
+after `cd` into the clone. `scripts/iterm-launch.sh` starts the full
+package when that clone exists. None of these enable LIVE. `run.py` never
 calls `create_order`.
 
 bitFlyer, Coincheck, and GMO are not imported and are not executed.

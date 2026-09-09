@@ -8,42 +8,35 @@ HOLD for 15 minutes while market data and strategy are healthy is `LONG_WAIT`, n
 
 ## Start (paste this ONE line in iTerm)
 
-`./bitbank-bot` only works **after** `cd` into the repo. From `~` it fails with
-`zsh: no such file or directory`. Paste **this one line** from any directory
-(including home). Do not paste the extra flag examples below.
+iTerm / iTerm2 / iTerm15 opens in your **home directory** (`~`).
+`./bitbank-bot` is not in `~`, so zsh prints `no such file or directory`.
+A long `bash -lc` line also breaks when iTerm wraps the paste.
+
+Paste **this one line** only. It works from `~`. It needs `curl` and `python3`.
 
 ```bash
-bash -lc 'set -euo pipefail; REPO="$HOME/docker-compose-up-d"; if [ ! -d "$REPO/.git" ]; then git clone https://github.com/kazuterukawamitu/docker-compose-up-d.git "$REPO"; fi; cd "$REPO"; if [ ! -f src/bitbank_bot/__init__.py ]; then git fetch origin cursor/closed-loop-runtime-hardening; git checkout -B cursor/closed-loop-runtime-hardening origin/cursor/closed-loop-runtime-hardening; fi; exec bash scripts/iterm-launch.sh --screen'
+curl -fsSL https://raw.githubusercontent.com/kazuterukawamitu/docker-compose-up-d/cursor/closed-loop-runtime-hardening/iterm15 -o "$HOME/iterm15" && python3 "$HOME/iterm15"
 ```
 
-That clones to `~/docker-compose-up-d` if needed, checks out the bot branch only
-when `src/bitbank_bot` is missing, then starts a **continuous DRY_RUN** 取引画面.
-HOLD/待機 is normal. Stop with Ctrl-C. JSON detail is `logs/bot.log`.
+That saves the DRY_RUN program to `~/iterm15` and starts the 取引画面.
+HOLD/待機 is normal. Stop with Ctrl-C. No Bitbank order is sent.
 
-After the repo exists, this shorter line also works from **any** directory:
+Next time, from any directory including `~`:
+
+```bash
+python3 "$HOME/iterm15"
+```
+
+`--once --synthetic` is a smoke test that **exits on purpose**. Do not add it
+to the iTerm start line.
+
+After the repo exists, the full package (still DRY_RUN by default) is:
 
 ```bash
 bash "$HOME/docker-compose-up-d/scripts/iterm-launch.sh" --screen
 ```
 
-`./bitbank-bot` is only for a shell that is already inside that folder:
-
-```bash
-cd "$HOME/docker-compose-up-d" && ./bitbank-bot --screen
-```
-
-Optional flags (use only after the repo path above, not as `./bitbank-bot` from `~`):
-
-```bash
-bash "$HOME/docker-compose-up-d/scripts/iterm-launch.sh" --once --synthetic --dry-run --skip-lock --no-screen
-bash "$HOME/docker-compose-up-d/scripts/iterm-launch.sh" --check-config
-```
-
-`--once --synthetic` is a one-cycle smoke test that **exits on purpose**.
-The iTerm one-liner does **not** pass `--once`.
-
-The launcher never enables LIVE. If pip/venv are missing it falls back to
-stdlib `run.py` (no orders).
+`./bitbank-bot` only works after `cd` into that folder. Do not type it from `~`.
 
 Live trading stays **off** unless `.env` has `TRADING_MODE=live` **and**
 `LIVE_TRADING_CONFIRM=YES_I_ACCEPT_REAL_MONEY_RISK` **and** both API keys.
@@ -86,7 +79,7 @@ State-machine mapping: [docs/STRATEGY.md](docs/STRATEGY.md).
 ## Tests
 
 ```bash
-bash "$HOME/docker-compose-up-d/scripts/iterm-launch.sh" --once --synthetic --dry-run --skip-lock --no-screen
+python3 "$HOME/iterm15" --once --synthetic --no-screen
 PYTHONPATH=src .venv/bin/python -m pytest -q
 ```
 

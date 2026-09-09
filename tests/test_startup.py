@@ -16,6 +16,9 @@ def test_compileall_src() -> None:
         py_compile.compile(str(path), doraise=True)
     py_compile.compile(str(root / "main.py"), doraise=True)
     py_compile.compile(str(root / "run.py"), doraise=True)
+    iterm15 = root / "iterm15"
+    if iterm15.is_file():
+        py_compile.compile(str(iterm15), doraise=True)
     diag = root / "diagnostics.py"
     if diag.is_file():
         py_compile.compile(str(diag), doraise=True)

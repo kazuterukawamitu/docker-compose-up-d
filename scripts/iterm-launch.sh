@@ -71,5 +71,13 @@ if [[ -x "$ROOT/bitbank-bot" ]]; then
   exec "$ROOT/bitbank-bot" "$@"
 fi
 
-echo "bitbank-bot missing; using start.sh from $ROOT" >&2
-exec bash "$ROOT/start.sh" "$@"
+if [[ -f "$ROOT/start.sh" ]]; then
+  echo "bitbank-bot missing; using start.sh from $ROOT" >&2
+  exec bash "$ROOT/start.sh" "$@"
+fi
+if [[ -f "$ROOT/run.py" ]]; then
+  echo "full launcher missing; starting stdlib DRY_RUN (run.py, no orders)" >&2
+  exec python3 "$ROOT/run.py" "$@"
+fi
+echo "no bitbank-bot, start.sh, or run.py at $ROOT" >&2
+exit 2

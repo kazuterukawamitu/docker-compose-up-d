@@ -18,6 +18,10 @@ if [[ -o interactive && -f "$_bitbank_venv/bin/activate" ]]; then
 fi
 
 bitbank-bot() {
+  if [[ -f "$HOME/iterm15" ]]; then
+    python3 "$HOME/iterm15" "$@"
+    return
+  fi
   bash "$bitbank_root/scripts/iterm-launch.sh" "$@"
 }
 
