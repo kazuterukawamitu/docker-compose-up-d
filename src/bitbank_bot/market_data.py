@@ -157,7 +157,7 @@ def drop_incomplete_candle(
             "MARKET",
             "WAIT incomplete candle dropped",
             candle_type=candle_type,
-            ts=last.timestamp_ms,
+            candle_ts=last.timestamp_ms,
         )
         return candles[:-1]
     return candles
