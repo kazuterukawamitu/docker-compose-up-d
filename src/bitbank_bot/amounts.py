@@ -38,6 +38,9 @@ def plan_buy(
     cfg: Config,
     risk: RiskManager,
     target_jpy: Decimal | None = None,
+    risk_pct: Decimal | None = None,
+    stop_loss_pct: Decimal | None = None,
+    size_scale: Decimal | None = None,
 ) -> AmountPlan:
     available_jpy = D(available_jpy)
     available_btc = D(available_btc)
@@ -58,11 +61,40 @@ def plan_buy(
             reason="invalid_price",
         )
     max_usable_jpy = available_jpy * cfg.max_balance_usage * (ONE - cfg.fee_buffer)
-    if target_jpy is None:
+    if risk_pct is not None and stop_loss_pct is not None and D(stop_loss_pct) > ZERO:
+        equity = available_jpy + available_btc * price
+        risk_jpy = equity * D(risk_pct)
+        loss_per_btc = price * D(stop_loss_pct)
+        if loss_per_btc <= ZERO:
+            return AmountPlan(
+                side="buy",
+                amount=ZERO,
+                price=price,
+                available_jpy=available_jpy,
+                available_btc=available_btc,
+                target_jpy=ZERO,
+                planned_order_jpy=ZERO,
+                actual_execution_jpy=None,
+                actual_balance_jpy=available_jpy,
+                actual_balance_btc=available_btc,
+                ok=False,
+                reason="invalid_stop_loss",
+            )
+        sized_btc = risk_jpy / loss_per_btc
+        if size_scale is not None:
+            sized_btc *= D(size_scale)
+        sized_jpy = sized_btc * price
+        if target_jpy is None:
+            target_jpy = min(sized_jpy, max_usable_jpy)
+        else:
+            target_jpy = min(D(target_jpy), sized_jpy, max_usable_jpy)
+    elif target_jpy is None:
         target_jpy = max_usable_jpy
     else:
         target_jpy = D(target_jpy)
     usable_jpy = min(target_jpy, max_usable_jpy)
+    if usable_jpy > available_jpy * (ONE - cfg.fee_buffer):
+        usable_jpy = available_jpy * (ONE - cfg.fee_buffer)
     balance_btc = usable_jpy / price
     decision = risk.check_buy(available_btc, balance_btc)
     raw = min(balance_btc, decision.capped_btc) if decision.allowed else ZERO
@@ -152,6 +184,9 @@ class PositionSizer:
         available_btc: Decimal,
         price: Decimal,
         target_jpy: Decimal | None = None,
+        risk_pct: Decimal | None = None,
+        stop_loss_pct: Decimal | None = None,
+        size_scale: Decimal | None = None,
     ) -> AmountPlan:
         return plan_buy(
             available_jpy=available_jpy,
@@ -160,6 +195,9 @@ class PositionSizer:
             cfg=self.cfg,
             risk=self.risk,
             target_jpy=target_jpy,
+            risk_pct=risk_pct,
+            stop_loss_pct=stop_loss_pct,
+            size_scale=size_scale,
         )
 
     def plan_sell(

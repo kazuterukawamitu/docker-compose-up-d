@@ -121,7 +121,30 @@ class OrderExecutor:
                 None,
                 None,
             )
-        if not self.cfg.may_place_live_orders:
+        if self.cfg.live_ready or not self.cfg.may_place_live_orders:
+            mode = self.cfg.trading_mode.upper()
+            if self.cfg.live_ready:
+                slog(
+                    "WOULD_SUBMIT_ORDER",
+                    "LIVE_READY: not calling Bitbank create_order",
+                    pair=self.cfg.pair,
+                    side=plan.side,
+                    amount=str(plan.amount),
+                    price=str(plan.price),
+                    mode=mode,
+                )
+                return OrderResult(
+                    True,
+                    "would_submit",
+                    False,
+                    False,
+                    None,
+                    "UNFILLED",
+                    ZERO,
+                    ZERO,
+                    None,
+                    None,
+                )
             slog(
                 "ORDER_INTENT",
                 "DRY_RUN: not calling Bitbank create_order",
@@ -191,15 +214,26 @@ class OrderExecutor:
         if self.cfg.order_type == "limit":
             q = quantize_price(plan.price, self.cfg.price_tick)
             price_str = str(int(q)) if q == q.to_integral_value() else str(q)
-        raw = self.client.create_order(
-            pair=self.cfg.pair,
-            amount=str(plan.amount),
-            side=plan.side,
-            order_type=self.cfg.order_type,
-            price=price_str,
-            post_only=self.cfg.post_only if self.cfg.order_type == "limit" else None,
-            live_confirmed=True,
-        )
+        try:
+            raw = self.client.create_order(
+                pair=self.cfg.pair,
+                amount=str(plan.amount),
+                side=plan.side,
+                order_type=self.cfg.order_type,
+                price=price_str,
+                post_only=self.cfg.post_only if self.cfg.order_type == "limit" else None,
+                live_confirmed=True,
+            )
+        except Exception as exc:
+            slog(
+                "ERROR",
+                "create_order transport/API error; reconciling before any resend",
+                error=type(exc).__name__,
+            )
+            recovered = self._recover_after_submit_error(plan)
+            if recovered is None:
+                raise
+            raw = recovered
         order_id = str(raw.get("order_id") or "")
         status = str(raw.get("status") or "")
         slog("ORDER_ACCEPTED", "order accepted", order_id=order_id, status=status)
@@ -275,3 +309,26 @@ class OrderExecutor:
             status=status,
         )
         return OrderResult(True, reason, False, False, order_id, status, executed, avg, actual, raw)
+
+    def _recover_after_submit_error(self, plan: AmountPlan) -> dict[str, Any] | None:
+        """Never POST again. If Bitbank already accepted the order, reuse it."""
+        try:
+            active = self.active_orders()
+        except Exception as exc:
+            slog("ERROR", "reconcile after submit failed", error=type(exc).__name__)
+            return None
+        matches = [
+            row
+            for row in active
+            if str(row.get("side") or "") == plan.side
+            and D(row.get("start_amount") or 0) == plan.amount
+        ]
+        if len(matches) == 1:
+            slog(
+                "ORDER_ACCEPTED",
+                "recovered existing order after timeout; not resending",
+                order_id=matches[0].get("order_id"),
+            )
+            return matches[0]
+        slog("ORDER_STATUS", "no unique matching order after timeout; not resending", matches=len(matches))
+        return None

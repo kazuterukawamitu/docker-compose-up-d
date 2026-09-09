@@ -7,6 +7,7 @@ from decimal import Decimal
 from typing import Sequence
 
 from bitbank_bot.config import Config
+from bitbank_bot.logging_setup import slog
 from bitbank_bot.indicators import (
     Trend,
     crossed_down,
@@ -326,11 +327,32 @@ class Strategy:
         return Signal.hold("no_sell_setup")
 
     def _buy_signal(self, snap: MarketSnapshot) -> Signal:
-        if (
+        buy1 = (
             snap.prev_ma_trend == Trend.DOWN
             and snap.ma_trend in {Trend.FLAT, Trend.UP}
             and snap.crossed_up
-        ):
+        )
+        buy2 = snap.ma_trend == Trend.UP and snap.crossed_down
+        buy3 = self._buy3
+        buy4 = self._buy4
+        score = int(buy1) + int(buy2) + int(buy3) + int(buy4)
+        slog(
+            "STRATEGY",
+            "BUY_GATE",
+            trend=snap.ma_trend.value,
+            prev_trend=snap.prev_ma_trend.value,
+            crossed_up=snap.crossed_up,
+            crossed_down=snap.crossed_down,
+            granville_turn=buy1,
+            pullback=buy3,
+            dip=buy4,
+            uptrend_cross_down=buy2,
+            volume_ok=True,
+            score=f"{score}/4",
+            close=str(snap.close),
+            ma=str(snap.ma),
+        )
+        if buy1:
             return Signal(
                 "BUY1",
                 "buy",
