@@ -162,9 +162,78 @@ class ConnectionHealth:
 
 
 @dataclass
+class ErrorRecord:
+    task: str
+    klass: ErrorClass
+    when: float
+    message: str
+
+
+@dataclass
+class ErrorCollector:
+    records: list[ErrorRecord] = field(default_factory=list)
+    limit: int = 50
+
+    def add(self, task: str, klass: ErrorClass, message: str) -> ErrorRecord:
+        rec = ErrorRecord(task, klass, time.monotonic(), message[:200])
+        self.records.append(rec)
+        if len(self.records) > self.limit:
+            self.records = self.records[-self.limit :]
+        return rec
+
+    def recent(self, n: int = 10) -> list[ErrorRecord]:
+        return self.records[-n:]
+
+
+@dataclass
+class QuarantineManager:
+    items: dict[str, float] = field(default_factory=dict)
+    threshold: int = 8
+    failures: dict[str, int] = field(default_factory=dict)
+
+    def note_failure(self, name: str) -> bool:
+        self.failures[name] = self.failures.get(name, 0) + 1
+        if self.failures[name] >= self.threshold:
+            self.items[name] = time.monotonic()
+            slog("WATCHDOG", "QUARANTINE", task=name)
+            return True
+        return False
+
+    def note_success(self, name: str) -> None:
+        self.failures[name] = 0
+        self.items.pop(name, None)
+
+    def is_quarantined(self, name: str) -> bool:
+        return name in self.items
+
+    def release(self, name: str) -> None:
+        self.items.pop(name, None)
+        self.failures[name] = 0
+
+
+@dataclass
+class TaskSupervisor:
+    healing: "SelfHealingEngine"
+
+    def run(self, name: str, fn: Callable[[], object]) -> object:
+        if self.healing.quarantine.is_quarantined(name):
+            slog("WATCHDOG", "task skipped; quarantined", task=name)
+            raise RuntimeError(f"quarantined:{name}")
+        try:
+            result = fn()
+        except Exception as exc:
+            self.healing.on_error(name, exc)
+            raise
+        self.healing.on_success(name)
+        return result
+
+
+@dataclass
 class SelfHealingEngine:
     breaker: CircuitBreaker = field(default_factory=CircuitBreaker)
     health: ConnectionHealth = field(default_factory=ConnectionHealth)
+    errors: ErrorCollector = field(default_factory=ErrorCollector)
+    quarantine: QuarantineManager = field(default_factory=QuarantineManager)
     quarantined: set[str] = field(default_factory=set)
     task_failures: dict[str, int] = field(default_factory=dict)
 
@@ -172,23 +241,26 @@ class SelfHealingEngine:
         self.breaker.success()
         self.health.note_rest(True)
         self.task_failures[name] = 0
+        self.quarantine.note_success(name)
+        self.quarantined.discard(name)
 
     def on_error(self, name: str, exc: BaseException | None = None, *, reason: str = "") -> ErrorClass:
         kind = classify_error(exc, reason=reason)
         self.breaker.failure()
         self.health.note_rest(False)
         self.task_failures[name] = self.task_failures.get(name, 0) + 1
+        message = type(exc).__name__ if exc else reason
+        self.errors.add(name, kind, message)
         slog(
             "ERROR",
             "classified runtime error",
             task=name,
             error_class=kind.value,
-            error=type(exc).__name__ if exc else reason,
+            error=message,
             retry_count=self.task_failures[name],
         )
-        if self.task_failures[name] >= 8:
+        if self.quarantine.note_failure(name):
             self.quarantined.add(name)
-            slog("WATCHDOG", "QUARANTINE", task=name)
         return kind
 
     def recover_ws(self, starter: Callable[[], None]) -> None:

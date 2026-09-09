@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
-from typing import Iterable
+from typing import Any, Iterable
 
 from bitbank_bot.config import (
     DEFAULT_MA_PERIOD,
@@ -15,7 +15,7 @@ from bitbank_bot.config import (
 )
 from bitbank_bot.logging_setup import slog
 from bitbank_bot.money import D
-from bitbank_bot.rest_client import BitbankAPIError, RestClient
+from bitbank_bot.rest_client import BitbankAPIError
 
 JST = timezone(timedelta(hours=9))
 
@@ -66,7 +66,7 @@ def parse_ohlcv(row: list[object]) -> Candle:
 
 
 def fetch_candles(
-    client: RestClient,
+    client: Any,
     cfg: Config,
     *,
     latest_only: bool = False,

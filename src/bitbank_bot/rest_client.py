@@ -268,6 +268,19 @@ class RestClient:
         slog("PUBLIC_API", "ticker", pair=pair, last=data.get("last"))
         return data
 
+    def get_depth(self, pair: str) -> dict[str, Any]:
+        data = self.public_get(f"/{pair}/depth")
+        asks = data.get("asks") or []
+        bids = data.get("bids") or []
+        slog(
+            "PUBLIC_API",
+            "depth",
+            pair=pair,
+            asks=len(asks) if isinstance(asks, list) else 0,
+            bids=len(bids) if isinstance(bids, list) else 0,
+        )
+        return data
+
     def get_candlestick(self, pair: str, candle_type: str, date_key: str) -> list[list[Any]]:
         path = f"/{pair}/candlestick/{candle_type}/{date_key}"
         try:
@@ -406,6 +419,28 @@ class RestClient:
             body["post_only"] = post_only
         return self.private_post("/user/spot/order", body, update=True, side_effect=True)
 
+    def cancel_order(
+        self,
+        pair: str,
+        order_id: str,
+        *,
+        live_confirmed: bool = False,
+    ) -> dict[str, Any]:
+        if not live_confirmed:
+            raise BitbankAPIError("refusing cancel_order without live_confirmed")
+        return self.private_post(
+            "/user/spot/cancel_order",
+            {"pair": pair, "order_id": order_id},
+            update=True,
+            side_effect=True,
+        )
+
     def get_active_orders(self, pair: str) -> list[dict[str, Any]]:
         data = self.private_get("/user/spot/active_orders", {"pair": pair})
-        return list(data.get("orders") or [])
+        orders = data.get("orders") if isinstance(data, dict) else data
+        if orders is None:
+            return []
+        if not isinstance(orders, list):
+            slog("ERROR", "active_orders payload was not a list", type=type(orders).__name__)
+            return []
+        return list(orders)

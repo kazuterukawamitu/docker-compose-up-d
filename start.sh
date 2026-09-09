@@ -132,7 +132,21 @@ if [[ "$need_install" -eq 1 ]]; then
 fi
 
 if ! "$VPY" -c "import dotenv, httpx" >/dev/null 2>&1; then
-  echo "pip packages missing; starting stdlib DRY_RUN (python3 run.py, no orders)"
+  echo "pip packages missing; the full bot (main.py) cannot start" >&2
+  live_intent=0
+  if [[ -f "$ROOT/.env" ]]; then
+    if grep -Eiq '^[[:space:]]*DRY_RUN=false([[:space:]]|$)' "$ROOT/.env" \
+      || grep -Eiq '^[[:space:]]*LIVE_TRADING=true([[:space:]]|$)' "$ROOT/.env" \
+      || grep -Eiq '^[[:space:]]*TRADING_MODE=live' "$ROOT/.env"; then
+      live_intent=1
+    fi
+  fi
+  if [[ "$live_intent" -eq 1 ]]; then
+    echo "refusing run.py fallback: live flags are set and run.py never calls create_order" >&2
+    echo "install httpx + python-dotenv (start.sh venv) then use python3 main.py" >&2
+    exit 2
+  fi
+  echo "falling back to stdlib DRY_RUN (python3 run.py). This never places Bitbank orders." >&2
   exec "$PY" "$ROOT/run.py" "$@"
 fi
 

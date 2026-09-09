@@ -38,6 +38,14 @@ class OrderClient(Protocol):
         live_confirmed: bool = False,
     ) -> dict[str, Any]: ...
 
+    def cancel_order(
+        self,
+        pair: str,
+        order_id: str,
+        *,
+        live_confirmed: bool = False,
+    ) -> dict[str, Any]: ...
+
 
 @dataclass
 class OrderResult:
@@ -62,10 +70,16 @@ class OrderExecutor:
         if self.client is None:
             return []
         try:
-            return self.client.get_active_orders(self.cfg.pair)
+            raw = self.client.get_active_orders(self.cfg.pair)
         except Exception as exc:
             slog("ERROR", "active_orders failed", error=type(exc).__name__)
             raise
+        if raw is None:
+            return []
+        if not isinstance(raw, list):
+            slog("ERROR", "active_orders was not a list", type=type(raw).__name__)
+            return []
+        return raw
 
     def _refresh_order(self, order_id: str) -> dict[str, Any] | None:
         if self.client is None or not hasattr(self.client, "get_order"):
@@ -192,6 +206,7 @@ class OrderExecutor:
             return OrderResult(
                 False, "no_client", False, False, None, None, ZERO, ZERO, None, None
             )
+        self._snapshot_depth()
         try:
             active = self.active_orders()
         except Exception as exc:
@@ -345,3 +360,47 @@ class OrderExecutor:
             status=status,
         )
         return OrderResult(True, reason, False, False, order_id, status, executed, avg, actual, raw)
+
+    def _snapshot_depth(self) -> None:
+        if self.client is None or not hasattr(self.client, "get_depth"):
+            return
+        try:
+            book = self.client.get_depth(self.cfg.pair)
+        except Exception as exc:
+            slog("MARKET", "depth unavailable", error=type(exc).__name__)
+            return
+        asks = book.get("asks") if isinstance(book, dict) else None
+        bids = book.get("bids") if isinstance(book, dict) else None
+        slog(
+            "MARKET",
+            "depth before order",
+            asks=len(asks) if isinstance(asks, list) else 0,
+            bids=len(bids) if isinstance(bids, list) else 0,
+        )
+
+    def cancel(self, order_id: str) -> bool:
+        if not order_id:
+            return False
+        if not self.cfg.may_place_live_orders:
+            slog(
+                "ORDER_STATUS",
+                "not calling Bitbank cancel_order",
+                order_id=order_id,
+                mode=self.cfg.resolved_trading_mode(),
+            )
+            return False
+        if self.client is None or not hasattr(self.client, "cancel_order"):
+            slog("ERROR", "live path has no cancel_order")
+            return False
+        try:
+            self.client.cancel_order(self.cfg.pair, order_id, live_confirmed=True)
+        except Exception as exc:
+            slog(
+                "ERROR",
+                "cancel_order failed; not retrying POST",
+                error=type(exc).__name__,
+                order_id=order_id,
+            )
+            return False
+        slog("ORDER_STATUS", "cancel accepted", order_id=order_id)
+        return True

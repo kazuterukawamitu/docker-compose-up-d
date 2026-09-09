@@ -2,19 +2,19 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import signal
 import time
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
-from pathlib import Path
 from typing import Any
 
 from bitbank_bot.amounts import AmountPlan
 from bitbank_bot.config import Config
+from bitbank_bot.engine_state import BotState, PendingOrder, load_state, save_state
+from bitbank_bot.exchange import BitbankAdapter
 from bitbank_bot.logging_setup import slog
+from bitbank_bot.managers import ConnectionManager, DataManager, ExecutionMonitor, StateManager
 from bitbank_bot.market_data import (
     Candle,
     CandleCache,
@@ -24,7 +24,7 @@ from bitbank_bot.market_data import (
 )
 from bitbank_bot.money import D, ZERO
 from bitbank_bot.multi_timeframe import evaluate_htf
-from bitbank_bot.orders import OrderExecutor, OrderResult
+from bitbank_bot.orders import OrderResult
 from bitbank_bot.preflight import preflight
 from bitbank_bot.reconciliation import ReconciliationManager
 from bitbank_bot.rest_client import BitbankAPIError, RestClient, is_auth_error
@@ -33,121 +33,12 @@ from bitbank_bot.screen import TradingScreen, view_from_engine
 from bitbank_bot.self_healing import SelfHealingEngine
 from bitbank_bot.strategy import Position, Signal, Strategy, build_snapshots
 from bitbank_bot.trade_signal_executor import TradeSignalExecutor
+from bitbank_bot.trade_state import TradePhase, TradeStateMachine
 from bitbank_bot.watchdog import classify as classify_watchdog
-from bitbank_bot.websocket_client import BitbankWebsocket
 
 _LOG = logging.getLogger("bitbank_bot")
 
-
-@dataclass
-class PendingOrder:
-    order_id: str
-    side: str
-    kind: str
-    tp_pct: Decimal | None
-    index: int
-    timestamp_ms: int
-    amount: Decimal
-    filled_amount: Decimal = ZERO
-
-
-@dataclass
-class BotState:
-    position: Position | None
-    risk: RiskManager
-    last_candle_ts: int
-    started_at: float
-    pending: PendingOrder | None = None
-    paper_jpy: Decimal = ZERO
-    paper_btc: Decimal = ZERO
-
-
-def load_state(path: str | Path, cfg: Config) -> BotState:
-    risk = RiskManager(cfg)
-    position = None
-    last_ts = 0
-    pending: PendingOrder | None = None
-    paper_jpy = cfg.dry_run_free_jpy
-    paper_btc = cfg.dry_run_free_btc
-    p = Path(path)
-    if p.exists():
-        raw = json.loads(p.read_text(encoding="utf-8"))
-        pos = raw.get("position")
-        if pos:
-            position = Position(
-                amount=D(pos["amount"]),
-                average_price=D(pos["average_price"]),
-                tp_pct=D(pos["tp_pct"]),
-                entry_candle_index=int(pos["entry_candle_index"]),
-                entry_candle_ts=int(pos.get("entry_candle_ts") or 0),
-                actual_execution_jpy=D(pos["actual_execution_jpy"]),
-                kind=str(pos.get("kind") or ""),
-            )
-        operator_killed = bool(raw.get("operator_killed", False))
-        risk = RiskManager(
-            cfg,
-            daily_pnl=D(raw.get("daily_pnl") or 0),
-            daily_pnl_date=raw.get("daily_pnl_date"),
-            killed=operator_killed or cfg.kill_switch,
-        )
-        last_ts = int(raw.get("last_candle_ts") or 0)
-        pending_raw = raw.get("pending")
-        if pending_raw and pending_raw.get("order_id"):
-            tp_raw = pending_raw.get("tp_pct")
-            pending = PendingOrder(
-                order_id=str(pending_raw["order_id"]),
-                side=str(pending_raw.get("side") or ""),
-                kind=str(pending_raw.get("kind") or ""),
-                tp_pct=D(tp_raw) if tp_raw not in (None, "") else None,
-                index=int(pending_raw.get("index") or 0),
-                timestamp_ms=int(pending_raw.get("timestamp_ms") or 0),
-                amount=D(pending_raw.get("amount") or 0),
-                filled_amount=D(pending_raw.get("filled_amount") or 0),
-            )
-        if raw.get("paper_jpy") not in (None, ""):
-            paper_jpy = D(raw.get("paper_jpy"))
-        if raw.get("paper_btc") not in (None, ""):
-            paper_btc = D(raw.get("paper_btc"))
-    return BotState(
-        position, risk, last_ts, time.monotonic(), pending, paper_jpy, paper_btc
-    )
-
-
-def save_state(path: str | Path, state: BotState) -> None:
-    p = Path(path)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    payload: dict[str, Any] = {
-        "daily_pnl": str(state.risk.daily_pnl),
-        "daily_pnl_date": state.risk.daily_pnl_date,
-        "operator_killed": state.risk.operator_killed,
-        "last_candle_ts": state.last_candle_ts,
-        "paper_jpy": str(state.paper_jpy),
-        "paper_btc": str(state.paper_btc),
-        "position": None,
-        "pending": None,
-    }
-    if state.pending:
-        payload["pending"] = {
-            "order_id": state.pending.order_id,
-            "side": state.pending.side,
-            "kind": state.pending.kind,
-            "tp_pct": str(state.pending.tp_pct) if state.pending.tp_pct is not None else "",
-            "index": state.pending.index,
-            "timestamp_ms": state.pending.timestamp_ms,
-            "amount": str(state.pending.amount),
-            "filled_amount": str(state.pending.filled_amount),
-        }
-    if state.position:
-        payload["position"] = {
-            "amount": str(state.position.amount),
-            "average_price": str(state.position.average_price),
-            "tp_pct": str(state.position.tp_pct),
-            "entry_candle_index": state.position.entry_candle_index,
-            "entry_candle_ts": state.position.entry_candle_ts,
-            "actual_execution_jpy": str(state.position.actual_execution_jpy),
-            "kind": state.position.kind,
-        }
-    p.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+__all__ = ["BotState", "Engine", "PendingOrder", "install_signal_handlers", "load_state", "save_state"]
 
 
 class Engine:
@@ -181,25 +72,21 @@ class Engine:
         self.signal_counts = {"BUY": 0, "SELL": 0, "HOLD": 0}
         self.last_reconcile_cycle = 0
         self.order_lock = False
+        self.connections = ConnectionManager(cfg, client)
+        self.data = DataManager(cfg, self.connections.rest() if client is not None else None, self.cache)
+        self.states = StateManager(cfg)
+        self.trade_machine = TradeStateMachine()
+        self.last_trade_phase = TradePhase.WAIT.value
 
     def request_stop(self, *_args: object) -> None:
         slog("BOOT", "shutdown requested")
         self._stop = True
 
-    def _rest(self) -> RestClient:
-        if self.client is None:
-            self.client = RestClient(
-                public_url=self.cfg.public_url,
-                private_url=self.cfg.private_url,
-                api_key=self.cfg.api_key,
-                api_secret=self.cfg.api_secret,
-                access_time_window_ms=self.cfg.access_time_window_ms,
-                timeout_sec=self.cfg.http_timeout_sec,
-                max_retries=self.cfg.max_retries,
-                query_rps=self.cfg.query_rps,
-                update_rps=self.cfg.update_rps,
-            )
-        return self.client
+    def _rest(self) -> Any:
+        rest = self.connections.rest()
+        self.client = rest
+        self.data.client = rest
+        return rest
 
     def _balances(self, rest: RestClient, state: BotState | None = None) -> tuple[Decimal, Decimal]:
         if self.cfg.has_keys:
@@ -218,16 +105,7 @@ class Engine:
         return jpy, btc
 
     def _maybe_ws(self) -> None:
-        if not self.cfg.enable_websocket or self.ws is not None:
-            return
-        try:
-            self.ws = BitbankWebsocket(
-                self.cfg.ws_url, self.cfg.ws_rooms, stale_sec=self.cfg.stale_ws_sec
-            )
-            self.ws.start()
-        except Exception as exc:
-            slog("WEBSOCKET", "start failed; REST only", error=type(exc).__name__)
-            self.ws = None
+        self.ws = self.connections.start_ws()
 
     def process_candles(
         self,
@@ -237,6 +115,14 @@ class Engine:
         persist: bool = True,
     ) -> Signal:
         candles = drop_incomplete_candle(candles, self.cfg.candle_type)
+        if execute and state.pending:
+            halt = state.risk.halt_reason()
+            if halt or self.cfg.kill_switch:
+                self._cancel_pending(state, reason=halt or "kill_switch")
+            else:
+                self._poll_pending(state)
+            if persist:
+                self.states.save(state)
         closes = [c.close for c in candles]
         stamps = [c.timestamp_ms for c in candles]
         snaps = build_snapshots(closes, stamps, self.cfg)
@@ -245,10 +131,6 @@ class Engine:
             hold = Signal.hold("not_enough_candles")
             self.last_signal = hold
             return hold
-        if execute and state.pending:
-            self._poll_pending(state)
-            if persist:
-                save_state(self.cfg.state_path, state)
         strategy = Strategy(self.cfg)
         last = snaps[-1]
         self.last_close = last.close
@@ -297,6 +179,7 @@ class Engine:
                     slog("STRATEGY", "candle already processed", candle_ts=snap.timestamp_ms)
                 continue
             if signal.side in {"buy", "sell"}:
+                self.trade_machine.transition(TradePhase.SIGNAL_FOUND, reason=signal.kind)
                 if not is_last:
                     slog(
                         "STRATEGY",
@@ -347,6 +230,11 @@ class Engine:
             if persist:
                 save_state(self.cfg.state_path, state)
         self.last_signal = signal
+        self.last_trade_phase = self.trade_machine.from_bot(
+            pending=state.pending is not None,
+            in_position=state.position is not None,
+            side=signal.side,
+        ).value
         return signal
 
     def _price_stale(self, close: Decimal) -> bool:
@@ -384,6 +272,15 @@ class Engine:
             self.last_block_reason = "order_lock"
             slog("EXECUTION_BLOCKED", "order_lock")
             return
+        if not self.healing.breaker.allow():
+            self.last_block_reason = "circuit_open"
+            slog("EXECUTION_BLOCKED", "circuit_open")
+            return
+        if self.healing.quarantine.is_quarantined("order"):
+            self.last_block_reason = "order_quarantined"
+            slog("EXECUTION_BLOCKED", "order_quarantined")
+            return
+        self.trade_machine.transition(TradePhase.ORDERING, reason=signal.kind)
         rest = self._rest()
         if self.ws is not None and not self.ws.is_stale() and self.ws.last_price():
             price = self.ws.last_price() or price
@@ -463,13 +360,32 @@ class Engine:
         )
         self._apply_fill(signal, plan, result, index, ts, state, jpy, btc)
 
+    def _cancel_pending(self, state: BotState, *, reason: str) -> None:
+        pending = state.pending
+        if pending is None:
+            return
+        rest = self._rest()
+        monitor = ExecutionMonitor(self.cfg, rest if self.cfg.has_keys else None)
+        cancelled = monitor.cancel(pending.order_id)
+        slog(
+            "ORDER_STATUS",
+            "pending cancel requested",
+            order_id=pending.order_id,
+            reason=reason,
+            cancelled=cancelled,
+            trading_mode=self.cfg.resolved_trading_mode(),
+        )
+        if cancelled or not self.cfg.has_keys:
+            state.pending = None
+            self.trade_machine.transition(TradePhase.WAIT, reason="pending_cancelled")
+
     def _poll_pending(self, state: BotState) -> None:
         pending = state.pending
         if pending is None:
             return
         rest = self._rest()
-        executor = OrderExecutor(self.cfg, rest if self.cfg.has_keys else None)
-        result = executor.poll(pending.order_id, pending.amount)
+        monitor = ExecutionMonitor(self.cfg, rest if self.cfg.has_keys else None)
+        result = monitor.poll(pending.order_id, pending.amount)
         if not result.ok:
             slog(
                 "ORDER_STATUS",
@@ -861,8 +777,8 @@ class Engine:
             except KeyboardInterrupt:
                 slog("BOOT", "keyboard interrupt")
                 self._stop = True
-        if self.ws:
-            self.ws.stop()
+        self.connections.stop_ws()
+        self.ws = None
         slog("BOOT", "stopped")
         return 0
 
@@ -919,6 +835,7 @@ class Engine:
             ),
             order_allowed=live and not self.last_block_reason,
             block_reason=self.last_block_reason,
+            trade_phase=self.last_trade_phase,
             utc=datetime.now(timezone.utc).isoformat(),
             **health,
         )

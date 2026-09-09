@@ -72,6 +72,14 @@ bitFlyer, Coincheck, and GMO are not imported and are not executed.
     full path and log `WOULD_SUBMIT_ORDER` instead of calling `create_order`.
 15. **Order POST retry.** `POST /user/spot/order` is not retried on timeout;
     the bot reconciles open orders instead of sending a second BUY/SELL.
+16. **Named facades.** `BitbankAdapter`, `ConnectionManager`, `DataManager`,
+    `StateManager`, `ExecutionMonitor`, and `TradeStateMachine` wrap the
+    existing path. `OrderExecutor` is still the only live `create_order` caller.
+17. **Depth + cancel.** Public `GET /{pair}/depth` is logged before a live
+    order. `POST /user/spot/cancel_order` is not retried and only runs in LIVE
+    (kill switch / halt).
+18. **`run.py` fallback.** `start.sh` will not start `run.py` when live flags
+    are set, because that program never posts orders.
 
 ## What this bot does not do
 
@@ -83,3 +91,36 @@ bitFlyer, Coincheck, and GMO are not imported and are not executed.
 
 If keys were pasted into chat, rotate them in the bitbank console. Do not put
 them in git, screenshots, or logs.
+
+## Program review (added / removed / kept)
+
+**Removed:** none. Wiki HTML leftovers, `run.py`, and the README strategy stay.
+
+**Added (this branch, relative to `main`):**
+
+| Path | Role |
+| --- | --- |
+| `src/bitbank_bot/exchange/bitbank_adapter.py` | Thin Bitbank facade over `RestClient` |
+| `src/bitbank_bot/trade_signal_executor.py` | Single signal → gate → size → order path |
+| `src/bitbank_bot/rate_engine.py` | FIXED / DYNAMIC / AUTO take-profit / size |
+| `src/bitbank_bot/execution_gate.py` | Last checks; `EXECUTION_BLOCKED` |
+| `src/bitbank_bot/reconciliation.py` | Bitbank snapshot vs bot state |
+| `src/bitbank_bot/self_healing.py` | Circuit breaker, error class, quarantine |
+| `src/bitbank_bot/sentry_setup.py` | Optional Sentry; redacts secrets |
+| `src/bitbank_bot/engine_state.py` | `BotState` JSON load/save |
+| `src/bitbank_bot/managers.py` | Connection / data / state / execution monitor |
+| `src/bitbank_bot/trade_state.py` | WAIT → SIGNAL_FOUND → ORDERING → PENDING/POSITION |
+| `scripts/iterm_dev_env.zsh` | Source-able iTerm env (does not rewrite `~/.zshrc`) |
+| `.pre-commit-config.yaml` | Ruff/Black hooks |
+| `tests/test_execution_path.py` | Live-ready / LIVE / candle 404 / submit path |
+| `tests/test_rate_engine.py` | Rate modes |
+| `tests/test_self_healing.py` | Error class + circuit |
+| `tests/test_runtime.py` | Adapter, managers, state machine, faults |
+
+**Modified (kept, not replaced):** `config.py`, `engine.py`, `orders.py`,
+`rest_client.py`, `market_data.py`, `strategy.py`, `amounts.py`,
+`indicators.py`, `preflight.py`, `main.py`, `screen.py`, `logging_setup.py`,
+`.env.example`, `README.md`, `docs/AUDIT.md`, `deploy/bitbank-bot.service`,
+`pyproject.toml`, `start.sh`, `tests/helpers.py`, `tests/test_strategy.py`.
+
+`run.py` is **kept** as a DRY_RUN screen only. It is not the live bot.
