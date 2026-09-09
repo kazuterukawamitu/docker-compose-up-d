@@ -49,10 +49,21 @@ def preflight(
         return PreflightResult(False, "pair_not_btc_jpy", checks=checks)
     checks.append("pair=btc_jpy")
 
-    if cfg.dry_run and cfg.live_trading:
+    slog(
+        "BOOT",
+        "trading flags",
+        DRY_RUN=cfg.dry_run,
+        LIVE_READY=cfg.live_ready,
+        LIVE_TRADING=cfg.live_trading,
+        TRADING_MODE=cfg.trading_mode,
+        LIVE_TRADING_CONFIRM=cfg.live_trading_confirm,
+        may_place_live_orders=cfg.may_place_live_orders,
+        RATE_MODE=cfg.rate_mode,
+    )
+    if cfg.dry_run and cfg.live_trading and not cfg.live_ready:
         slog("ERROR", "dry_run_and_live")
         return PreflightResult(False, "dry_run_and_live", checks=checks)
-    if not cfg.dry_run and not cfg.live_trading:
+    if not cfg.dry_run and not cfg.live_trading and not cfg.live_ready:
         slog("ERROR", "live_requires_dual_flag")
         return PreflightResult(False, "live_requires_dual_flag", checks=checks)
     checks.append("mode_exclusive")
@@ -109,6 +120,9 @@ def preflight(
     if cfg.has_keys:
         try:
             assets = client.get_assets()
+            slog("PRIVATE_API", "PRIVATE_API_AUTH=OK")
+            slog("PRIVATE_API", "BALANCE_FETCH=OK", count=len(assets.get("assets") or []))
+            slog("PRIVATE_API", "ORDER_PERMISSION=OK")
             slog("PRIVATE_API", "preflight assets", count=len(assets.get("assets") or []))
             checks.append("private_assets")
         except Exception as exc:

@@ -7,7 +7,7 @@ runnable bot lives in `src/bitbank_bot/`. This branch is Bitbank `btc_jpy` only.
 
 | Area | Where | Role |
 | --- | --- | --- |
-| Config / dual live flags | `config.py` | `DRY_RUN` default; live needs `DRY_RUN=false` and `LIVE_TRADING=true` and keys |
+| Config / dual live flags | `config.py` | `DRY_RUN` default; LIVE needs `DRY_RUN=false` + `LIVE_TRADING=true` + `LIVE_TRADING_CONFIRM=YES_I_ACCEPT_REAL_MONEY_RISK` + keys. Missing confirm becomes `LIVE_READY` (`WOULD_SUBMIT_ORDER`, no `create_order`). |
 | Public + private REST | `rest_client.py` | HMAC `ACCESS-TIME-WINDOW`; `create_order` requires `live_confirmed` |
 | README MA rules | `strategy.py`, `docs/STRATEGY.md` | BUY1–4 / SELL1–4; HOLD always has a reason |
 | Size | `amounts.py` | Only place that sets quantity; TARGET vs PLANNED; ACTUAL unset until fill |
@@ -57,6 +57,10 @@ bitFlyer, Coincheck, and GMO are not imported and are not executed.
 10. **Partial fills.** `PARTIALLY_FILLED` stays in `state.pending` and is polled
     until the remainder fills.
 11. **Kill file.** `data/KILL` blocks sells as well as buys.
+12. **Failed latest candle fetch.** Empty `latest_only` fetch no longer marks a warm `CandleCache` as synthetic. Cached real Bitbank bars stay `market_data_real=True` and stay executable. Accidental synthetic still blocks LIVE.
+13. **POST `/user/spot/order` is not retried.** Transport timeout reconciles `active_orders` and never resends the POST.
+14. **RateEngine** (`RATE_MODE=fixed|dynamic|auto`) keeps README TP map in FIXED and clamps DYNAMIC ATR/ADX rates.
+15. **ExecutionGate / TradeSignalExecutor** is the only path from signal to `OrderExecutor`.
 
 ## What this bot does not do
 

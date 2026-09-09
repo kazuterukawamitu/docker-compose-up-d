@@ -12,10 +12,13 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
-from bitbank_bot.amounts import AmountPlan, PositionSizer
+from bitbank_bot.amounts import AmountPlan
 from bitbank_bot.config import Config
+from bitbank_bot.connection_manager import ConnectionManager
+from bitbank_bot.execution_gate import GateContext
 from bitbank_bot.logging_setup import slog
 from bitbank_bot.market_data import (
+    CANDLE_MS,
     Candle,
     CandleCache,
     drop_incomplete_candle,
@@ -26,10 +29,18 @@ from bitbank_bot.money import D, ZERO
 from bitbank_bot.multi_timeframe import evaluate_htf
 from bitbank_bot.orders import OrderExecutor, OrderResult
 from bitbank_bot.preflight import preflight
+from bitbank_bot.reconciliation import ReconciliationManager
 from bitbank_bot.rest_client import BitbankAPIError, RestClient, is_auth_error
 from bitbank_bot.risk import RiskManager
 from bitbank_bot.screen import TradingScreen, view_from_engine
+from bitbank_bot.self_healing_engine import HealAction, SelfHealingEngine
 from bitbank_bot.strategy import Position, Signal, Strategy, build_snapshots
+from bitbank_bot.trade_signal_executor import (
+    SignalStats,
+    TradeSignalExecutor,
+    apply_rate_to_signal,
+    ticker_stale,
+)
 from bitbank_bot.watchdog import classify as classify_watchdog
 from bitbank_bot.websocket_client import BitbankWebsocket
 
@@ -172,6 +183,12 @@ class Engine:
         self.last_signal = Signal.hold("starting")
         self.last_public_last: str = "-"
         self.last_error = ""
+        self.market_data_real = False
+        self.connection = ConnectionManager(stale_sec=cfg.stale_ws_sec)
+        self.healing = SelfHealingEngine()
+        self.signal_stats = SignalStats()
+        self._last_reconcile = 0.0
+        self.reconcile_block = False
 
     def request_stop(self, *_args: object) -> None:
         slog("BOOT", "shutdown requested")
@@ -216,6 +233,7 @@ class Engine:
                 self.cfg.ws_url, self.cfg.ws_rooms, stale_sec=self.cfg.stale_ws_sec
             )
             self.ws.start()
+            self.connection.attach_ws(self.ws)
         except Exception as exc:
             slog("WEBSOCKET", "start failed; REST only", error=type(exc).__name__)
             self.ws = None
@@ -265,7 +283,18 @@ class Engine:
                 continue
             signal = strategy.evaluate(snap, state.position)
             self.strategy_evaluations += 1
-            slog("STRATEGY", "signal", kind=signal.kind, reason=signal.reason, side=signal.side)
+            self.signal_stats.note(signal)
+            self.healing.note("last_strategy_at")
+            slog(
+                "SIGNAL_CREATED" if signal.side in {"buy", "sell"} else "STRATEGY",
+                "signal",
+                kind=signal.kind,
+                reason=signal.reason,
+                side=signal.side,
+                buy_count=self.signal_stats.buy,
+                sell_count=self.signal_stats.sell,
+                hold_count=self.signal_stats.hold,
+            )
             if not execute or heartbeat:
                 if heartbeat:
                     slog("STRATEGY", "candle already processed", candle_ts=snap.timestamp_ms)
@@ -308,7 +337,14 @@ class Engine:
                     self.last_block_reason = "stale_websocket"
                     signal = Signal.hold("stale_websocket")
                     break
-                self._execute(signal, snap.close, snap.index, snap.timestamp_ms, state)
+                self._execute(
+                    signal,
+                    snap.close,
+                    snap.index,
+                    snap.timestamp_ms,
+                    state,
+                    candles,
+                )
             state.last_candle_ts = snap.timestamp_ms
             if persist:
                 save_state(self.cfg.state_path, state)
@@ -322,14 +358,18 @@ class Engine:
         index: int,
         ts: int,
         state: BotState,
+        candles: list[Candle] | None = None,
     ) -> None:
         rest = self._rest()
         if self.ws is not None and not self.ws.is_stale() and self.ws.last_price():
             price = self.ws.last_price() or price
         try:
             jpy, btc = self._balances(rest, state)
+            self.healing.note("last_balance_at")
+            self.connection.note_rest_ok()
         except BitbankAPIError as exc:
             _LOG.exception("balance fetch failed on order path")
+            self.connection.note_rest_fail()
             if is_auth_error(exc):
                 state.risk.note_auth_failure()
                 reason = "auth_failure"
@@ -341,35 +381,65 @@ class Engine:
             return
         except Exception as exc:
             _LOG.exception("balance fetch failed on order path")
+            self.connection.note_rest_fail()
             state.risk.note_api_error()
             self.last_block_reason = "balance_fetch_failed"
             slog("ERROR", "no order", reason="balance_fetch_failed", error=type(exc).__name__)
             return
         state.risk.note_api_ok()
         state.risk.update_equity(jpy, btc, price)
-        sizer = PositionSizer(self.cfg, state.risk)
-        if signal.side == "buy":
-            plan = sizer.plan_buy(available_jpy=jpy, available_btc=btc, price=price)
-        else:
-            plan = sizer.plan_sell(available_jpy=jpy, available_btc=btc, price=price)
+        pipeline = TradeSignalExecutor(self.cfg, rest if self.cfg.has_keys else None)
+        series = candles or list(self.cache.candles)
+        rate = pipeline.decide_rate(signal, series)
+        if not rate.ok:
+            self.last_block_reason = rate.reason
+            slog("EXECUTION_BLOCKED", "TRADE_BLOCKED", reason=rate.reason)
+            return
+        signal = apply_rate_to_signal(signal, rate)
+        if ticker_stale(price, D(self.last_public_last) if self.last_public_last not in {"-", ""} else None, self.cfg):
+            self.last_block_reason = "stale_market_data"
+            slog("EXECUTION_BLOCKED", "TRADE_BLOCKED", reason="stale_market_data")
+            return
+        plan = pipeline.size(signal, price, jpy, btc, state.risk, rate)
         slog(
-            "RISK",
+            "POSITION_SIZE_CALCULATED",
             "RISK MANAGER OK",
             ok=plan.ok,
             reason=plan.reason,
             target_jpy=str(plan.target_jpy),
             planned_order_jpy=str(plan.planned_order_jpy),
             amount=str(plan.amount),
+            rate_mode=rate.mode,
         )
-        if not plan.ok:
-            self.last_block_reason = plan.reason
-            slog("RISK", "order blocked", reason=plan.reason, side=signal.side)
+        accidental_synthetic = self.used_synthetic_fallback and not self._explicit_synthetic
+        ctx = GateContext(
+            market_data_real=bool(
+                (self.market_data_real or bool(series)) and not accidental_synthetic
+            ),
+            market_data_fresh=True,
+            private_api_ok=self.cfg.has_keys or self.cfg.dry_run,
+            balance_ok=plan.ok,
+            kill_switch=bool(state.risk.halt_reason()),
+            amount=plan.amount,
+            duplicate_order=False,
+            open_order_conflict=bool(state.pending) or self.reconcile_block,
+            connection_healthy=True,
+            stale_price=False,
+            synthetic=accidental_synthetic,
+        )
+        gate = pipeline.gate(signal, rate, plan, ctx)
+        if not gate.proceed:
+            self.last_block_reason = gate.reason
+            slog("RISK", "order blocked", reason=gate.reason, side=signal.side)
             return
-        self.last_block_reason = ""
-        order_client = rest if self.cfg.has_keys else None
-        executor = OrderExecutor(self.cfg, order_client)
+        if gate.reason == "dry_run":
+            self.last_block_reason = ""
+        elif gate.would_submit:
+            self.last_block_reason = "live_ready"
+        else:
+            self.last_block_reason = ""
         try:
-            result = executor.place(signal, plan)
+            result = pipeline.submit(signal, plan, gate)
         except Exception as exc:
             _LOG.exception("order place failed")
             slog("ERROR", "order path failed", error=type(exc).__name__)
@@ -382,6 +452,8 @@ class Engine:
             simulated=result.simulated,
             dry_run=result.dry_run,
         )
+        if result.reason == "would_submit":
+            return
         self._apply_fill(signal, plan, result, index, ts, state, jpy, btc)
 
     def _poll_pending(self, state: BotState) -> None:
@@ -581,6 +653,9 @@ class Engine:
     def run_once(self, *, synthetic: bool = False, skip_preflight: bool = False) -> int:
         slog("BOOT", "run_once", synthetic=synthetic, dry_run=self.cfg.dry_run)
         self._explicit_synthetic = synthetic
+        if synthetic:
+            self.used_synthetic_fallback = True
+            self.market_data_real = False
         rest = self._rest()
         if not skip_preflight and not synthetic:
             result = preflight(self.cfg, rest, require_public=True)
@@ -610,6 +685,15 @@ class Engine:
         slog("BOOT", "run_once complete")
         return 0
 
+    def _cache_is_fresh(self) -> bool:
+        if not self.cache.candles:
+            return False
+        width = CANDLE_MS.get(self.cfg.candle_type, 3_600_000)
+        last = self.cache.candles[-1]
+        now_ms = int(time.time() * 1000)
+        age_ms = now_ms - last.timestamp_ms
+        return age_ms <= int(width * 3 + self.cfg.stale_ws_sec * 1000)
+
     def _candles_for_cycle(
         self,
         rest: RestClient,
@@ -619,24 +703,45 @@ class Engine:
     ) -> list[Candle]:
         if force_synthetic:
             self.used_synthetic_fallback = True
+            self.market_data_real = False
             slog("MARKET", "using synthetic candles")
             return synthetic_candles()
         try:
             incoming = fetch_candles(rest, self.cfg, latest_only=latest_only)
             if incoming:
                 self.used_synthetic_fallback = False
+                self.market_data_real = True
+                self.connection.note_rest_ok()
+                self.healing.note("last_candle_at")
+                slog("MARKET_DATA_RECEIVED", "real bitbank candles", count=len(incoming))
                 return incoming
-            slog("MARKET", "empty public candles; synthetic fallback without orders")
+            slog("MARKET", "empty public candles this fetch")
         except Exception as exc:
+            self.connection.note_rest_fail()
             slog(
                 "WATCHDOG",
                 "FAIL",
-                reason="public_candles_failed_using_synthetic",
+                reason="public_candles_failed",
                 error=type(exc).__name__,
             )
-        self.used_synthetic_fallback = True
-        slog("MARKET", "synthetic fallback; loop continues (no orders)")
-        return synthetic_candles()
+        if self.cache.candles and self._cache_is_fresh():
+            self.used_synthetic_fallback = False
+            self.market_data_real = True
+            slog(
+                "MARKET",
+                "using cached real candles; latest fetch empty",
+                count=len(self.cache.candles),
+            )
+            return []
+        if self.cfg.dry_run and not self.cfg.may_place_live_orders:
+            self.used_synthetic_fallback = True
+            self.market_data_real = False
+            slog("MARKET", "synthetic fallback; loop continues (no orders)")
+            return synthetic_candles()
+        self.used_synthetic_fallback = False
+        self.market_data_real = False
+        slog("MARKET", "no real candles and live/ready mode; not synthesizing")
+        return []
 
     def run_forever(
         self,
@@ -652,6 +757,7 @@ class Engine:
             synthetic=synthetic,
         )
         self._explicit_synthetic = synthetic
+        self.healing.optional_sentry(self.cfg.sentry_dsn)
         rest = self._rest()
         if self.screen is not None:
             self.screen.boot("公開ティッカーと足を取得しています…")
@@ -681,6 +787,7 @@ class Engine:
                     rest, latest_only=latest_only, force_synthetic=synthetic
                 )
                 self._refresh_public_last(rest)
+                self.healing.note("last_loop_at")
                 accidental_synthetic = (
                     self.used_synthetic_fallback and not self._explicit_synthetic
                 )
@@ -690,14 +797,18 @@ class Engine:
                         "FAIL",
                         reason="synthetic_fallback_no_orders",
                     )
+                    slog("EXECUTION_BLOCKED", "TRADE_BLOCKED", reason="synthetic_market_data")
                     candles = list(self.cache.candles) if self.cache.candles else incoming
                 else:
-                    candles = self.cache.merge(incoming)
+                    candles = self.cache.merge(incoming) if incoming else list(self.cache.candles)
+                if candles:
+                    slog("MARKET", "closed candles ready", count=len(candles), real=self.market_data_real)
+                self._maybe_reconcile(rest, state)
                 signal = self.process_candles(
                     candles,
                     state,
                     execute=not accidental_synthetic,
-                    persist=not (synthetic or self.used_synthetic_fallback),
+                    persist=not (synthetic or accidental_synthetic),
                 )
                 last_ok = time.monotonic()
                 last = str(candles[-1].close) if candles else "-"
@@ -722,9 +833,15 @@ class Engine:
             except Exception as exc:
                 _LOG.exception("loop error")
                 slog("ERROR", "loop error", error=type(exc).__name__, detail=str(exc)[:200])
+                action = self.healing.handle_loop_error(
+                    exc, reconnect=lambda: self.connection.recover_websocket()
+                )
                 idle = time.monotonic() - last_ok
-                slog("WATCHDOG", "FAIL", reason="loop_error", idle_sec=int(idle))
+                slog("WATCHDOG", "FAIL", reason="loop_error", idle_sec=int(idle), heal=action.value)
                 self.last_watchdog = "FAIL"
+                if action == HealAction.STOP:
+                    slog("WATCHDOG", "kill switch after unrecoverable error")
+                    break
                 if idle >= timeout:
                     slog("WATCHDOG", "FAIL stuck errors; still not exiting on HOLD")
                 self.cycles += 1
@@ -756,8 +873,16 @@ class Engine:
             reason=signal.reason,
             in_position=bool(state.position),
             uptime_sec=int(time.monotonic() - state.started_at),
-            mode="DRY_RUN" if self.cfg.dry_run else "LIVE",
-            bitbank_jpy_unchanged=self.cfg.dry_run,
+            mode=self.cfg.trading_mode.upper(),
+            DRY_RUN=self.cfg.dry_run,
+            LIVE_READY=self.cfg.live_ready,
+            LIVE_TRADING=self.cfg.live_trading,
+            may_place_live_orders=self.cfg.may_place_live_orders,
+            market_data_real=self.market_data_real,
+            market_data_source="synthetic" if self.used_synthetic_fallback else "bitbank",
+            connection_state=self.connection.snapshot().connection_state,
+            health_score=self.connection.snapshot().health_score,
+            bitbank_jpy_unchanged=self.cfg.dry_run or self.cfg.live_ready,
             utc=datetime.now(timezone.utc).isoformat(),
         )
         slog("HEARTBEAT", "WebSocket CONNECTED" if ws_ok else "WebSocket DISCONNECTED")
@@ -774,8 +899,11 @@ class Engine:
             if last not in (None, ""):
                 self.last_public_last = str(last)
                 self.last_error = ""
+                self.connection.note_rest_ok()
+                self.healing.note("last_ticker_at")
         except Exception as exc:
             self.last_error = type(exc).__name__
+            self.connection.note_rest_fail()
 
     def _paint(self, state: BotState, signal: Signal, last: str = "-") -> None:
         if self.screen is None:
@@ -785,6 +913,7 @@ class Engine:
             pair=self.cfg.pair,
             dry_run=self.cfg.dry_run,
             live_orders=self.cfg.may_place_live_orders,
+            trading_mode=self.cfg.trading_mode,
             price=last if last != "-" else self.last_close,
             public_last=self.last_public_last,
             ma=self.last_ma,
@@ -804,6 +933,31 @@ class Engine:
             candle_type=self.cfg.candle_type,
         )
         self.screen.render(view)
+
+    def _maybe_reconcile(self, rest: RestClient, state: BotState) -> None:
+        if not self.cfg.has_keys:
+            return
+        now = time.monotonic()
+        if self._last_reconcile and now - self._last_reconcile < max(30.0, self.cfg.poll_sec * 4):
+            return
+        self._last_reconcile = now
+        manager = ReconciliationManager(self.cfg, rest)
+        bot_btc = state.position.amount if state.position else ZERO
+        report = manager.reconcile(
+            bot_btc=bot_btc,
+            pending_order_id=state.pending.order_id if state.pending else None,
+            allow_paper=self.cfg.dry_run,
+        )
+        self.healing.note("last_order_check_at")
+        if report.action == "clear_pending":
+            slog("ORDER_STATUS", "clearing vanished pending order")
+            state.pending = None
+            self.reconcile_block = False
+        elif report.action == "block":
+            self.reconcile_block = True
+            self.last_block_reason = report.reason
+        else:
+            self.reconcile_block = False
 
 
 def install_signal_handlers(engine: Engine) -> None:

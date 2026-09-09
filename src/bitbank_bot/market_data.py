@@ -15,7 +15,7 @@ from bitbank_bot.config import (
 )
 from bitbank_bot.logging_setup import slog
 from bitbank_bot.money import D
-from bitbank_bot.rest_client import RestClient
+from bitbank_bot.rest_client import BitbankAPIError, RestClient
 
 JST = timezone(timedelta(hours=9))
 
@@ -65,29 +65,92 @@ def parse_ohlcv(row: list[object]) -> Candle:
     )
 
 
+def log_candle_api_error(
+    exc: BaseException,
+    *,
+    pair: str,
+    candle_type: str,
+    date_key: str,
+    retry_count: int,
+) -> None:
+    http_status = getattr(exc, "http_status", None)
+    bitbank_code = getattr(exc, "code", None)
+    body = getattr(exc, "body", None)
+    body_text = ""
+    if isinstance(body, (dict, list)):
+        body_text = str(body)[:240]
+    elif body is not None:
+        body_text = str(body)[:240]
+    slog(
+        "CANDLE_API_ERROR",
+        "candlestick fetch failed",
+        pair=pair,
+        candle_type=candle_type,
+        date=date_key,
+        http_status=http_status,
+        bitbank_code=bitbank_code,
+        error=type(exc).__name__,
+        retry_count=retry_count,
+        response_body=body_text,
+    )
+
+
+def _date_keys(cfg: Config, *, latest_only: bool, extra_day: bool = False) -> list[str]:
+    now = datetime.now(JST)
+    keys: list[str] = []
+    if cfg.candle_type in SHORT_CANDLE_TYPES:
+        days = 1 if latest_only else cfg.candle_lookback_days
+        if extra_day and latest_only:
+            days = 2
+        for i in range(days):
+            keys.append(candle_date_key(cfg.candle_type, now - timedelta(days=i)))
+    else:
+        keys.append(candle_date_key(cfg.candle_type, now))
+        if not latest_only or extra_day:
+            keys.append(candle_date_key(cfg.candle_type, now.replace(year=now.year - 1)))
+    # preserve order, drop dupes
+    out: list[str] = []
+    seen: set[str] = set()
+    for key in keys:
+        if key not in seen:
+            seen.add(key)
+            out.append(key)
+    return out
+
+
 def fetch_candles(
     client: RestClient,
     cfg: Config,
     *,
     latest_only: bool = False,
 ) -> list[Candle]:
-    now = datetime.now(JST)
-    keys: list[str] = []
-    if cfg.candle_type in SHORT_CANDLE_TYPES:
-        days = 1 if latest_only else cfg.candle_lookback_days
-        for i in range(days):
-            keys.append(candle_date_key(cfg.candle_type, now - timedelta(days=i)))
-    else:
-        keys.append(candle_date_key(cfg.candle_type, now))
-        if not latest_only:
-            keys.append(candle_date_key(cfg.candle_type, now.replace(year=now.year - 1)))
-
+    keys = _date_keys(cfg, latest_only=latest_only)
     seen: set[int] = set()
     candles: list[Candle] = []
+    failures = 0
     for key in keys:
         try:
             rows = client.get_candlestick(cfg.pair, cfg.candle_type, key)
+        except BitbankAPIError as exc:
+            failures += 1
+            log_candle_api_error(
+                exc,
+                pair=cfg.pair,
+                candle_type=cfg.candle_type,
+                date_key=key,
+                retry_count=failures,
+            )
+            slog("MARKET", "candlestick fetch skipped", date_key=key, error=type(exc).__name__)
+            continue
         except Exception as exc:
+            failures += 1
+            log_candle_api_error(
+                exc,
+                pair=cfg.pair,
+                candle_type=cfg.candle_type,
+                date_key=key,
+                retry_count=failures,
+            )
             slog("MARKET", "candlestick fetch skipped", date_key=key, error=type(exc).__name__)
             continue
         for row in rows:
@@ -100,8 +163,41 @@ def fetch_candles(
                 continue
             seen.add(candle.timestamp_ms)
             candles.append(candle)
+    if not candles and latest_only:
+        slog("MARKET", "latest candle day empty; retrying adjacent date key")
+        for key in _date_keys(cfg, latest_only=True, extra_day=True):
+            if key in keys:
+                continue
+            try:
+                rows = client.get_candlestick(cfg.pair, cfg.candle_type, key)
+            except Exception as exc:
+                failures += 1
+                log_candle_api_error(
+                    exc,
+                    pair=cfg.pair,
+                    candle_type=cfg.candle_type,
+                    date_key=key,
+                    retry_count=failures,
+                )
+                continue
+            for row in rows:
+                try:
+                    candle = parse_ohlcv(row)
+                except (IndexError, TypeError, ValueError, InvalidOperation):
+                    continue
+                if candle.timestamp_ms in seen:
+                    continue
+                seen.add(candle.timestamp_ms)
+                candles.append(candle)
     candles.sort(key=lambda c: c.timestamp_ms)
-    slog("MARKET", "candles loaded", count=len(candles), candle_type=cfg.candle_type)
+    slog(
+        "MARKET",
+        "candles loaded",
+        count=len(candles),
+        candle_type=cfg.candle_type,
+        market_data_real=bool(candles),
+        fetch_failures=failures,
+    )
     return drop_incomplete_candle(candles, cfg.candle_type)
 
 

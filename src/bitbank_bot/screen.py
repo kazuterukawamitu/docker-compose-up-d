@@ -55,11 +55,17 @@ class ScreenView:
     block_reason: str
     error: str
     candle_type: str
+    trading_mode: str = "dry_run"
     note: str = "HOLD/待機は正常です。Ctrl-C で停止"
 
 
 def format_screen(view: ScreenView) -> str:
-    mode = "DRY_RUN  実注文なし" if not view.live_orders else "LIVE  実注文オン"
+    if view.live_orders:
+        mode = "LIVE  実注文オン"
+    elif getattr(view, "trading_mode", "") == "live_ready":
+        mode = "LIVE_READY  実注文なし"
+    else:
+        mode = "DRY_RUN  実注文なし"
     pos = "なし"
     if view.in_position:
         pos = (
@@ -134,6 +140,7 @@ def view_from_engine(
     pair: str,
     dry_run: bool,
     live_orders: bool,
+    trading_mode: str = "dry_run",
     price: object,
     public_last: object,
     ma: object,
@@ -154,8 +161,9 @@ def view_from_engine(
 ) -> ScreenView:
     return ScreenView(
         pair=pair,
-        mode="DRY_RUN" if dry_run else "LIVE",
+        mode=trading_mode.upper() if trading_mode else ("DRY_RUN" if dry_run else "LIVE"),
         live_orders=live_orders,
+        trading_mode=trading_mode or ("dry_run" if dry_run else "live"),
         price=str(price),
         public_last=str(public_last if public_last not in (None, "") else price),
         ma=str(ma),
