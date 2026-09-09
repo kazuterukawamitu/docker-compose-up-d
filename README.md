@@ -71,7 +71,7 @@ Read-only execution check (never places an order):
 python3 scripts/bitbank_execution_audit.py
 ```
 
-Audit notes: [docs/AUDIT.md](docs/AUDIT.md).
+Audit notes: [docs/AUDIT.md](docs/AUDIT.md). Closed-loop A–H: [docs/CLOSED_LOOP.md](docs/CLOSED_LOOP.md). Large specs belong in git, not New Chat: [docs/PROMPT_INTAKE.md](docs/PROMPT_INTAKE.md).
 
 systemd example (not installed by this repo): [deploy/bitbank-bot.service](deploy/bitbank-bot.service).
 

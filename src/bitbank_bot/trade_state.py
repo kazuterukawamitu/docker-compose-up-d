@@ -10,10 +10,14 @@ from bitbank_bot.logging_setup import slog
 class TradePhase(str, Enum):
     WAIT = "WAIT"
     SIGNAL_FOUND = "SIGNAL_FOUND"
+    ENTRY_READY = "ENTRY_READY"
+    EXIT_READY = "EXIT_READY"
     ORDERING = "ORDERING"
     PENDING = "PENDING"
     POSITION = "POSITION"
     FLAT = "FLAT"
+    ERROR = "ERROR"
+    RECOVERY = "RECOVERY"
 
 
 class TradeStateMachine:
@@ -38,8 +42,12 @@ class TradeStateMachine:
             return self.transition(TradePhase.PENDING, reason="pending_order")
         if in_position:
             return self.transition(TradePhase.POSITION, reason="open_position")
-        if side in {"buy", "sell"}:
-            return self.transition(TradePhase.SIGNAL_FOUND, reason=side or "")
+        if side == "buy":
+            self.transition(TradePhase.SIGNAL_FOUND, reason="buy")
+            return self.transition(TradePhase.ENTRY_READY, reason="buy")
+        if side == "sell":
+            self.transition(TradePhase.SIGNAL_FOUND, reason="sell")
+            return self.transition(TradePhase.EXIT_READY, reason="sell")
         if self.phase is TradePhase.POSITION:
             return self.transition(TradePhase.FLAT, reason="flat")
         return self.transition(TradePhase.WAIT, reason="no_setup")

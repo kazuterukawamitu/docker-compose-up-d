@@ -19,7 +19,7 @@ runnable bot lives in `src/bitbank_bot/`. This branch is Bitbank `btc_jpy` only.
 | Loop | `engine.py` | Candles → signal → rate → gate → size → order; cache miss ≠ synthetic |
 | Screen | `screen.py` | iTerm 取引画面; JSON stays in `logs/bot.log` |
 | 4h+1d filter | `multi_timeframe.py` | Hard BUY block when both HTF SMAs slope down, or HTF data missing |
-| Watchdog | `watchdog.py` | HOLD past 15 minutes is `LONG_WAIT`, not `FAIL` |
+| Watchdog | `watchdog.py` | HOLD past 15 minutes is `LONG_WAIT`, not `FAIL`; `RuntimeWatchdog` thread |
 | Read-only audit | `scripts/bitbank_execution_audit.py` | ticker / assets / active_orders / trade_history |
 
 `run.py` is a stdlib-only DRY_RUN 取引画面. It is the program that
@@ -124,3 +124,6 @@ them in git, screenshots, or logs.
 `pyproject.toml`, `start.sh`, `tests/helpers.py`, `tests/test_strategy.py`.
 
 `run.py` is **kept** as a DRY_RUN screen only. It is not the live bot.
+
+Large New Chat pastes: see [PROMPT_INTAKE.md](PROMPT_INTAKE.md). Closed-loop A–H:
+[CLOSED_LOOP.md](CLOSED_LOOP.md).

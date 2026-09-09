@@ -1,6 +1,15 @@
 from __future__ import annotations
 
-from bitbank_bot.watchdog import FAIL, LONG_WAIT, NORMAL_WAIT, SIGNAL, classify
+from types import SimpleNamespace
+
+from bitbank_bot.watchdog import (
+    FAIL,
+    LONG_WAIT,
+    NORMAL_WAIT,
+    SIGNAL,
+    RuntimeWatchdog,
+    classify,
+)
 
 
 def test_hold_under_timeout_is_normal_wait() -> None:
@@ -68,3 +77,41 @@ def test_buy_or_sell_is_signal() -> None:
         has_order_signal=True,
     )
     assert report.status == SIGNAL
+
+
+def test_runtime_watchdog_ignores_never_marked() -> None:
+    health = SimpleNamespace(
+        last_loop_at=0.0,
+        last_ticker_at=0.0,
+        last_candle_at=0.0,
+        last_ws_at=0.0,
+        last_rest_at=0.0,
+        last_strategy_at=0.0,
+        last_order_check_at=0.0,
+        last_balance_at=0.0,
+    )
+    dog = RuntimeWatchdog(health, stale_sec=1.0, interval_sec=30.0)
+    assert dog.inspect(now=100.0) == []
+
+
+def test_runtime_watchdog_flags_stale_and_recovers() -> None:
+    seen: list[str] = []
+    health = SimpleNamespace(
+        last_loop_at=1.0,
+        last_ticker_at=90.0,
+        last_candle_at=90.0,
+        last_ws_at=1.0,
+        last_rest_at=90.0,
+        last_strategy_at=90.0,
+        last_order_check_at=90.0,
+        last_balance_at=90.0,
+    )
+    dog = RuntimeWatchdog(
+        health, stale_sec=10.0, interval_sec=30.0, on_recover=seen.extend
+    )
+    findings = dog.inspect(now=100.0)
+    assert "loop" in findings
+    assert "ws" in findings
+    assert "ticker" not in findings
+    dog.on_recover(findings)
+    assert "ws" in seen

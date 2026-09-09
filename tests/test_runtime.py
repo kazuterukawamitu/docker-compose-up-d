@@ -193,6 +193,8 @@ def test_trade_state_machine() -> None:
     assert machine.phase is TradePhase.WAIT
     machine.transition(TradePhase.SIGNAL_FOUND, reason="BUY1")
     assert machine.phase is TradePhase.SIGNAL_FOUND
+    machine.from_bot(pending=False, in_position=False, side="buy")
+    assert machine.phase is TradePhase.ENTRY_READY
     machine.from_bot(pending=True, in_position=False, side="buy")
     assert machine.phase is TradePhase.PENDING
     machine.from_bot(pending=False, in_position=True, side=None)

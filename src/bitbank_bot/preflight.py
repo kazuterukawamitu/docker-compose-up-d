@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import shutil
 import sys
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -71,6 +72,13 @@ def preflight(
         may_place_live_orders=cfg.may_place_live_orders,
     )
     checks.append("mode_exclusive")
+    slog(
+        "BOOT",
+        "CLOCK_OK",
+        unix_ms=int(time.time() * 1000),
+        note="ACCESS-REQUEST-TIME uses this host clock; keep VPS NTP synced",
+    )
+    checks.append("clock_ok")
 
     for raw in (cfg.log_dir, Path(cfg.state_path).parent, Path(cfg.lock_path).parent):
         _ensure_dir(Path(raw))

@@ -34,6 +34,7 @@ from bitbank_bot.self_healing import SelfHealingEngine
 from bitbank_bot.strategy import Position, Signal, Strategy, build_snapshots
 from bitbank_bot.trade_signal_executor import TradeSignalExecutor
 from bitbank_bot.trade_state import TradePhase, TradeStateMachine
+from bitbank_bot.watchdog import RuntimeWatchdog
 from bitbank_bot.watchdog import classify as classify_watchdog
 
 _LOG = logging.getLogger("bitbank_bot")
@@ -77,10 +78,24 @@ class Engine:
         self.states = StateManager(cfg)
         self.trade_machine = TradeStateMachine()
         self.last_trade_phase = TradePhase.WAIT.value
+        self.runtime_watch = RuntimeWatchdog(
+            self.healing.health,
+            stale_sec=max(30.0, float(cfg.stale_ws_sec)),
+            interval_sec=5.0,
+            on_recover=self._watchdog_recover,
+        )
 
     def request_stop(self, *_args: object) -> None:
         slog("BOOT", "shutdown requested")
         self._stop = True
+        self.runtime_watch.stop()
+
+    def _watchdog_recover(self, findings: list[str]) -> None:
+        slog("WATCHDOG", "runtime recover", findings=",".join(findings))
+        if "ws" in findings and self.cfg.enable_websocket:
+            self.healing.recover_ws(self._maybe_ws)
+        if "loop" in findings or "rest" in findings:
+            self.trade_machine.transition(TradePhase.RECOVERY, reason=",".join(findings))
 
     def _rest(self) -> Any:
         rest = self.connections.rest()
@@ -694,6 +709,8 @@ class Engine:
                 return 2
         if self.cfg.enable_websocket:
             self._maybe_ws()
+        if max_cycles is None:
+            self.runtime_watch.start()
         state = load_state(self.cfg.state_path, self.cfg)
         if synthetic:
             state.last_candle_ts = 0
@@ -777,6 +794,7 @@ class Engine:
             except KeyboardInterrupt:
                 slog("BOOT", "keyboard interrupt")
                 self._stop = True
+        self.runtime_watch.stop()
         self.connections.stop_ws()
         self.ws = None
         slog("BOOT", "stopped")
