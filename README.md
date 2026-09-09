@@ -2,38 +2,48 @@
 
 Bitbank-only `btc_jpy` bot. Default is a **continuous DRY_RUN loop** with an iTerm **取引画面** (trading dashboard). HOLD/WAIT on a bar is normal. JSON lines are written to `logs/bot.log`, not the dashboard.
 
-`main` on GitHub is still wiki HTML. The runnable bot is this checkout (`src/bitbank_bot/`). Start it with `./bitbank-bot`.
+`main` on GitHub is still wiki HTML. The runnable bot is this checkout (`src/bitbank_bot/`).
 
 HOLD for 15 minutes while market data and strategy are healthy is `LONG_WAIT`, not a crash. Public-API fallback candles never place orders. Live UNFILLED limits are persisted and polled. New BUY is blocked when both 4h and 1d SMA slopes are down (`ENABLE_HTF_FILTER`).
 
-## Start (this is the program)
+## Start (paste this ONE line in iTerm)
 
-From the repo root, run the executable:
+`./bitbank-bot` only works **after** `cd` into the repo. From `~` it fails with
+`zsh: no such file or directory`. Paste **this one line** from any directory
+(including home). Do not paste the extra flag examples below.
 
 ```bash
-./bitbank-bot
+bash -lc 'set -euo pipefail; REPO="$HOME/docker-compose-up-d"; if [ ! -d "$REPO/.git" ]; then git clone https://github.com/kazuterukawamitu/docker-compose-up-d.git "$REPO"; fi; cd "$REPO"; if [ ! -f src/bitbank_bot/__init__.py ]; then git fetch origin cursor/closed-loop-runtime-hardening; git checkout -B cursor/closed-loop-runtime-hardening origin/cursor/closed-loop-runtime-hardening; fi; exec bash scripts/iterm-launch.sh --screen'
 ```
 
-That is the application. Default is a **continuous DRY_RUN loop**. On a TTY it
-opens the iTerm **取引画面**. HOLD/待機 is normal. Stop with Ctrl-C.
-JSON detail is written to `logs/bot.log`.
+That clones to `~/docker-compose-up-d` if needed, checks out the bot branch only
+when `src/bitbank_bot` is missing, then starts a **continuous DRY_RUN** 取引画面.
+HOLD/待機 is normal. Stop with Ctrl-C. JSON detail is `logs/bot.log`.
 
-The launcher never enables LIVE, never checks out a git branch, and forwards
-CLI flags:
+After the repo exists, this shorter line also works from **any** directory:
 
 ```bash
-./bitbank-bot --screen
-./bitbank-bot --once --synthetic --dry-run --skip-lock --no-screen
-./bitbank-bot --check-config
+bash "$HOME/docker-compose-up-d/scripts/iterm-launch.sh" --screen
+```
+
+`./bitbank-bot` is only for a shell that is already inside that folder:
+
+```bash
+cd "$HOME/docker-compose-up-d" && ./bitbank-bot --screen
+```
+
+Optional flags (use only after the repo path above, not as `./bitbank-bot` from `~`):
+
+```bash
+bash "$HOME/docker-compose-up-d/scripts/iterm-launch.sh" --once --synthetic --dry-run --skip-lock --no-screen
+bash "$HOME/docker-compose-up-d/scripts/iterm-launch.sh" --check-config
 ```
 
 `--once --synthetic` is a one-cycle smoke test that **exits on purpose**.
-`./bitbank-bot` with no extra args does **not** pass `--once`.
+The iTerm one-liner does **not** pass `--once`.
 
-`start.sh`, `python3 main.py`, and `python3 run.py` still work.
-`main.py` uses the full package when httpx is installed, otherwise the same
-stdlib `run.py` (no orders). If pip/venv are missing, `./bitbank-bot` falls
-back to `run.py` automatically.
+The launcher never enables LIVE. If pip/venv are missing it falls back to
+stdlib `run.py` (no orders).
 
 Live trading stays **off** unless `.env` has `TRADING_MODE=live` **and**
 `LIVE_TRADING_CONFIRM=YES_I_ACCEPT_REAL_MONEY_RISK` **and** both API keys.
@@ -76,7 +86,7 @@ State-machine mapping: [docs/STRATEGY.md](docs/STRATEGY.md).
 ## Tests
 
 ```bash
-./bitbank-bot --once --synthetic --dry-run --skip-lock --no-screen
+bash "$HOME/docker-compose-up-d/scripts/iterm-launch.sh" --once --synthetic --dry-run --skip-lock --no-screen
 PYTHONPATH=src .venv/bin/python -m pytest -q
 ```
 

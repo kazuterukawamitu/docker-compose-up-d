@@ -52,7 +52,7 @@ def test_start_sh_is_venv_loop_launcher() -> None:
     assert ".env.example" in text
     assert "python3.12" in text
     assert "python3" in text
-    assert 'BOT_BRANCH="cursor/bitbank-audit-unify-f5fd"' in text
+    assert 'BOT_BRANCH="cursor/closed-loop-runtime-hardening"' in text
     assert "run.py" in text
 
 

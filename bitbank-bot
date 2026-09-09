@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 # Bitbank BTC/JPY — the executable that runs this application.
 #
-#   ./bitbank-bot
-#   ./bitbank-bot --screen
-#   ./bitbank-bot --once --synthetic --dry-run --skip-lock --no-screen
+# ./bitbank-bot only works after cd into this folder. From ~ in iTerm, run
+# scripts/iterm-launch.sh (see README). Do not type ./bitbank-bot from $HOME.
 #
 # Default: continuous DRY_RUN loop. Never enables LIVE. Never checks out a git
 # branch. Forwards every CLI flag to the bot. On a TTY, opens the 取引画面

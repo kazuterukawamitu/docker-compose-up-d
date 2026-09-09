@@ -21,7 +21,7 @@ export PYTHONIOENCODING=utf-8
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT"
 
-BOT_BRANCH="cursor/bitbank-audit-unify-f5fd"
+BOT_BRANCH="cursor/closed-loop-runtime-hardening"
 
 ensure_bot_source() {
   if [[ -f "$ROOT/src/bitbank_bot/__init__.py" && -f "$ROOT/main.py" ]]; then

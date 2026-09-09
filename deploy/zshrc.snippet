@@ -17,10 +17,14 @@ if [[ -o interactive && -f "$_bitbank_venv/bin/activate" ]]; then
   fi
 fi
 
+bitbank-bot() {
+  bash "$bitbank_root/scripts/iterm-launch.sh" "$@"
+}
+
 bitbank-bot-screen() {
-  bash "$bitbank_root/start.sh" --screen "$@"
+  bash "$bitbank_root/scripts/iterm-launch.sh" --screen "$@"
 }
 
 bitbank-bot-once() {
-  bash "$bitbank_root/start.sh" --once --synthetic --skip-lock --no-screen "$@"
+  bash "$bitbank_root/scripts/iterm-launch.sh" --once --synthetic --dry-run --skip-lock --no-screen "$@"
 }
