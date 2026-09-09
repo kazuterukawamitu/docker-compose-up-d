@@ -7,7 +7,7 @@ runnable bot lives in `src/bitbank_bot/`. This branch is Bitbank `btc_jpy` only.
 
 | Area | Where | Role |
 | --- | --- | --- |
-| Config / dual live flags | `config.py` | `DRY_RUN` default; live needs `DRY_RUN=false` and `LIVE_TRADING=true` and keys |
+| Config / dual live flags | `config.py` | `DRY_RUN` default; `LIVE` needs `TRADING_MODE=live` + `LIVE_TRADING_CONFIRM=YES_I_ACCEPT_REAL_MONEY_RISK` + keys. `DRY_RUN=false` alone is `LIVE_READY` |
 | Public + private REST | `rest_client.py` | HMAC `ACCESS-TIME-WINDOW`; `create_order` requires `live_confirmed` |
 | README MA rules | `strategy.py`, `docs/STRATEGY.md` | BUY1–4 / SELL1–4; HOLD always has a reason |
 | Size | `amounts.py` | Only place that sets quantity; TARGET vs PLANNED; ACTUAL unset until fill |
@@ -17,6 +17,12 @@ runnable bot lives in `src/bitbank_bot/`. This branch is Bitbank `btc_jpy` only.
 | Screen | `screen.py` | iTerm 取引画面; JSON stays in `logs/bot.log` |
 | 4h+1d filter | `multi_timeframe.py` | Hard BUY block when both HTF SMAs slope down, or HTF data missing |
 | Watchdog | `watchdog.py` | HOLD past 15 minutes is `LONG_WAIT`, not `FAIL` |
+| RateEngine | `rate_engine.py` | FIXED keeps BUY1–4 TPs; DYNAMIC/AUTO clamp ATR-based rates |
+| ExecutionGate | `execution_gate.py` | LIVE / LIVE_READY / DRY_RUN reasons; `WOULD_SUBMIT_ORDER` |
+| TradeSignalExecutor | `trade_signal_executor.py` | Single path: signal → rate → gate → size → order |
+| ConnectionManager | `connection_manager.py` | REST/WS health score; WS stale does not kill REST |
+| Reconciliation | `reconciliation.py` | Bitbank balances/open orders vs bot state |
+| Self-healing | `self_healing.py` | GET retry + classify; POST orders are never blindly retried |
 | Read-only audit | `scripts/bitbank_execution_audit.py` | ticker / assets / active_orders / trade_history |
 
 `run.py` is a stdlib-only DRY_RUN 取引画面. It is the program that
@@ -35,9 +41,12 @@ bitFlyer, Coincheck, and GMO are not imported and are not executed.
 
 ## Order-path gaps this branch closes
 
-1. **Accidental synthetic fallback.** If the public candle API fails, the loop
-   used to evaluate *and execute* against generated bars. Execution is now off
-   unless `--synthetic` was requested. Watchdog is `FAIL` / `synthetic_fallback_no_orders`.
+1. **Accidental synthetic fallback.** A failed *latest* candle fetch used to
+   mark the whole cycle synthetic and disable orders even when the cache still
+   held real Bitbank bars (the `candles loaded count=0` / `3922 ready` split).
+   Latest fetch now includes yesterday+today. Empty/error latest fetch uses
+   fresh cached REAL candles. Synthetic is only used when no real cache exists,
+   and it still cannot place live orders.
 2. **15-minute HOLD.** Healthy no-trade is `LONG_WAIT`, not a crashed bot.
 3. **Live UNFILLED limits.** `accepted_unfilled` is stored in `state.pending`
    and polled via `GET /user/spot/order`. New signals wait until that order

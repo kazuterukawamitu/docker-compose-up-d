@@ -7,6 +7,7 @@ from decimal import Decimal
 from typing import Sequence
 
 from bitbank_bot.config import Config
+from bitbank_bot.logging_setup import slog
 from bitbank_bot.indicators import (
     Trend,
     crossed_down,
@@ -272,6 +273,22 @@ class Strategy:
             return buy
         return Signal.hold("no_buy_setup")
 
+    def _log_buy_gates(self, snap: MarketSnapshot, **flags: bool) -> None:
+        score = sum(1 for ok in flags.values() if ok)
+        total = len(flags)
+        slog(
+            "BUY_GATE",
+            f"score={score}/{total}",
+            trend=snap.ma_trend.value,
+            prev_trend=snap.prev_ma_trend.value,
+            crossed_up=snap.crossed_up,
+            crossed_down=snap.crossed_down,
+            close=str(snap.close),
+            ma=str(snap.ma),
+            golden_cross=snap.golden_cross,
+            **{f"BUY_CHECK_{name}": value for name, value in flags.items()},
+        )
+
     def _tp_signal(self, snap: MarketSnapshot, position: Position) -> Signal:
         target = pct_offset(position.average_price, position.tp_pct)
         if snap.close >= target:
@@ -326,11 +343,26 @@ class Strategy:
         return Signal.hold("no_sell_setup")
 
     def _buy_signal(self, snap: MarketSnapshot) -> Signal:
-        if (
+        buy1 = (
             snap.prev_ma_trend == Trend.DOWN
             and snap.ma_trend in {Trend.FLAT, Trend.UP}
             and snap.crossed_up
-        ):
+        )
+        buy2 = snap.ma_trend == Trend.UP and snap.crossed_down
+        buy3 = bool(self._buy3)
+        buy4 = bool(self._buy4)
+        self._log_buy_gates(
+            snap,
+            granville_reversal=buy1,
+            trend_up_cross_down=buy2,
+            pullback_bounce=buy3,
+            downtrend_dip=buy4,
+            trend_left_down=snap.prev_ma_trend == Trend.DOWN
+            and snap.ma_trend in {Trend.FLAT, Trend.UP},
+            crossed_up=snap.crossed_up,
+            crossed_down=snap.crossed_down,
+        )
+        if buy1:
             return Signal(
                 "BUY1",
                 "buy",
@@ -340,7 +372,7 @@ class Strategy:
                 crossover_price_bp=snap.crossover_price_bp
                 or crossover_price_bp(snap.cross_price),
             )
-        if snap.ma_trend == Trend.UP and snap.crossed_down:
+        if buy2:
             tp = self.cfg.buy2_golden_tp if snap.golden_cross else self.cfg.buy2_tp
             return Signal(
                 "BUY2",
@@ -352,7 +384,7 @@ class Strategy:
                 crossover_price_bp=snap.crossover_price_bp
                 or crossover_price_bp(snap.cross_price),
             )
-        if self._buy3:
+        if buy3:
             return Signal(
                 "BUY3",
                 "buy",
@@ -360,7 +392,7 @@ class Strategy:
                 "pullback then bounce above MA",
                 origin_price=self.buy3.origin,
             )
-        if self._buy4:
+        if buy4:
             return Signal(
                 "BUY4",
                 "buy",

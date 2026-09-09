@@ -1,0 +1,26 @@
+# Bitbank BTC/JPY bot — source from ~/.zshrc
+#   source /path/to/docker-compose-up-d/deploy/zshrc.snippet
+# Does not print secrets. Safe for iTerm2/iTerm5 Shell Integration.
+
+bitbank_root="${BITBANK_BOT_ROOT:-$HOME/docker-compose-up-d}"
+
+export PYTHONUNBUFFERED=1
+export PYTHONIOENCODING=utf-8
+export PYTHONDONTWRITEBYTECODE=1
+
+_bitbank_venv="$bitbank_root/.venv"
+if [[ -o interactive && -f "$_bitbank_venv/bin/activate" ]]; then
+  if [[ "$PWD" == "$bitbank_root" || "$PWD" == "$bitbank_root"/* ]]; then
+    # shellcheck disable=SC1091
+    source "$_bitbank_venv/bin/activate"
+    export PYTHONPATH="$bitbank_root/src${PYTHONPATH:+:$PYTHONPATH}"
+  fi
+fi
+
+bitbank-bot-screen() {
+  bash "$bitbank_root/start.sh" --screen "$@"
+}
+
+bitbank-bot-once() {
+  bash "$bitbank_root/start.sh" --once --synthetic --skip-lock --no-screen "$@"
+}

@@ -27,6 +27,38 @@ def _plan() -> AmountPlan:
     )
 
 
+def test_live_ready_would_submit_without_post() -> None:
+    client = MagicMock()
+    c = cfg(dry_run=False, live_trading=False, trading_mode="LIVE_READY")
+    result = OrderExecutor(c, client).place(
+        Signal("BUY1", "buy", Decimal("0.03"), "test"), _plan()
+    )
+    assert result.reason == "would_submit"
+    client.create_order.assert_not_called()
+
+
+def test_create_order_timeout_recovers_existing_order() -> None:
+    client = MagicMock()
+    client.create_order.side_effect = TimeoutError("gone")
+    recovered = {
+        "order_id": "77",
+        "side": "buy",
+        "start_amount": "0.001",
+        "executed_amount": "0",
+        "average_price": "0",
+        "status": "UNFILLED",
+    }
+    client.get_active_orders.side_effect = [[], [recovered]]
+    client.get_order.return_value = recovered
+    c = cfg(dry_run=False, live_trading=True, api_key="k", api_secret="s")
+    result = OrderExecutor(c, client).place(
+        Signal("BUY1", "buy", Decimal("0.03"), "test"), _plan()
+    )
+    assert result.ok
+    assert result.order_id == "77"
+    assert client.create_order.call_count == 1
+
+
 def test_dry_run_never_calls_create_order() -> None:
     client = MagicMock()
     client.create_order.side_effect = AssertionError("live order")

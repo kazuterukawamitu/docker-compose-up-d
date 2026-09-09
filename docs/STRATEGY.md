@@ -37,6 +37,12 @@ Priority: **SELL > TAKE_PROFIT > BUY**. No sell on the entry candle. HOLD always
 
 Trend uses `slope = (ma - prev_ma) / prev_ma` versus `MA_SLOPE_THRESHOLD=0.0005`.
 
+## Rate modes (not a second strategy)
+
+`RATE_MODE=fixed` (default) keeps the table above. `dynamic` / `auto` only
+change the numeric TP/SL/risk after the same BUY/SELL/HOLD decision. They never
+place orders themselves.
+
 ## Higher-timeframe filter (not a second strategy)
 
 When `ENABLE_HTF_FILTER=true` (default), a **new BUY** is blocked if the 4-hour

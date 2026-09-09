@@ -122,6 +122,29 @@ class OrderExecutor:
                 None,
             )
         if not self.cfg.may_place_live_orders:
+            mode = self.cfg.trading_mode
+            if mode == "LIVE_READY":
+                slog(
+                    "WOULD_SUBMIT_ORDER",
+                    "LIVE_READY: not calling Bitbank create_order",
+                    pair=self.cfg.pair,
+                    side=plan.side,
+                    amount=str(plan.amount),
+                    price=str(plan.price),
+                    kind=signal.kind,
+                )
+                return OrderResult(
+                    True,
+                    "would_submit",
+                    True,
+                    False,
+                    None,
+                    "UNFILLED",
+                    ZERO,
+                    ZERO,
+                    None,
+                    None,
+                )
             slog(
                 "ORDER_INTENT",
                 "DRY_RUN: not calling Bitbank create_order",
@@ -191,18 +214,40 @@ class OrderExecutor:
         if self.cfg.order_type == "limit":
             q = quantize_price(plan.price, self.cfg.price_tick)
             price_str = str(int(q)) if q == q.to_integral_value() else str(q)
-        raw = self.client.create_order(
+        slog(
+            "ORDER_REQUESTED",
+            "POST /user/spot/order",
             pair=self.cfg.pair,
-            amount=str(plan.amount),
             side=plan.side,
-            order_type=self.cfg.order_type,
+            amount=str(plan.amount),
             price=price_str,
-            post_only=self.cfg.post_only if self.cfg.order_type == "limit" else None,
-            live_confirmed=True,
         )
+        try:
+            raw = self.client.create_order(
+                pair=self.cfg.pair,
+                amount=str(plan.amount),
+                side=plan.side,
+                order_type=self.cfg.order_type,
+                price=price_str,
+                post_only=self.cfg.post_only if self.cfg.order_type == "limit" else None,
+                live_confirmed=True,
+            )
+        except Exception as exc:
+            slog(
+                "ERROR",
+                "create_order transport/API error; not auto-resending POST",
+                error=type(exc).__name__,
+            )
+            recovered = self._recover_uncertain_order(plan)
+            if recovered is not None:
+                raw = recovered
+            else:
+                raise
         order_id = str(raw.get("order_id") or "")
         status = str(raw.get("status") or "")
         slog("ORDER_ACCEPTED", "order accepted", order_id=order_id, status=status)
+        if order_id:
+            slog("ORDER_ID_RECEIVED", "order_id stored", order_id=order_id, status=status)
         executed = D(raw.get("executed_amount") or 0)
         avg = D(raw.get("average_price") or 0)
         amount_ordered = D(raw.get("start_amount") or plan.amount)
@@ -223,7 +268,7 @@ class OrderExecutor:
             executed_amount=str(executed),
         )
         if executed <= ZERO:
-            slog("ORDER_STATUS", "no fill yet; not logging FILL", order_id=order_id, status=status)
+            slog("ORDER_ACTIVE", "no fill yet; not logging FILL", order_id=order_id, status=status)
             return OrderResult(
                 True, "accepted_unfilled", False, False, order_id, status, ZERO, ZERO, None, raw
             )
@@ -241,6 +286,27 @@ class OrderExecutor:
         return OrderResult(
             True, reason, False, False, order_id, status, executed, avg, actual, raw
         )
+
+    def _recover_uncertain_order(self, plan: AmountPlan) -> dict[str, Any] | None:
+        """After a POST timeout, reuse an existing matching live order. Never resend."""
+        try:
+            active = self.active_orders()
+        except Exception as exc:
+            slog("ERROR", "uncertain-order lookup failed", error=type(exc).__name__)
+            return None
+        for row in active:
+            if str(row.get("side") or "") != plan.side:
+                continue
+            start = D(row.get("start_amount") or 0)
+            if start == plan.amount:
+                slog(
+                    "ORDER_ACCEPTED",
+                    "recovered order after POST uncertainty; not resending",
+                    order_id=str(row.get("order_id") or ""),
+                )
+                return row
+        slog("ORDER_STATUS", "no matching open order after POST error; not resending")
+        return None
 
     def poll(self, order_id: str, fallback_amount: Decimal) -> OrderResult:
         """Re-read a live order. Does not place a new order."""

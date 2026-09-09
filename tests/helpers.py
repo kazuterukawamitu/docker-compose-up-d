@@ -9,6 +9,9 @@ from bitbank_bot.risk import RiskManager
 
 def cfg(**overrides: object) -> Config:
     base = Config()
+    if overrides.get("live_trading") and overrides.get("dry_run") is False:
+        overrides.setdefault("trading_mode", "LIVE")
+        overrides.setdefault("live_trading_confirm", True)
     for key, value in overrides.items():
         setattr(base, key, value)
     return base
