@@ -269,8 +269,10 @@ def test_launch_from_outside_repo_says_cd_first(tmp_path) -> None:
     out = proc.stdout + proc.stderr
     assert proc.returncode == 2, out
     assert "cd to the repo first" in out
-    assert "[ 40%]" not in proc.stdout
-    assert "179 passed" not in out
+    assert not any(
+        line.strip().startswith(".") and "%]" in line for line in out.splitlines()
+    )
+    assert "passed in" not in out
 
 
 def test_launch_help_works_outside_repo(tmp_path) -> None:
