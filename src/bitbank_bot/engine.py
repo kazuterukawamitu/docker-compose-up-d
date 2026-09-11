@@ -28,7 +28,7 @@ from bitbank_bot.money import D, ZERO
 from bitbank_bot.multi_timeframe import evaluate_htf
 from bitbank_bot.orders import OrderExecutor, OrderResult
 from bitbank_bot.preflight import preflight
-from bitbank_bot.reconciliation import reconcile
+from bitbank_bot.reconciliation import ReconcileReport, reconcile
 from bitbank_bot.rest_client import BitbankAPIError, RestClient, is_auth_error
 from bitbank_bot.risk import RiskManager
 from bitbank_bot.screen import TradingScreen, view_from_engine
@@ -461,6 +461,31 @@ class Engine:
         )
         self._apply_fill(signal, plan, result, index, ts, state, jpy, btc)
 
+    def _apply_reconcile_report(self, report: ReconcileReport, state: BotState) -> None:
+        if report.ok:
+            return
+        self.last_block_reason = ",".join(report.mismatches)[:80] or report.reason
+        if "pending_filled_unapplied" in report.mismatches:
+            slog(
+                "ORDER_STATUS",
+                "reconcile saw filled pending; polling",
+                bitbank_btc=str(report.bitbank_btc),
+                local_btc=str(report.local_btc),
+                open_orders=report.open_orders,
+            )
+            self._poll_pending(state)
+            save_state(self.cfg.state_path, state)
+            return
+        if "pending_missing" in report.mismatches and state.pending is not None:
+            slog(
+                "ORDER_STATUS",
+                "clear canceled pending after reconcile",
+                order_id=state.pending.order_id,
+                open_orders=report.open_orders,
+            )
+            state.pending = None
+            save_state(self.cfg.state_path, state)
+
     def _poll_pending(self, state: BotState) -> None:
         pending = state.pending
         if pending is None:
@@ -513,7 +538,12 @@ class Engine:
         )
         try:
             jpy, btc = self._balances(rest, state)
-        except Exception:
+        except Exception as exc:
+            slog(
+                "ERROR",
+                "pending poll balance fetch failed",
+                error=type(exc).__name__,
+            )
             jpy, btc = ZERO, ZERO
         pending.filled_amount = result.executed_amount
         if result.reason != "partial_fill":
@@ -837,7 +867,7 @@ class Engine:
                     and self.cycles % self.cfg.reconcile_every_cycles == 0
                 ):
                     local_btc = state.position.amount if state.position else ZERO
-                    reconcile(
+                    report = reconcile(
                         rest if self.cfg.has_keys else None,
                         self.cfg,
                         local_btc=local_btc,
@@ -845,6 +875,7 @@ class Engine:
                         paper_jpy=state.paper_jpy,
                         paper_btc=state.paper_btc,
                     )
+                    self._apply_reconcile_report(report, state)
                 self._heartbeat(state, signal, last)
                 if max_cycles is not None and self.cycles >= max_cycles:
                     slog("BOOT", "max_cycles reached", cycles=self.cycles)
