@@ -43,6 +43,22 @@ def _order_status(raw: dict[str, Any]) -> str:
     return str(raw.get("status") or "").upper().replace(" ", "_").replace("-", "_")
 
 
+def locked_sell_btc(opens: list[dict[str, Any]]) -> Decimal:
+    """BTC reserved in open sell orders (not in free_amount)."""
+    locked = ZERO
+    for row in opens:
+        if str(row.get("side") or "").lower() != "sell":
+            continue
+        raw_remaining = row.get("remaining_amount")
+        if raw_remaining not in (None, ""):
+            remaining = D(raw_remaining)
+        else:
+            remaining = D(row.get("start_amount") or 0) - D(row.get("executed_amount") or 0)
+        if remaining > ZERO:
+            locked += remaining
+    return locked
+
+
 def reconcile(
     client: ReconcileClient | None,
     cfg: Config,
@@ -64,7 +80,8 @@ def reconcile(
         return ReconcileReport(False, "reconcile_failed")
     mismatches: list[str] = []
     local = D(local_btc)
-    if abs(btc - local) > cfg.min_amount_btc:
+    comparable_btc = btc + locked_sell_btc(opens)
+    if abs(comparable_btc - local) > cfg.min_amount_btc:
         mismatches.append("btc_position")
     if pending_order_id:
         ids = {str(row.get("order_id") or "") for row in opens}
@@ -95,7 +112,7 @@ def reconcile(
         ok=not mismatches,
         reason="mismatch" if mismatches else "ok",
         bitbank_jpy=jpy,
-        bitbank_btc=btc,
+        bitbank_btc=comparable_btc,
         local_btc=local,
         open_orders=len(opens),
         mismatches=mismatches,

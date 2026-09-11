@@ -75,6 +75,15 @@ class Signal:
         return Signal(kind="HOLD", side=None, tp_pct=None, reason=reason)
 
 
+def _is_same_entry_candle(position: Position | None, snap: MarketSnapshot) -> bool:
+    """Prefer the stable fill timestamp; index shifts when lookback length changes."""
+    if position is None:
+        return False
+    if position.entry_candle_ts > 0:
+        return snap.timestamp_ms == position.entry_candle_ts
+    return snap.index == position.entry_candle_index
+
+
 class Buy3Machine:
     def __init__(self, extend_pct: Decimal) -> None:
         self.extend_pct = extend_pct
@@ -258,7 +267,7 @@ class Strategy:
 
     def evaluate(self, snap: MarketSnapshot, position: Position | None) -> Signal:
         self.observe(snap)
-        same_entry = position is not None and snap.index == position.entry_candle_index
+        same_entry = _is_same_entry_candle(position, snap)
         if position is not None and not same_entry:
             sell = self._sell_signal(snap)
             if sell.kind != "HOLD":

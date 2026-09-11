@@ -22,6 +22,13 @@ def _fill_status(raw_status: str, executed: Decimal, ordered: Decimal) -> str:
     return "FULLY_FILLED"
 
 
+def _execution_jpy(executed: Decimal, avg: Decimal) -> Decimal | None:
+    """Fill notional. Missing/zero average_price must not become a 0-JPY ledger fill."""
+    if executed <= ZERO or avg <= ZERO:
+        return None
+    return executed * avg
+
+
 class OrderClient(Protocol):
     def get_active_orders(self, pair: str) -> list[dict[str, Any]]: ...
 
@@ -249,7 +256,7 @@ class OrderExecutor:
         executed = D(raw.get("executed_amount") or 0)
         avg = D(raw.get("average_price") or 0)
         amount_ordered = D(raw.get("start_amount") or plan.amount)
-        if order_id and executed <= ZERO:
+        if order_id and (executed <= ZERO or avg <= ZERO):
             refreshed = self._refresh_order(order_id)
             if refreshed:
                 raw = refreshed
@@ -265,12 +272,25 @@ class OrderExecutor:
             status=status,
             executed_amount=str(executed),
         )
-        if executed <= ZERO:
-            slog("ORDER_STATUS", "no fill yet; not logging FILL", order_id=order_id, status=status)
+        actual = _execution_jpy(executed, avg)
+        if executed <= ZERO or actual is None:
+            if executed > ZERO and actual is None:
+                slog(
+                    "ERROR",
+                    "fill missing average_price; keeping unfilled pending",
+                    order_id=order_id,
+                    executed_amount=str(executed),
+                )
+            else:
+                slog(
+                    "ORDER_STATUS",
+                    "no fill yet; not logging FILL",
+                    order_id=order_id,
+                    status=status,
+                )
             return OrderResult(
                 True, "accepted_unfilled", False, False, order_id, status, ZERO, ZERO, None, raw
             )
-        actual = executed * avg
         reason = "partial_fill" if status == "PARTIALLY_FILLED" else "fill"
         slog(
             "FILL" if reason == "fill" else "ORDER_STATUS",
@@ -310,11 +330,11 @@ class OrderExecutor:
         avg = D(match.get("average_price") or 0)
         ordered = D(match.get("start_amount") or plan.amount)
         status = _fill_status(str(match.get("status") or ""), executed, ordered)
-        if executed <= ZERO:
+        actual = _execution_jpy(executed, avg)
+        if executed <= ZERO or actual is None:
             return OrderResult(
                 True, "accepted_unfilled", False, False, order_id, status, ZERO, ZERO, None, match
             )
-        actual = executed * avg
         reason = "partial_fill" if status == "PARTIALLY_FILLED" else "fill"
         return OrderResult(True, reason, False, False, order_id, status, executed, avg, actual, match)
 
@@ -336,11 +356,18 @@ class OrderExecutor:
             status=status,
             executed_amount=str(executed),
         )
-        if executed <= ZERO:
+        actual = _execution_jpy(executed, avg)
+        if executed <= ZERO or actual is None:
+            if executed > ZERO and actual is None:
+                slog(
+                    "ERROR",
+                    "poll fill missing average_price; holding pending",
+                    order_id=order_id,
+                    executed_amount=str(executed),
+                )
             return OrderResult(
                 True, "accepted_unfilled", False, False, order_id, status, ZERO, ZERO, None, raw
             )
-        actual = executed * avg
         reason = "partial_fill" if status == "PARTIALLY_FILLED" else "fill"
         slog(
             "FILL" if reason == "fill" else "ORDER_STATUS",

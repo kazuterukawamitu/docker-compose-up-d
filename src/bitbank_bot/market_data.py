@@ -63,6 +63,16 @@ def as_jst(now: datetime | None = None) -> datetime:
     return now.astimezone(JST)
 
 
+def shift_years(when: datetime, years: int) -> datetime:
+    """Shift calendar year. Feb 29 maps to Feb 28 when the target year is not a leap year."""
+    when = as_jst(when)
+    target = when.year + years
+    try:
+        return when.replace(year=target)
+    except ValueError:
+        return when.replace(year=target, month=2, day=28)
+
+
 def candle_date_key(candle_type: str, when: datetime) -> str:
     when = as_jst(when)
     if candle_type in SHORT_CANDLE_TYPES:
@@ -91,7 +101,7 @@ def candle_date_keys(
     else:
         keys.append(candle_date_key(candle_type, now))
         if not latest_only:
-            keys.append(candle_date_key(candle_type, now.replace(year=now.year - 1)))
+            keys.append(candle_date_key(candle_type, shift_years(now, -1)))
     return keys
 
 
@@ -190,7 +200,9 @@ def fetch_candles_detailed(
         dates=",".join(keys),
         errors=len(errors),
     )
-    closed = drop_incomplete_candle(candles, cfg.candle_type)
+    closed = drop_incomplete_candle(
+        candles, cfg.candle_type, now_ms=int(now.timestamp() * 1000)
+    )
     slog(
         "MARKET",
         "closed candles ready",

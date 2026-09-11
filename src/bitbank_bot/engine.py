@@ -149,7 +149,9 @@ def save_state(path: str | Path, state: BotState) -> None:
             "actual_execution_jpy": str(state.position.actual_execution_jpy),
             "kind": state.position.kind,
         }
-    p.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    tmp = p.with_suffix(p.suffix + ".tmp")
+    tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    tmp.replace(p)
 
 
 class Engine:
@@ -179,6 +181,7 @@ class Engine:
         self.last_error = ""
         self.market_data_real = False
         self.rest_ok = False
+        self.order_manager_ok = True
         self._last_closed_candles: list[Candle] = []
         self._backoff_sec = 0.0
 
@@ -258,12 +261,17 @@ class Engine:
         self.last_trend = last.ma_trend.value
         slog(
             "MARKET",
-            "MARKET DATA OK",
+            (
+                "MARKET DATA OK"
+                if (self.market_data_real or self._explicit_synthetic)
+                else "MARKET DATA UNVERIFIED"
+            ),
             close=str(last.close),
             ma=str(last.ma),
             trend=last.ma_trend.value,
             crossed_up=last.crossed_up,
             crossed_down=last.crossed_down,
+            market_data_real=bool(self.market_data_real or self._explicit_synthetic),
         )
         signal = Signal.hold("no_eval")
         for i, snap in enumerate(snaps):
@@ -390,12 +398,14 @@ class Engine:
                 state.risk.note_api_error()
                 reason = "balance_fetch_failed"
             self.last_block_reason = reason
+            self.order_manager_ok = False
             slog("ERROR", "no order", reason=reason, error=type(exc).__name__)
             return
         except Exception as exc:
             _LOG.exception("balance fetch failed on order path")
             state.risk.note_api_error()
             self.last_block_reason = "balance_fetch_failed"
+            self.order_manager_ok = False
             slog("ERROR", "no order", reason="balance_fetch_failed", error=type(exc).__name__)
             return
         state.risk.note_api_ok()
@@ -407,7 +417,7 @@ class Engine:
             plan = sizer.plan_sell(available_jpy=jpy, available_btc=btc, price=price)
         slog(
             "RISK",
-            "RISK MANAGER OK",
+            "RISK MANAGER OK" if plan.ok else "RISK MANAGER BLOCKED",
             ok=plan.ok,
             reason=plan.reason,
             target_jpy=str(plan.target_jpy),
@@ -426,11 +436,7 @@ class Engine:
                 signal,
                 plan,
                 self._last_closed_candles,
-                market_data_real=(
-                    self.market_data_real
-                    or self._explicit_synthetic
-                    or not self.used_synthetic_fallback
-                ),
+                market_data_real=self.market_data_real or self._explicit_synthetic,
                 market_data_fresh=market_fresh or self._explicit_synthetic,
                 kill_switch=bool(state.risk.halt_reason() == "kill_switch"),
                 pending_order=state.pending is not None,
@@ -442,6 +448,7 @@ class Engine:
             _LOG.exception("order place failed")
             slog("ERROR", "order path failed", error=type(exc).__name__)
             state.risk.note_api_error()
+            self.order_manager_ok = False
             return
         if outcome.blocked:
             self.last_block_reason = outcome.blocked
@@ -450,7 +457,22 @@ class Engine:
         result = outcome.result
         if result is None:
             self.last_block_reason = "no_result"
+            self.order_manager_ok = False
+            slog("HEARTBEAT", "ORDER MANAGER DEGRADED", reason="no_result")
             return
+        if not result.ok:
+            self.last_block_reason = result.reason
+            self.order_manager_ok = False
+            slog(
+                "HEARTBEAT",
+                "ORDER MANAGER DEGRADED",
+                reason=result.reason,
+                simulated=result.simulated,
+                dry_run=result.dry_run,
+                mode=self.cfg.resolved_trading_mode(),
+            )
+            return
+        self.order_manager_ok = True
         slog(
             "HEARTBEAT",
             "ORDER MANAGER OK",
@@ -494,6 +516,7 @@ class Engine:
         executor = OrderExecutor(self.cfg, rest if self.cfg.has_keys else None)
         result = executor.poll(pending.order_id, pending.amount)
         if not result.ok:
+            self.order_manager_ok = False
             slog(
                 "ORDER_STATUS",
                 "pending poll failed; holding new orders",
@@ -507,8 +530,24 @@ class Engine:
                 order_id=pending.order_id,
             )
             return
+        if result.actual_execution_jpy is None or result.actual_execution_jpy <= ZERO:
+            slog(
+                "ERROR",
+                "pending fill missing average_price; holding pending",
+                order_id=pending.order_id,
+                executed_amount=str(result.executed_amount),
+            )
+            return
         delta = result.executed_amount - pending.filled_amount
         avg = result.average_price
+        actual = delta * avg
+        if actual <= ZERO:
+            slog(
+                "ERROR",
+                "pending fill delta has no notional; holding pending",
+                order_id=pending.order_id,
+            )
+            return
         delta_result = OrderResult(
             True,
             result.reason,
@@ -518,7 +557,7 @@ class Engine:
             result.status,
             delta,
             avg,
-            delta * avg if avg else ZERO,
+            actual,
             result.raw,
         )
         signal = Signal(pending.kind, pending.side, pending.tp_pct, "pending_fill")
@@ -545,14 +584,16 @@ class Engine:
                 error=type(exc).__name__,
             )
             jpy, btc = ZERO, ZERO
-        pending.filled_amount = result.executed_amount
-        if result.reason != "partial_fill":
-            state.pending = None
-        self._apply_fill(
+        applied = self._apply_fill(
             signal, plan, delta_result, pending.index, pending.timestamp_ms, state, jpy, btc
         )
+        if not applied:
+            return
+        pending.filled_amount = result.executed_amount
         if result.reason == "partial_fill":
             state.pending = pending
+        else:
+            state.pending = None
 
     def _set_watchdog(
         self,
@@ -589,7 +630,7 @@ class Engine:
         state: BotState,
         jpy: Decimal,
         btc: Decimal,
-    ) -> None:
+    ) -> bool:
         if result.reason == "accepted_unfilled" and result.order_id:
             state.pending = PendingOrder(
                 order_id=result.order_id,
@@ -607,13 +648,13 @@ class Engine:
                 order_id=result.order_id,
                 side=signal.side,
             )
-            return
+            return True
         if not result.ok or result.executed_amount <= ZERO:
-            return
+            return False
         actual_jpy = result.actual_execution_jpy
-        if actual_jpy is None:
+        if actual_jpy is None or actual_jpy <= ZERO:
             slog("ERROR", "fill missing actual_execution_jpy; ignoring TARGET/PLANNED")
-            return
+            return False
         stage = "SIMULATED_FILL" if result.simulated or self.cfg.dry_run else "FILL"
         slog(
             stage,
@@ -684,6 +725,7 @@ class Engine:
             )
         elif result.reason != "partial_fill":
             state.pending = None
+        return True
 
     def run_once(self, *, synthetic: bool = False, skip_preflight: bool = False) -> int:
         slog("BOOT", "run_once", synthetic=synthetic, dry_run=self.cfg.dry_run)
@@ -841,6 +883,8 @@ class Engine:
                         reason="synthetic_market_data",
                     )
                     candles = list(self.cache.candles) if self.cache.candles else incoming
+                elif self._explicit_synthetic:
+                    candles = incoming
                 else:
                     candles = self.cache.merge(incoming, real=True)
                 signal = self.process_candles(
@@ -935,8 +979,17 @@ class Engine:
             slog("HEARTBEAT", "MARKET DATA SYNTHETIC", market_data_real=False)
         else:
             slog("HEARTBEAT", "MARKET DATA BLOCKED", market_data_real=False)
-        slog("HEARTBEAT", "ORDER MANAGER OK")
-        slog("HEARTBEAT", "RISK MANAGER OK")
+        slog(
+            "HEARTBEAT",
+            "ORDER MANAGER OK" if self.order_manager_ok else "ORDER MANAGER DEGRADED",
+            reason=self.last_block_reason or "",
+        )
+        risk_halt = state.risk.halt_reason()
+        slog(
+            "HEARTBEAT",
+            "RISK MANAGER OK" if not risk_halt else "RISK MANAGER HALTED",
+            reason=risk_halt or "ok",
+        )
         self._paint(state, signal, last)
 
     def _refresh_public_last(self, rest: RestClient) -> None:
