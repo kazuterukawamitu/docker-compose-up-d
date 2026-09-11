@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import threading
+import time
 from unittest.mock import MagicMock
 
 import httpx
 import pytest
 
-from bitbank_bot.rest_client import BitbankAPIError, RestClient, coerce_active_orders
+from bitbank_bot.rest_client import BitbankAPIError, RateLimiter, RestClient, coerce_active_orders
 
 
 def test_create_order_does_not_retry_post() -> None:
@@ -86,3 +88,18 @@ def test_get_active_orders_normalizes_empty_dict() -> None:
         assert client.get_active_orders("btc_jpy") == []
     finally:
         client.close()
+
+
+def test_rate_limiter_query_sleep_does_not_block_update() -> None:
+    limiter = RateLimiter(query_rps=1, update_rps=10)
+    limiter.wait("query")
+    started = time.monotonic()
+    waiter = threading.Thread(target=lambda: limiter.wait("query"))
+    waiter.start()
+    time.sleep(0.05)
+    limiter.wait("update")
+    update_elapsed = time.monotonic() - started
+    waiter.join(timeout=5)
+    assert waiter.is_alive() is False
+    assert update_elapsed < 0.5
+

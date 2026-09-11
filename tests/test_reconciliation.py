@@ -119,3 +119,30 @@ def test_reconcile_id_map_orders_do_not_crash() -> None:
     )
     assert report.ok
     assert report.open_orders == 1
+
+
+def test_reconcile_counts_locked_sell_btc_toward_position() -> None:
+    client = MagicMock()
+    client.free_amount.side_effect = lambda asset: (
+        Decimal("100000") if asset == "jpy" else Decimal("0")
+    )
+    client.get_active_orders.return_value = [
+        {
+            "order_id": "7",
+            "side": "sell",
+            "remaining_amount": "0.001",
+            "start_amount": "0.001",
+            "executed_amount": "0",
+        }
+    ]
+    report = reconcile(
+        client,
+        cfg(api_key="k", api_secret="s"),
+        local_btc=Decimal("0.001"),
+        pending_order_id="7",
+    )
+    assert report.ok
+    assert "btc_position" not in report.mismatches
+    assert report.bitbank_btc == Decimal("0.001")
+    assert report.open_orders == 1
+

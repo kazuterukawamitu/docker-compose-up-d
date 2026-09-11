@@ -114,3 +114,33 @@ def test_ticker_close_mismatch_and_freshness() -> None:
     candle = Candle(Decimal("1"), Decimal("1"), Decimal("1"), Decimal("1"), Decimal("1"), 1_000_000)
     assert candles_are_fresh([candle], "5min", now_ms=1_000_000 + 5 * 60 * 1000)
     assert not candles_are_fresh([candle], "5min", now_ms=1_000_000 + 20 * 60 * 1000)
+
+
+def test_shift_years_leap_day_does_not_raise() -> None:
+    from bitbank_bot.market_data import shift_years
+
+    leap = datetime(2024, 2, 29, 12, 0, tzinfo=JST)
+    shifted = shift_years(leap, -1)
+    assert shifted.year == 2023
+    assert shifted.month == 2
+    assert shifted.day == 28
+
+
+def test_long_candle_keys_on_leap_day() -> None:
+    leap = datetime(2024, 2, 29, 15, 0, tzinfo=JST)
+    keys = candle_date_keys("1day", leap, latest_only=False, lookback_days=1)
+    assert "2024" in keys
+    assert "2023" in keys
+
+
+def test_incomplete_drop_uses_injected_now() -> None:
+    now = datetime(2026, 9, 11, 12, 0, tzinfo=JST)
+    ts = int(now.timestamp() * 1000)
+    row = ["100", "110", "90", "105", "1", ts]
+    client = _CandleClient({"20260911": [row], "20260910": []})
+    c = cfg(candle_type="5min", candle_lookback_days=1)
+    result = fetch_candles_detailed(client, c, latest_only=True, now=now)  # type: ignore[arg-type]
+    assert result.fetched_count == 1
+    assert result.closed_count == 0
+    assert result.market_data_real is False
+

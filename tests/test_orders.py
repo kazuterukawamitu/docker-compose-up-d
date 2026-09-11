@@ -295,3 +295,41 @@ def test_poll_failed() -> None:
     result = OrderExecutor(c, client).poll("42", Decimal("0.001"))
     assert not result.ok
     assert result.reason == "poll_failed"
+
+
+def test_poll_executed_without_average_price_stays_unfilled() -> None:
+    client = MagicMock()
+    client.get_order.return_value = {
+        "order_id": "42",
+        "status": "FULLY_FILLED",
+        "executed_amount": "0.001",
+        "average_price": "0",
+        "start_amount": "0.001",
+    }
+    c = cfg(dry_run=False, live_trading=True, api_key="k", api_secret="s")
+    result = OrderExecutor(c, client).poll("42", Decimal("0.001"))
+    assert result.ok
+    assert result.reason == "accepted_unfilled"
+    assert result.executed_amount == Decimal("0")
+    assert result.actual_execution_jpy is None
+
+
+def test_place_fill_without_average_price_is_pending() -> None:
+    client = MagicMock()
+    client.get_active_orders.return_value = []
+    client.create_order.return_value = {
+        "order_id": "8",
+        "status": "FULLY_FILLED",
+        "executed_amount": "0.001",
+        "average_price": "0",
+        "start_amount": "0.001",
+    }
+    c = cfg(dry_run=False, live_trading=True, api_key="k", api_secret="s")
+    result = OrderExecutor(c, client).place(
+        Signal("BUY1", "buy", Decimal("0.03"), "test"), _plan()
+    )
+    assert result.ok
+    assert result.reason == "accepted_unfilled"
+    assert result.order_id == "8"
+    assert result.actual_execution_jpy is None
+
