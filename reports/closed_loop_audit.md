@@ -378,3 +378,13 @@ git ls-files start.sh
 bash ./start.sh
 ```
 
+### Test results (this pass)
+
+`python3 -m compileall` PASS. `python3 -m py_compile tests/test_trading_modes.py` PASS
+(no extra `)`). `PYTHONPATH=src pytest` **195 passed**.
+`bash ./start.sh --help` from the repo prints the missing-file recovery and
+`--self-test`. After `scripts/home_start.sh` is `./start.sh` in `/tmp` or a
+fake `$HOME` (via `install_launch_alias.sh`), `bash ./start.sh` exits 2 with
+`cd to the repo first` (not bash's raw missing-file error). No live POST.
+No secrets.
+
