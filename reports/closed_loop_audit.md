@@ -402,9 +402,10 @@ No secrets.
    (often `python3 test_public.py` or `python3 main.py` from `~`, or a
    hardcoded `/Users/.../test_public.py`). It is not a bot crash.
 3. `--once` is **not** forwarded on the default `bash ./start.sh` path.
-   The comment `# Do not pass --once here.` stays (the suggested deletion
-   would only remove that invariant; the exec line still has no `--once`).
-   Default start is the supervised loop (`-m bitbank_bot.launch`), not pytest.
+   The leftover comment `# Do not pass --once here.` was removed (docs
+   only). The exec line is still
+   `exec "$VPY" -m bitbank_bot.launch ... "$@"` with no injected `--once`.
+   Default start is the supervised loop, not pytest.
 
 ### Fix
 
@@ -424,4 +425,16 @@ No secrets.
 
 LIVE stays off. No secrets logged. Default `bash ./start.sh` is not
 `--once` and is not pytest.
+
+### Test results (this pass)
+
+`python3 -m compileall` PASS. `PYTHONPATH=src pytest` **202 passed**.
+`bash /workspace/start.sh --help` from `/tmp` EXIT 0 (locates repo via
+BASH_SOURCE). `bash /workspace/start.sh --check-config --no-screen` from
+`/tmp` EXIT 0, `project_root=/workspace`,
+`using /workspace/.venv/bin/python`, keys UNSET, `may_place_live_orders: False`.
+`bash /workspace/scripts/run_tests.sh --collect-only` from `/tmp` collects
+`tests/` (not `no tests ran`). `pytest -p bitbank_bot.pytest_plugin` from
+`/tmp` EXIT 2 with `cd ... or use: bash .../scripts/run_tests.sh`.
+No live POST. No secrets.
 

@@ -8,13 +8,12 @@ started from ``~`` this prints a cd / run_tests.sh hint instead of
 
 from __future__ import annotations
 
-import sys
-
 
 def pytest_configure(config) -> None:  # noqa: ARG001
+    import pytest
+
     from bitbank_bot.launch import guard_pytest_cwd
 
     msg = guard_pytest_cwd()
     if msg:
-        sys.stderr.write(msg + "\n")
-        raise SystemExit(2)
+        pytest.exit(msg, returncode=2)
