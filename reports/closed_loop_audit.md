@@ -82,7 +82,7 @@ outcomes; they were easy to confuse with a broken order loop.
 
 ## F. Test results
 
-`python3 -m compileall` PASS. `PYTHONPATH=src pytest` **136 passed**.
+`python3 -m compileall` PASS. `PYTHONPATH=src pytest` **165 passed**.
 Public Bitbank `btc_jpy` ticker + `5min` YYYYMMDD (today and yesterday, JST)
 succeeded from this VM. No private order POST. Cloud tests stay dry-run /
 mocked / public API only.
@@ -202,3 +202,63 @@ Dataclass fields are populated and consumed (engine + RECONCILE logs). No unused
 ### Test results (this pass)
 
 Recorded after `compileall` + `pytest`. Public GET only; no live POST.
+
+---
+
+## Third pass (full-program review)
+
+Review requested after two incomplete pasted diffs. Re-inspected current
+sources (did not assume the second-pass summary was still accurate).
+
+**Diff 1:** `ReconcileReport` already has `bitbank_btc`, `local_btc`,
+`open_orders`, and `mismatches`. They are populated in `reconcile()` and
+read in engine / RECONCILE logs. Not duplicated.
+
+**Diff 2:** `market_data.py` import from `config` is complete and used
+(`DEFAULT_MA_PERIOD`, `LONG_CANDLE_TYPES`, `SHORT_CANDLE_TYPES`, `Config`).
+The pasted hunk was a no-op.
+
+### Bugs found and fixed
+
+| Bug | Severity | Fix |
+| --- | --- | --- |
+| `_execute` passed `market_data_real=not used_synthetic_fallback`, so LIVE orders could proceed when `Engine.market_data_real` was still false | High | Pass `self.market_data_real or self._explicit_synthetic` only |
+| `--synthetic` `run_forever` merged bars with `real=True`, marking the cache as Bitbank data | High | Do not merge explicit synthetic into `CandleCache` |
+| Reconcile compared `free_amount(btc)` to local position, so an open sell (locked BTC) false-mismatched | High | Add open-sell remaining size to free BTC before compare |
+| Fill with `executed>0` and `average_price=0` booked a 0-JPY fill and could drop pending | High | Treat missing avg as unfilled pending; poll does not clear until notional exists |
+| Heartbeat / `_execute` logged `ORDER MANAGER OK` after `result.ok is False`; `process_candles` logged `MARKET DATA OK` for unverified bars | Medium | DEGRADED / HALTED / UNVERIFIED messages; set `last_block_reason` from failed `OrderResult` |
+| `datetime.replace(year=n-1)` raises on 29 Feb for 4h/1d keys (HTF + long candles) | High on leap day | `shift_years()` maps Feb 29 → Feb 28 |
+| `drop_incomplete_candle` used wall clock while fetch used injected `now` | Medium | Pass `now_ms` from the fetch clock |
+| `RateLimiter.wait` slept while holding the lock (query sleep blocked update) | Medium | Sleep outside the lock |
+| `same_entry` used `entry_candle_index`, which shifts when lookback length changes | Medium | Prefer `entry_candle_ts` |
+| `save_state` wrote `state.json` in place (crash mid-write can corrupt) | Low | Write `state.json.tmp` then replace |
+
+### Files changed this pass
+
+**Modified:** `engine.py`, `market_data.py`, `multi_timeframe.py`, `orders.py`,
+`reconciliation.py`, `rest_client.py`, `strategy.py`,
+`tests/test_engine.py`, `tests/test_candle_fetch.py`, `tests/test_orders.py`,
+`tests/test_reconciliation.py`, `tests/test_rest_retry.py`,
+`tests/test_strategy.py`, `reports/closed_loop_audit.md`.
+
+**Added / removed:** none.
+
+### Test results (this pass)
+
+`python3 -m compileall` PASS. `PYTHONPATH=src pytest` **165 passed**.
+Public GET only; no live POST from this VM.
+
+### Remaining risks (honest)
+
+- This pass reviewed the live path in `src/bitbank_bot` and tests. It does
+  not claim every possible bug in `run.py`, wiki HTML dumps, or unexercised
+  Bitbank payload variants.
+- LIVE still needs real keys + confirm phrase on the VPS `.env`.
+- HTF 4h+1d still blocks BUY when slopes are down or HTF fetch fails.
+- Limit orders can stay UNFILLED; JPY/BTC move after a fill poll.
+- Reconcile still uses spot `free_amount` + open *sell* remaining; it does
+  not import `onhand_amount` from `/user/assets` (Bitbank field may exist).
+- `TradeSignalExecutor` still sets `open_order_conflict=False`; live
+  duplicate protection remains in `OrderExecutor.active_orders()`.
+- No profit guarantee.
+
