@@ -262,3 +262,31 @@ Public GET only; no live POST from this VM.
   duplicate protection remains in `OrderExecutor.active_orders()`.
 - No profit guarantee.
 
+---
+
+## Fourth pass (enhanced launcher)
+
+Existing launchers were `start.sh` (venv + `main.py`), repo-root `main.py`,
+stdlib `run.py`, and `python -m bitbank_bot`. This pass enhanced **`start.sh`**
+and added `src/bitbank_bot/launch.py` as the recommended wrapper around the
+same engine. `run.py` and `python -m bitbank_bot` still work.
+
+`.env.example` already had `RATE_MODE=fixed` and `RECONCILE_EVERY_CYCLES=10`.
+`load_config` already maps both into `Config.rate_mode` / `reconcile_every_cycles`
+(engine RateEngine + periodic `reconcile()`). Tests now assert that wiring.
+
+Launcher additions (only what `start.sh` lacked):
+
+- Resolve repo root from the script path (no `/Users/kazuteru...` assumption)
+- Reuse `.venv`; load `.env` via dotenv without printing values
+- Non-secret diagnostics: TRADING_MODE, RATE_MODE, pair `btc_jpy`,
+  DRY_RUN/LIVE_READY/LIVE, RECONCILE_EVERY_CYCLES, CANDLE_TYPE, API keys
+  SET/UNSET, lock + `data/KILL`, log dir
+- LIVE refused unless dual-auth (`TRADING_MODE=LIVE` + confirm phrase + keys);
+  otherwise LIVE_READY or DRY_RUN. Default stays DRY_RUN
+- Crash restart with backoff; exit 2/3 (config/lock) does not loop
+- CLI args still forwarded; `--once` / `--check-config` are one-shot
+- `logs/bot.log` uses RotatingFileHandler (5MB × 5)
+
+Start: `bash ./start.sh`. Health: `bash ./start.sh --once --synthetic --skip-lock --no-screen`.
+

@@ -8,23 +8,48 @@ HOLD for 15 minutes while market data and strategy are healthy is `LONG_WAIT`, n
 
 ## Start (this is the program)
 
-`main` on GitHub is wiki HTML. You do **not** need pip, venv, or `start.sh` for the bot to run.
-
-Paste **this one line** in iTerm. It downloads `run.py` and starts a DRY_RUN 取引画面 (no orders):
+Recommended launcher (venv, `.env`, diagnostics, crash backoff). From the repo root:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/kazuterukawamitu/docker-compose-up-d/cursor/bitbank-audit-unify-f5fd/run.py -o "$HOME/bitbank_run.py" && python3 "$HOME/bitbank_run.py"
+bash ./start.sh
 ```
 
-You should see `Bitbank  BTC/JPY  取引画面`. HOLD/待機 is normal. Stop with Ctrl-C.
+One-cycle dry health check (no orders):
 
-If this repo is already checked out on this branch:
+```bash
+bash ./start.sh --once --synthetic --skip-lock --no-screen
+```
+
+`start.sh` finds this repo from its own path (not a hardcoded Mac home), uses
+`.venv`, loads `.env` without printing secrets, and starts the existing
+`python -m bitbank_bot` entry. LIVE is refused unless `TRADING_MODE=LIVE` **and**
+`LIVE_TRADING_CONFIRM=YES_I_ACCEPT_REAL_MONEY_RISK` **and** both API keys.
+Default remains `DRY_RUN`. JSON logs go to `logs/bot.log` (rotated 5MB × 5).
+`data/KILL` halts new orders. `data/bot.lock` is the instance lock.
+
+Same launcher without the shell wrapper:
+
+```bash
+PYTHONPATH=src python3 -m bitbank_bot.launch
+python3 main.py
+```
+
+Stdlib-only fallback (no pip / no venv), still DRY_RUN and no orders:
 
 ```bash
 python3 run.py
 ```
 
-`python3 main.py` also works: it uses the full package when httpx is installed, otherwise the same stdlib `run.py`.
+`python -m bitbank_bot` is the engine only (no crash-restart wrapper). Use that
+under systemd (`deploy/bitbank-bot.service`) or pass `--no-supervise`.
+
+Paste **this one line** in iTerm to clone and open the 取引画面:
+
+```bash
+bash -lc 'REPO="$HOME/docker-compose-up-d"; set -euo pipefail; if [ ! -d "$REPO/.git" ]; then git clone https://github.com/kazuterukawamitu/docker-compose-up-d.git "$REPO"; fi; cd "$REPO"; git fetch origin cursor/bitbank-closed-loop-f964; git checkout -B cursor/bitbank-closed-loop-f964 origin/cursor/bitbank-closed-loop-f964; exec bash ./start.sh --screen'
+```
+
+HOLD/待機 is normal. Stop with Ctrl-C.
 
 Live trading stays **off** unless `.env` has `TRADING_MODE=LIVE` **and**
 `LIVE_TRADING_CONFIRM=YES_I_ACCEPT_REAL_MONEY_RISK` **and** both API keys.
@@ -73,8 +98,8 @@ State-machine mapping: [docs/STRATEGY.md](docs/STRATEGY.md).
 ## Tests
 
 ```bash
-bash ~/docker-compose-up-d/start.sh --once --synthetic --skip-lock
-PYTHONPATH=src .venv/bin/python -m pytest -q
+bash ./start.sh --once --synthetic --skip-lock --no-screen
+PYTHONPATH=src python3 -m pytest -q
 ```
 
 Read-only execution check (never places an order):

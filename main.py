@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""Repo-root launcher. Prefers the full package; falls back to stdlib run.py.
+"""Repo-root launcher. Prefers the enhanced package launcher; falls back to stdlib run.py.
 
+    bash ./start.sh
     python3 main.py
     python3 run.py
 
-Both stay DRY_RUN. Neither places a Bitbank order.
+All stay DRY_RUN unless dual-auth LIVE is set in .env. None of these place a
+Bitbank order from defaults.
 """
 
 from __future__ import annotations
@@ -33,11 +35,11 @@ def _stdlib() -> int:
 def _launch() -> int:
     try:
         import httpx  # noqa: F401
-        from bitbank_bot.main import main
+        from bitbank_bot.launch import main as launch_main
     except ModuleNotFoundError:
         sys.stderr.write("full package/deps missing; starting stdlib DRY_RUN (run.py)\n")
         return _stdlib()
-    return int(main())
+    return int(launch_main())
 
 
 if __name__ == "__main__":

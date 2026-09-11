@@ -12,7 +12,10 @@ ExecStart=/opt/bitbank-bot/.venv/bin/python -m bitbank_bot
 Restart=always
 RestartSec=10
 # Example unit only. Do not enable on this Cloud Agent VM.
-# Copy to the VPS and keep DRY_RUN=true unless LIVE_TRADING is set in .env.
+# Engine-only start: systemd Restart=always covers crashes.
+# Do not also use start.sh --supervise here (that would nest restart loops).
+# For a supervised shell start instead: ExecStart=/opt/bitbank-bot/start.sh --no-screen --no-supervise
+# Copy to the VPS and keep TRADING_MODE=DRY_RUN unless dual-auth LIVE is set in .env.
 NoNewPrivileges=true
 
 [Install]
