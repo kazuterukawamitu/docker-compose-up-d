@@ -327,3 +327,54 @@ Enhanced launcher paths: `start.sh`, `src/bitbank_bot/launch.py`, `scripts/run_b
 From a temp cwd, `--check-config` exits 2 with `cd to the repo first`.
 No live POST. No secrets in diagnostics.
 
+---
+
+## Sixth pass (`./start.sh` from ~ and pytest-as-launch)
+
+### Cause of the two Mac messages
+
+1. `bash: ./start.sh: No such file or directory` is **bash**, not the bot.
+   `start.sh` is committed on this branch (`git ls-files start.sh` → `start.sh`,
+   mode `100755`). It is not on `$PATH` and it is not in `$HOME`. Running
+   `./start.sh` from `~` or `/tmp` fails before any repo script runs. A
+   checkout that is still `main` without this PR can also lack the enhanced
+   launcher (or have an older one). Confirm with `git ls-files start.sh` after
+   `git checkout cursor/bitbank-closed-loop-f964`.
+
+2. `PYTHONPATH=src python3 -m pytest -q` was printed in the README Tests
+   block (next to a start.sh smoke line). It is **not** a launch command.
+   `start.sh`, `launch.py`, and `main.py` do not exec pytest unless
+   `--self-test` is explicit. Pasting that line at `~` looks for `src` in
+   home and produces confusing errors; pasting pytest dots into zsh is the
+   earlier `command not found: ....` class of mistake.
+
+`tests/test_trading_modes.py` was already valid (balanced parens). The
+suggested extra `)` after `load_config(...)` was **not** applied.
+
+### Fix
+
+- `scripts/home_start.sh`: home-safe finder. Copy to `~/start.sh` so
+  `cd ~ && bash ./start.sh` prints `cd to the repo first` (detects
+  `docker-compose-up-d`) instead of a raw missing-file error. Never starts
+  the bot. Never runs pytest.
+- `scripts/install_launch_alias.sh`: installs that finder and a
+  `bitbank-start` function that cds to the clone.
+- `scripts/run_tests.sh`: cds to the repo that contains the script, then
+  runs pytest. Not a launch step.
+- `start.sh --self-test` execs `run_tests.sh` only. Help documents the
+  missing-file case and the required branch. Launchers do not print
+  `PYTHONPATH=src python3 -m pytest -q`.
+- README Start vs Tests split; Mac start is
+  `cd ~/docker-compose-up-d && git checkout cursor/bitbank-closed-loop-f964 && bash ./start.sh`.
+
+LIVE stays off. No secrets logged.
+
+### How to start from a Mac
+
+```bash
+cd ~/docker-compose-up-d
+git checkout cursor/bitbank-closed-loop-f964
+git ls-files start.sh
+bash ./start.sh
+```
+

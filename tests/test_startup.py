@@ -60,6 +60,17 @@ def test_start_sh_is_venv_loop_launcher() -> None:
     assert "cd to the repo first" in text
     assert "RATE_MODE" in text
     assert "RECONCILE_EVERY_CYCLES" in text
+    assert "--self-test" in text
+    assert "docker-compose-up-d" in text
+    assert "PYTHONPATH=src python3 -m pytest -q" not in text
+
+
+def test_trading_modes_file_compiles_without_stray_paren() -> None:
+    root = Path(__file__).resolve().parents[1]
+    path = root / "tests" / "test_trading_modes.py"
+    py_compile.compile(str(path), doraise=True)
+    source = path.read_text(encoding="utf-8")
+    assert source.count("(") == source.count(")")
 
 
 def test_loop_cli_exits_after_max_cycles(tmp_path, monkeypatch) -> None:

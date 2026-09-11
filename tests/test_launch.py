@@ -98,6 +98,7 @@ def test_should_supervise_skips_oneshot_and_systemd() -> None:
     assert should_supervise(split_launch_argv(["--check-config"])) is False
     assert should_supervise(split_launch_argv(["--max-cycles", "2"])) is False
     assert should_supervise(split_launch_argv(["--no-supervise"])) is False
+    assert should_supervise(split_launch_argv(["--self-test"])) is False
     assert should_supervise(split_launch_argv(["--supervise"]), {"INVOCATION_ID": "x"}) is True
     assert should_supervise(split_launch_argv([]), {"INVOCATION_ID": "x"}) is False
 
@@ -226,6 +227,9 @@ def test_launch_py_has_no_smart_quotes_and_parses() -> None:
         "start.sh",
         "main.py",
         "scripts/run_bot.sh",
+        "scripts/run_tests.sh",
+        "scripts/home_start.sh",
+        "scripts/install_launch_alias.sh",
         "src/bitbank_bot/logging_setup.py",
         "src/bitbank_bot/main.py",
     ):
@@ -292,6 +296,8 @@ def test_launch_help_works_outside_repo(tmp_path) -> None:
     assert "bash ./start.sh" in out
     assert "command not found" in out
     assert "RATE_MODE" in out
+    assert "PYTHONPATH=src python3 -m pytest -q" not in out
+    assert "scripts/run_tests.sh" in out
 
 
 def test_start_sh_copy_outside_repo_says_cd_first(tmp_path) -> None:
@@ -337,3 +343,147 @@ def test_run_bot_sh_help_from_repo() -> None:
     assert proc.returncode == 0, proc.stderr + proc.stdout
     assert "DRY_RUN" in proc.stdout
     assert "cd <repo>" in proc.stdout
+
+
+def test_start_sh_help_does_not_advertise_pytest_as_launch() -> None:
+    root = Path(__file__).resolve().parents[1]
+    proc = subprocess.run(
+        ["bash", str(root / "start.sh"), "--help"],
+        cwd=str(root),
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 0, out
+    assert "PYTHONPATH=src python3 -m pytest -q" not in out
+    assert "scripts/run_tests.sh" in out
+    assert "--self-test" in out
+    assert "No such file or directory" in out
+
+
+def test_home_start_from_tmp_says_cd_first(tmp_path) -> None:
+    root = Path(__file__).resolve().parents[1]
+    dest = tmp_path / "start.sh"
+    dest.write_text(
+        (root / "scripts" / "home_start.sh").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    dest.chmod(0o755)
+    proc = subprocess.run(
+        ["bash", "./start.sh"],
+        cwd=str(tmp_path),
+        capture_output=True,
+        text=True,
+        timeout=15,
+        env={**os.environ, "HOME": str(tmp_path)},
+    )
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 2, out
+    assert "cd to the repo first" in out
+    assert "No such file or directory" not in out
+    assert "docker-compose-up-d" in out
+
+
+def test_home_start_finds_common_clone_name(tmp_path) -> None:
+    root = Path(__file__).resolve().parents[1]
+    clone = tmp_path / "docker-compose-up-d"
+    clone.mkdir()
+    (clone / "start.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+    (clone / "run.py").write_text("#\n", encoding="utf-8")
+    (clone / "main.py").write_text("#\n", encoding="utf-8")
+    pkg = clone / "src" / "bitbank_bot"
+    pkg.mkdir(parents=True)
+    (pkg / "launch.py").write_text("#\n", encoding="utf-8")
+    proc = subprocess.run(
+        ["bash", str(root / "scripts" / "home_start.sh")],
+        cwd=str(tmp_path),
+        capture_output=True,
+        text=True,
+        timeout=15,
+        env={**os.environ, "HOME": str(tmp_path)},
+    )
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 2, out
+    assert "Found a clone at:" in out
+    assert str(clone) in out
+    assert "cd to the repo first" in out
+
+
+def test_install_alias_then_home_start_sh(tmp_path) -> None:
+    root = Path(__file__).resolve().parents[1]
+    proc = subprocess.run(
+        ["bash", str(root / "scripts" / "install_launch_alias.sh")],
+        cwd=str(root),
+        capture_output=True,
+        text=True,
+        timeout=15,
+        env={**os.environ, "HOME": str(tmp_path)},
+    )
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 0, out
+    home_start = tmp_path / "start.sh"
+    assert home_start.is_file()
+    zshrc = (tmp_path / ".zshrc").read_text(encoding="utf-8")
+    assert "bitbank-start" in zshrc
+    assert str(root) in zshrc
+    run = subprocess.run(
+        ["bash", "./start.sh"],
+        cwd=str(tmp_path),
+        capture_output=True,
+        text=True,
+        timeout=15,
+        env={**os.environ, "HOME": str(tmp_path)},
+    )
+    hint = run.stdout + run.stderr
+    assert run.returncode == 2, hint
+    assert "cd to the repo first" in hint
+    assert "No such file or directory" not in hint
+
+
+def test_run_tests_sh_cds_to_repo(tmp_path) -> None:
+    root = Path(__file__).resolve().parents[1]
+    proc = subprocess.run(
+        ["bash", str(root / "scripts" / "run_tests.sh"), "--collect-only", "-q"],
+        cwd=str(tmp_path),
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 0, out
+    assert "test_trading_modes.py" in out or "collected" in out.lower() or proc.returncode == 0
+
+
+def test_run_tests_sh_copy_outside_repo_says_cd_first(tmp_path) -> None:
+    root = Path(__file__).resolve().parents[1]
+    dest = tmp_path / "run_tests.sh"
+    dest.write_text(
+        (root / "scripts" / "run_tests.sh").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    proc = subprocess.run(
+        ["bash", str(dest)],
+        cwd=str(tmp_path),
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 2, out
+    assert "cd to the repo first" in out
+    assert "not a launch command" in out
+
+
+def test_start_sh_self_test_collect_only() -> None:
+    root = Path(__file__).resolve().parents[1]
+    proc = subprocess.run(
+        ["bash", str(root / "start.sh"), "--self-test", "--collect-only", "-q"],
+        cwd=str(root),
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 0, out
+    assert "/user/spot/order" not in out

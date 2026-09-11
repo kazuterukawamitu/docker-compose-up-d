@@ -17,7 +17,10 @@ root="$(cd "$here/.." && pwd)"
 if [[ ! -f "$root/start.sh" || ! -f "$root/src/bitbank_bot/launch.py" || ! -f "$root/run.py" ]]; then
   echo "cd to the repo first, then run: bash ./start.sh" >&2
   echo "This helper lives at scripts/run_bot.sh inside the repo." >&2
+  echo "Typical clone: cd ~/docker-compose-up-d && bash ./start.sh" >&2
+  echo "Need branch cursor/bitbank-closed-loop-f964 (git ls-files start.sh)." >&2
   echo "Do not paste pytest output (.... [ 40%] / 179 passed) into zsh." >&2
+  echo "pytest is not a launch step." >&2
   exit 2
 fi
 
@@ -25,7 +28,9 @@ cwd="$(pwd -P)"
 if [[ "$cwd" != "$root" && "$cwd" != "$root"/* ]]; then
   echo "cd to the repo first, then run: bash ./start.sh" >&2
   echo "cwd=$cwd repo=$root" >&2
+  echo "Typical clone: cd ~/docker-compose-up-d && bash ./start.sh" >&2
   echo "If zsh shows '>' you are stuck in paste/continuation — press Ctrl-C." >&2
+  echo "pytest is not a launch step. Tests: bash scripts/run_tests.sh (from the repo)." >&2
   exit 2
 fi
 

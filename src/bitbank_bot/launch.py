@@ -33,7 +33,15 @@ from bitbank_bot.config import (
 from bitbank_bot.main import main as bot_main
 
 ONESHOT_FLAGS = frozenset(
-    {"--once", "--check-config", "--preflight", "--backtest", "--help", "-h"}
+    {
+        "--once",
+        "--check-config",
+        "--preflight",
+        "--backtest",
+        "--help",
+        "-h",
+        "--self-test",
+    }
 )
 FATAL_EXIT_CODES = frozenset({2, 3})
 CLEAN_EXIT_CODES = frozenset({0, 130, 143, -2, -15})
@@ -44,7 +52,13 @@ LOG_ROTATION_HINT = "logs/bot.log rotated at 5MB x 5; do not dump huge stdout"
 SMART_QUOTES = frozenset("\u201c\u201d\u2018\u2019")
 NOT_IN_REPO_HINT = (
     "cd to the repo first, then run: bash ./start.sh\n"
+    "Typical clone name: docker-compose-up-d\n"
+    "  cd ~/docker-compose-up-d && bash ./start.sh\n"
+    "start.sh is on branch cursor/bitbank-closed-loop-f964 "
+    "(git ls-files start.sh must print start.sh).\n"
+    "If you are on main, checkout that branch or merge the PR.\n"
     "Do not paste pytest output (.... [ 40%] / 179 passed) into the terminal.\n"
+    "pytest is not a launch step. Tests: cd <repo> && bash scripts/run_tests.sh\n"
     "If zsh shows a lone '>' prompt, press Ctrl-C, then cd to the repo."
 )
 
@@ -271,6 +285,25 @@ def child_command(forwarded: list[str]) -> list[str]:
     return [sys.executable, "-m", "bitbank_bot", *forwarded]
 
 
+def run_self_test(root: Path, extra: list[str]) -> int:
+    """Run pytest from the repo root only. Never a launch step."""
+    helper = root / "scripts" / "run_tests.sh"
+    if helper.is_file():
+        cmd = ["bash", str(helper), *extra]
+        proc = subprocess.run(cmd, cwd=str(root))
+        return int(proc.returncode)
+    env = os.environ.copy()
+    src = str(root / "src")
+    prev = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = src if not prev else src + os.pathsep + prev
+    proc = subprocess.run(
+        [sys.executable, "-m", "pytest", *extra],
+        cwd=str(root),
+        env=env,
+    )
+    return int(proc.returncode)
+
+
 def run_child(forwarded: list[str], *, root: Path) -> int:
     env = os.environ.copy()
     env["PYTHONUNBUFFERED"] = "1"
@@ -346,8 +379,13 @@ def _usage_epilog() -> str:
         "RATE_MODE and RECONCILE_EVERY_CYCLES come from .env (printed SET/UNSET, no secrets).\n"
         "LIVE requires TRADING_MODE=LIVE and "
         f"LIVE_TRADING_CONFIRM={LIVE_CONFIRM_PHRASE}. Default is DRY_RUN.\n"
+        "If bash says './start.sh: No such file or directory' you are not in the clone "
+        "(often ~). cd ~/docker-compose-up-d && bash ./start.sh\n"
+        "Optional home-safe wrapper: bash scripts/install_launch_alias.sh\n"
         "If zsh says 'command not found: ....' you pasted pytest dots; press Ctrl-C "
         "if stuck at '>', then cd to the repo and run bash ./start.sh.\n"
+        "pytest is not a launch step. Developer tests (repo only): "
+        "bash scripts/run_tests.sh   or   bash ./start.sh --self-test\n"
         "Do not paste pytest output or this Python source into the terminal.\n"
     )
 
@@ -367,6 +405,20 @@ def main(argv: list[str] | None = None) -> int:
         )
         sys.stderr.write(NOT_IN_REPO_HINT + "\n")
         return 2
+    if "--self-test" in raw:
+        extra = [
+            item
+            for item in raw
+            if item not in {"--self-test", "--supervise", "--no-supervise"}
+        ]
+        try:
+            root = find_project_root()
+        except LaunchError as exc:
+            sys.stderr.write(f"launcher: {exc}\n")
+            return 2
+        os.chdir(root)
+        ensure_src_on_path(root)
+        return run_self_test(root, extra)
     try:
         root = find_project_root()
     except LaunchError as exc:

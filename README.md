@@ -2,22 +2,57 @@
 
 Bitbank-only `btc_jpy` bot. Default is a **continuous DRY_RUN loop** with an iTerm **取引画面** (trading dashboard). HOLD/WAIT on a bar is normal. JSON lines are written to `logs/bot.log`, not the dashboard.
 
-`main` on GitHub is still wiki HTML. The runnable bot is branch `cursor/bitbank-audit-unify-f5fd`.
+`main` on GitHub is still mostly wiki HTML plus an older launcher. The
+runnable bot on this PR is branch `cursor/bitbank-closed-loop-f964`.
 
 HOLD for 15 minutes while market data and strategy are healthy is `LONG_WAIT`, not a crash. Public-API fallback candles never place orders. Live UNFILLED limits are persisted and polled. New BUY is blocked when both 4h and 1d SMA slopes are down (`ENABLE_HTF_FILTER`).
 
 ## Start (this is the program)
 
-The only command to launch the enhanced program. **cd into the repo first**
-(your Mac home `~` is not the repo):
+The only command to launch the enhanced program. **You MUST `cd` into the
+clone first.** Your Mac home `~` is not the repo. `start.sh` exists only
+inside the checkout, on branch `cursor/bitbank-closed-loop-f964` (this PR).
 
 ```bash
-cd ~/docker-compose-up-d   # or wherever you cloned this repository
+cd ~/docker-compose-up-d
+git fetch origin cursor/bitbank-closed-loop-f964
+git checkout cursor/bitbank-closed-loop-f964
+git ls-files start.sh    # must print: start.sh
 bash ./start.sh
 ```
 
 `bash ./start.sh --help` prints the same instructions. A thin wrapper is
 `bash scripts/run_bot.sh` (also refuses unless cwd is this repo).
+
+### `bash: ./start.sh: No such file or directory`
+
+That message is from **bash**, before any bot code runs. Either:
+
+1. The current directory is `~` / `/tmp` / somewhere else — not the clone, or
+2. This checkout is `main` without the PR branch, so the enhanced `start.sh`
+   is not what you think (or is missing). Run `git ls-files start.sh`.
+
+Fix:
+
+```bash
+cd ~/docker-compose-up-d
+git checkout cursor/bitbank-closed-loop-f964
+bash ./start.sh
+```
+
+Optional: install a **home-safe finder** so `cd ~ && bash ./start.sh` prints
+the same "cd to the repo" hint instead of a raw "No such file":
+
+```bash
+cd ~/docker-compose-up-d
+bash scripts/install_launch_alias.sh
+```
+
+That copies `scripts/home_start.sh` to `~/start.sh` and adds a `bitbank-start`
+function. The home copy does **not** launch the bot and does **not** run tests.
+
+`bash start.sh` from `~` with no finder on `PATH` is expected to fail — there
+is no global `start.sh`.
 
 One-cycle dry health check (no orders):
 
@@ -115,14 +150,21 @@ State-machine mapping: [docs/STRATEGY.md](docs/STRATEGY.md).
 - `DRY_RUN=true` and `LIVE_TRADING=true` are mutually exclusive.
 - Create `data/KILL` to halt new orders.
 
-## Tests
+## Tests (not launch)
+
+Do **not** paste a pytest command into iTerm at `~`. That is how
+`src` goes missing and a pytest line "appears" as if it were a start step.
+Launchers never run the test suite unless you pass `--self-test`.
+
+From the repo only:
 
 ```bash
-bash ./start.sh --once --synthetic --skip-lock --no-screen
-PYTHONPATH=src python3 -m pytest -q
+cd ~/docker-compose-up-d
+bash scripts/run_tests.sh
 ```
 
-Run those commands in the repo. Do not paste the pytest dots or `N passed` line
+or `bash ./start.sh --self-test`. Same thing: the script `cd`s to the repo
+root before it touches pytest. Do not paste the dots or `N passed` line
 back into zsh.
 
 Read-only execution check (never places an order):

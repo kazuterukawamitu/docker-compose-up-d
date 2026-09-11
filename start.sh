@@ -35,6 +35,16 @@ This is the program-launching program. From the repo root only:
   bash ./start.sh --check-config
   bash ./start.sh --no-supervise
   bash ./start.sh --supervise
+  bash ./start.sh --self-test
+
+If bash says: ./start.sh: No such file or directory
+  You are not in the clone (often you are in ~). This file lives in the repo
+  on branch cursor/bitbank-closed-loop-f964. Confirm:
+    git ls-files start.sh
+  Then:
+    cd ~/docker-compose-up-d && bash ./start.sh
+  Optional home-safe finder (so cd ~ && bash ./start.sh prints this hint):
+    bash scripts/install_launch_alias.sh
 
 Locates the repo from this script (not a hardcoded Mac path), uses .venv,
 loads .env without printing secrets, prints SET/UNSET diagnostics
@@ -51,12 +61,40 @@ If zsh says: command not found: ....
   Press Ctrl-C to leave a stuck '>' prompt, then:
     cd <repo> && bash ./start.sh
   Do not paste pytest output or Python snippets into the terminal.
+
+pytest is not a launch step. Developer tests (from the repo only):
+  bash scripts/run_tests.sh
+  bash ./start.sh --self-test
 EOF
+}
+
+suggest_clones() {
+  echo "Typical clone name: docker-compose-up-d" >&2
+  echo "  cd ~/docker-compose-up-d" >&2
+  echo "  git checkout cursor/bitbank-closed-loop-f964" >&2
+  echo "  git ls-files start.sh    # must print: start.sh" >&2
+  echo "  bash ./start.sh" >&2
+  echo "If start.sh is missing, you are on main or not in the clone." >&2
+  local names="docker-compose-up-d docker-compose-up-d.git bitbank-bot"
+  local b n p
+  if [[ -n "${HOME:-}" ]]; then
+    for b in "$HOME" "$HOME/src" "$HOME/code" "$HOME/dev" "$HOME/Projects" "$HOME/github" "$HOME/repos"; do
+      for n in $names; do
+        p="$b/$n"
+        if [[ -f "$p/start.sh" && -f "$p/src/bitbank_bot/launch.py" ]]; then
+          echo "Found a clone at: $p" >&2
+          echo "  cd $p && bash ./start.sh" >&2
+        fi
+      done
+    done
+  fi
 }
 
 not_in_repo() {
   echo "cd to the repo first, then run: bash ./start.sh" >&2
+  suggest_clones
   echo "Do not paste pytest output (.... [ 40%] / 179 passed) into the terminal." >&2
+  echo "pytest is not a launch step. Do not paste test commands at ~." >&2
   echo "If zsh shows a lone '>' prompt, press Ctrl-C, then cd to the repo." >&2
 }
 
@@ -116,6 +154,27 @@ ensure_bot_source() {
 }
 
 ensure_bot_source
+
+self_test=0
+self_test_args=()
+for a in "$@"; do
+  if [[ "$a" == "--self-test" ]]; then
+    self_test=1
+  else
+    self_test_args+=("$a")
+  fi
+done
+if [[ "$self_test" -eq 1 ]]; then
+  if [[ ! -f "$ROOT/scripts/run_tests.sh" ]]; then
+    echo "cd to the repo first, then run: bash scripts/run_tests.sh" >&2
+    not_in_repo
+    exit 2
+  fi
+  if [[ ${#self_test_args[@]} -eq 0 ]]; then
+    exec bash "$ROOT/scripts/run_tests.sh"
+  fi
+  exec bash "$ROOT/scripts/run_tests.sh" "${self_test_args[@]}"
+fi
 
 pick_python() {
   local c
@@ -209,7 +268,7 @@ oneshot=0
 want_stdlib_loop=1
 for a in "$@"; do
   case "$a" in
-    --once|--check-config|--preflight|--backtest|--help|-h|--max-cycles)
+    --once|--check-config|--preflight|--backtest|--help|-h|--max-cycles|--self-test)
       oneshot=1
       want_stdlib_loop=0
       ;;
