@@ -276,7 +276,7 @@ class OrderExecutor:
         )
 
     def _recover_unconfirmed_submit(self, plan: AmountPlan) -> OrderResult | None:
-        """After a POST timeout, inspect open orders. Never POST again."""
+        """After a POST timeout, inspect open orders and trade history. Never POST again."""
         try:
             active = self.active_orders()
         except Exception as exc:
@@ -284,13 +284,40 @@ class OrderExecutor:
             return None
         match = None
         for row in active:
-            if str(row.get("side") or "") == plan.side:
+            side = str(row.get("side") or "")
+            amt = D(row.get("start_amount") or 0)
+            if side == plan.side and abs(amt - plan.amount) < D("0.00000001"):
                 match = row
                 break
         if match is None:
-            slog("ORDER_STATUS", "no matching open order after submit error")
+            if self.client is not None and hasattr(self.client, "get_trade_history"):
+                try:
+                    history = self.client.get_trade_history(self.cfg.pair)
+                    for trade in history:
+                        side = str(trade.get("side") or "")
+                        amt = D(trade.get("amount") or 0)
+                        if side == plan.side and abs(amt - plan.amount) < D("0.00000001"):
+                            order_id = str(trade.get("order_id") or "")
+                            if order_id and self.client:
+                                try:
+                                    match = self.client.get_order(self.cfg.pair, order_id)
+                                    slog(
+                                        "ORDER_STATUS",
+                                        "recovered filled order via trade_history",
+                                        order_id=order_id,
+                                    )
+                                    break
+                                except Exception:
+                                    pass
+                except Exception as exc:
+                    slog("ERROR", "trade_history lookup failed after submit error", error=type(exc).__name__)
+        if match is None:
+            slog("ORDER_STATUS", "no matching open or filled order after submit error")
             return None
         order_id = str(match.get("order_id") or "")
+        if not order_id:
+            slog("ORDER_STATUS", "recovered order missing order_id")
+            return None
         slog(
             "ORDER_STATUS",
             "recovered order via active_orders; not re-posting",

@@ -14,6 +14,8 @@ from bitbank_bot.money import D, ZERO
 class ReconcileClient(Protocol):
     def free_amount(self, asset: str) -> Decimal: ...
 
+    def get_assets(self) -> dict[str, Any]: ...
+
     def get_active_orders(self, pair: str) -> list[dict[str, Any]]: ...
 
     def get_order(self, pair: str, order_id: str) -> dict[str, Any]: ...
@@ -44,14 +46,22 @@ def reconcile(
         return ReconcileReport(True, "skipped_no_keys")
     try:
         jpy = client.free_amount("jpy")
-        btc = client.free_amount("btc")
         opens = client.get_active_orders(cfg.pair)
+        assets_data = client.get_assets()
+        btc_free = ZERO
+        btc_locked = ZERO
+        for row in assets_data.get("assets") or []:
+            if row.get("asset") == "btc":
+                btc_free = D(row.get("free_amount") or 0)
+                btc_locked = D(row.get("locked_amount") or 0)
+                break
+        btc = btc_free + btc_locked
     except Exception as exc:
         slog("RECONCILE", "failed", error=type(exc).__name__)
         return ReconcileReport(False, "reconcile_failed")
     mismatches: list[str] = []
     local = D(local_btc)
-    if local > ZERO and abs(btc - local) > cfg.min_amount_btc:
+    if abs(btc - local) > cfg.min_amount_btc:
         mismatches.append("btc_position")
     if pending_order_id:
         ids = {str(row.get("order_id") or "") for row in opens}

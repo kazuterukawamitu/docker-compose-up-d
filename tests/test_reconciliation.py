@@ -14,6 +14,11 @@ def test_reconcile_ok_when_balances_match() -> None:
         Decimal("100000") if asset == "jpy" else Decimal("0.001")
     )
     client.get_active_orders.return_value = []
+    client.get_assets.return_value = {
+        "assets": [
+            {"asset": "btc", "free_amount": "0.001", "locked_amount": "0"}
+        ]
+    }
     report = reconcile(
         client,
         cfg(api_key="k", api_secret="s"),
@@ -30,6 +35,11 @@ def test_reconcile_mismatch_btc_and_pending() -> None:
         Decimal("100000") if asset == "jpy" else Decimal("0.02")
     )
     client.get_active_orders.return_value = []
+    client.get_assets.return_value = {
+        "assets": [
+            {"asset": "btc", "free_amount": "0.02", "locked_amount": "0"}
+        ]
+    }
     client.get_order.return_value = {"status": "CANCELED", "executed_amount": "0"}
     report = reconcile(
         client,

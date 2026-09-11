@@ -338,18 +338,12 @@ class Engine:
                     )
                     self.last_block_reason = "STALE_MARKET_DATA"
                     signal = Signal.hold("STALE_MARKET_DATA")
-                    state.last_candle_ts = snap.timestamp_ms
-                    if persist:
-                        save_state(self.cfg.state_path, state)
-                    continue
+                    break
                 if not fresh and not self._explicit_synthetic:
                     slog("EXECUTION_BLOCKED", "order gated", reason="STALE_MARKET_DATA")
                     self.last_block_reason = "STALE_MARKET_DATA"
                     signal = Signal.hold("STALE_MARKET_DATA")
-                    state.last_candle_ts = snap.timestamp_ms
-                    if persist:
-                        save_state(self.cfg.state_path, state)
-                    continue
+                    break
                 self._execute(
                     signal,
                     snap.close,
@@ -916,9 +910,12 @@ class Engine:
                 self.last_public_last = str(last)
                 self.last_error = ""
                 self.rest_ok = True
+            else:
+                self.last_public_last = "-"
         except Exception as exc:
             self.last_error = type(exc).__name__
             self.rest_ok = False
+            self.last_public_last = "-"
             slog("ERROR", "ticker refresh failed", error=type(exc).__name__)
 
     def _paint(self, state: BotState, signal: Signal, last: str = "-") -> None:
