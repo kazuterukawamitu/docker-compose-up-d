@@ -388,3 +388,40 @@ fake `$HOME` (via `install_launch_alias.sh`), `bash ./start.sh` exits 2 with
 `cd to the repo first` (not bash's raw missing-file error). No live POST.
 No secrets.
 
+---
+
+## Seventh pass (Mac CommandLineTools path + pytest from ~)
+
+### Exact causes (verified)
+
+1. `no tests ran in 1.44s` is pytest started with no `tests/` collection:
+   wrong cwd (`~`), or a path that matched nothing. `pytest` / `-q` from home
+   does not load this repo's `pyproject.toml` `testpaths = ["tests"]`.
+2. `/Library/Developer/CommandLineTools/usr/bin/python3: can't open file ...
+   [Errno 2]` is Apple's `/usr/bin/python3` invoked on a missing `.py`
+   (often `python3 test_public.py` or `python3 main.py` from `~`, or a
+   hardcoded `/Users/.../test_public.py`). It is not a bot crash.
+3. `--once` is **not** forwarded on the default `bash ./start.sh` path.
+   The comment `# Do not pass --once here.` stays (the suggested deletion
+   would only remove that invariant; the exec line still has no `--once`).
+   Default start is the supervised loop (`-m bitbank_bot.launch`), not pytest.
+
+### Fix
+
+- `start.sh` still resolves the repo from `BASH_SOURCE` and `cd`s there, so
+  `bash /absolute/path/to/start.sh` from `~` starts the bot. Existing
+  `.venv/bin/python` is preferred **before** `pick_python` so CommandLineTools
+  python is not used to run the bot when a venv exists. Launch/main/run paths
+  are always `$ROOT/...`, never a cwd-relative missing file.
+- `resolve_runtime_python(root)` (mockable) prefers `<root>/.venv/bin/python`
+  and does not assume cwd.
+- `scripts/run_tests.sh` cds to the repo, sets `PYTHONPATH=src`, prefers a
+  venv interpreter that has pytest, and collects `tests/` so the result is
+  not `no tests ran`. From a foreign cwd, `pytest -p bitbank_bot.pytest_plugin`
+  prints `cd to the repo or use: bash scripts/run_tests.sh`.
+- README has one Mac execute block: `cd` **or** absolute `start.sh`; do not
+  point CommandLineTools python at a random file.
+
+LIVE stays off. No secrets logged. Default `bash ./start.sh` is not
+`--once` and is not pytest.
+

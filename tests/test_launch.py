@@ -19,6 +19,8 @@ from bitbank_bot.launch import (
     looks_like_pytest_paste,
     looks_like_repo,
     main,
+    pytest_invocation_guard,
+    resolve_runtime_python,
     should_supervise,
     split_launch_argv,
     supervise_loop,
@@ -232,6 +234,8 @@ def test_launch_py_has_no_smart_quotes_and_parses() -> None:
         "scripts/install_launch_alias.sh",
         "src/bitbank_bot/logging_setup.py",
         "src/bitbank_bot/main.py",
+        "src/bitbank_bot/pytest_plugin.py",
+        "tests/conftest.py",
     ):
         other = (root / rel).read_text(encoding="utf-8")
         for ch in SMART_QUOTES:
@@ -239,6 +243,8 @@ def test_launch_py_has_no_smart_quotes_and_parses() -> None:
     ast.parse((root / "main.py").read_text(encoding="utf-8"))
     ast.parse((root / "src" / "bitbank_bot" / "logging_setup.py").read_text(encoding="utf-8"))
     ast.parse((root / "src" / "bitbank_bot" / "main.py").read_text(encoding="utf-8"))
+    ast.parse((root / "src" / "bitbank_bot" / "pytest_plugin.py").read_text(encoding="utf-8"))
+    ast.parse((root / "tests" / "conftest.py").read_text(encoding="utf-8"))
 
 
 def test_looks_like_pytest_paste_and_repo_cwd() -> None:
@@ -441,6 +447,104 @@ def test_install_alias_then_home_start_sh(tmp_path) -> None:
     assert "No such file or directory" not in hint
 
 
+def test_resolve_runtime_python_prefers_venv(tmp_path) -> None:
+    root = tmp_path / "repo"
+    venv_py = root / ".venv" / "bin" / "python"
+    venv_py.parent.mkdir(parents=True)
+    venv_py.write_text("#!/bin/sh\n", encoding="utf-8")
+    seen: list[Path] = []
+
+    def exists_fn(path: Path) -> bool:
+        seen.append(Path(path))
+        return Path(path) == venv_py
+
+    exe = resolve_runtime_python(root, exists_fn=exists_fn, fallback="/usr/bin/python3")
+    assert exe == str(venv_py)
+    assert seen == [venv_py]
+
+
+def test_resolve_runtime_python_fallback_ignores_cwd(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    root = tmp_path / "repo"
+    root.mkdir()
+    (tmp_path / ".venv" / "bin").mkdir(parents=True)
+    (tmp_path / ".venv" / "bin" / "python").write_text("#!/bin/sh\n", encoding="utf-8")
+    exe = resolve_runtime_python(
+        root,
+        exists_fn=lambda _p: False,
+        fallback="/opt/custom/python3",
+    )
+    assert exe == "/opt/custom/python3"
+    assert "CommandLineTools" not in exe
+    assert str(tmp_path / ".venv") not in exe
+
+
+def test_start_sh_absolute_path_help_from_other_cwd(tmp_path) -> None:
+    root = Path(__file__).resolve().parents[1]
+    proc = subprocess.run(
+        ["bash", str(root / "start.sh"), "--help"],
+        cwd=str(tmp_path),
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 0, out
+    assert "DRY_RUN" in proc.stdout
+    assert "start.sh" in proc.stdout
+    assert "BASH_SOURCE" in proc.stdout or "absolute" in proc.stdout.lower()
+    assert "CommandLineTools" in out
+
+
+def test_start_sh_absolute_path_check_config_from_other_cwd(tmp_path) -> None:
+    root = Path(__file__).resolve().parents[1]
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+    env["DRY_RUN"] = "true"
+    env["LIVE_TRADING"] = "false"
+    proc = subprocess.run(
+        ["bash", str(root / "start.sh"), "--check-config", "--no-screen"],
+        cwd=str(tmp_path),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 0, out
+    assert "project_root=" in out or "project_root:" in out
+    assert str(root) in out
+    assert "/user/spot/order" not in out
+
+
+def test_pytest_invocation_guard_from_home(tmp_path) -> None:
+    root = find_project_root()
+    msg = pytest_invocation_guard(tmp_path)
+    assert msg is not None
+    assert "run_tests.sh" in msg
+    assert "cd" in msg.lower()
+    assert pytest_invocation_guard(root) is None
+    assert pytest_invocation_guard(root / "tests") is None
+
+
+def test_pytest_plugin_from_foreign_cwd_prints_error(tmp_path) -> None:
+    root = Path(__file__).resolve().parents[1]
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+    env["PYTHONPATH"] = str(root / "src")
+    proc = subprocess.run(
+        [sys.executable, "-m", "pytest", "-p", "bitbank_bot.pytest_plugin", "-q"],
+        cwd=str(tmp_path),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    out = proc.stdout + proc.stderr
+    assert proc.returncode != 0, out
+    assert "run_tests.sh" in out
+    assert "cd" in out.lower()
+    assert "no tests ran" not in out.lower()
+
+
 def test_run_tests_sh_cds_to_repo(tmp_path) -> None:
     root = Path(__file__).resolve().parents[1]
     proc = subprocess.run(
@@ -452,7 +556,8 @@ def test_run_tests_sh_cds_to_repo(tmp_path) -> None:
     )
     out = proc.stdout + proc.stderr
     assert proc.returncode == 0, out
-    assert "test_trading_modes.py" in out or "collected" in out.lower() or proc.returncode == 0
+    assert "no tests ran" not in out.lower()
+    assert "test_launch.py" in out or "test_startup.py" in out or "test_trading_modes.py" in out
 
 
 def test_run_tests_sh_copy_outside_repo_says_cd_first(tmp_path) -> None:
@@ -487,3 +592,18 @@ def test_start_sh_self_test_collect_only() -> None:
     out = proc.stdout + proc.stderr
     assert proc.returncode == 0, out
     assert "/user/spot/order" not in out
+
+
+def test_start_sh_self_test_from_other_cwd(tmp_path) -> None:
+    root = Path(__file__).resolve().parents[1]
+    proc = subprocess.run(
+        ["bash", str(root / "start.sh"), "--self-test", "--collect-only", "-q"],
+        cwd=str(tmp_path),
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 0, out
+    assert "no tests ran" not in out.lower()
+    assert "test_launch.py" in out or "test_startup.py" in out or "collected" in out.lower()

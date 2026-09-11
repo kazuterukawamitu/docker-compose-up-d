@@ -27,6 +27,7 @@ not_in_repo() {
   echo "  git checkout $BOT_BRANCH" >&2
   echo "  git ls-files start.sh    # must print: start.sh" >&2
   echo "  bash ./start.sh" >&2
+  echo "Or from ~: bash ~/docker-compose-up-d/start.sh" >&2
   echo "If start.sh is missing, you are on main (or not in the clone)." >&2
   echo "Checkout $BOT_BRANCH or merge the PR; do not run tests from ~." >&2
   echo "pytest is not a launch step. Do not paste test commands at ~." >&2

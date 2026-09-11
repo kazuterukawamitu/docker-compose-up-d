@@ -6,9 +6,10 @@ refuses LIVE without dual-auth, and optionally restarts on crash with backoff.
 
 It does not place Bitbank orders. Child process is ``python -m bitbank_bot``.
 
-Do not paste this file or pytest output into zsh. From the repo root::
+Do not paste this file or pytest output into zsh. From any cwd::
 
     bash ./start.sh
+    bash /absolute/path/to/start.sh
 """
 
 from __future__ import annotations
@@ -54,12 +55,20 @@ NOT_IN_REPO_HINT = (
     "cd to the repo first, then run: bash ./start.sh\n"
     "Typical clone name: docker-compose-up-d\n"
     "  cd ~/docker-compose-up-d && bash ./start.sh\n"
+    "Or from ~ (no cd): bash ~/docker-compose-up-d/start.sh\n"
     "start.sh is on branch cursor/bitbank-closed-loop-f964 "
     "(git ls-files start.sh must print start.sh).\n"
     "If you are on main, checkout that branch or merge the PR.\n"
     "Do not paste pytest output (.... [ 40%] / 179 passed) into the terminal.\n"
-    "pytest is not a launch step. Tests: cd <repo> && bash scripts/run_tests.sh\n"
+    "Do not run CommandLineTools python3 on test_public.py / main.py from ~.\n"
+    "pytest is not a launch step. Tests: bash scripts/run_tests.sh "
+    "(absolute path is fine; do not run pytest from ~).\n"
     "If zsh shows a lone '>' prompt, press Ctrl-C, then cd to the repo."
+)
+PYTEST_HOME_HINT = (
+    "pytest found no Bitbank tests in this directory.\n"
+    "cd to the repo or use: bash scripts/run_tests.sh\n"
+    "Do not run pytest from ~. pytest is not how you start the bot."
 )
 
 
@@ -105,6 +114,50 @@ def looks_like_pytest_paste(argv: list[str]) -> bool:
         if stripped[:1].isdigit() and stripped.endswith("passed"):
             return True
     return False
+
+
+def resolve_runtime_python(
+    root: Path,
+    *,
+    venv_python: Path | None = None,
+    fallback: str | None = None,
+    exists_fn=None,
+) -> str:
+    """Prefer ``<root>/.venv/bin/python``. Never guess the venv from cwd.
+
+    ``exists_fn`` and ``venv_python`` are mockable. CommandLineTools
+    ``/usr/bin/python3`` is only the fallback when no venv interpreter exists.
+    """
+    candidate = Path(venv_python) if venv_python is not None else (root / ".venv" / "bin" / "python")
+    check = exists_fn or (lambda p: Path(p).is_file() and os.access(p, os.X_OK))
+    if check(candidate):
+        return str(candidate)
+    return fallback if fallback is not None else sys.executable
+
+
+def pytest_invocation_guard(
+    cwd: Path | None = None,
+    *,
+    module_file: Path | None = None,
+) -> str | None:
+    """Error text when pytest is started outside the clone (e.g. from ~)."""
+    here = (cwd or Path.cwd()).resolve()
+    if looks_like_repo(here):
+        return None
+    if (here / "tests").is_dir() and looks_like_repo(here.parent):
+        return None
+    seed = module_file if module_file is not None else Path(__file__)
+    try:
+        root = find_project_root(seed)
+    except LaunchError:
+        return PYTEST_HOME_HINT
+    if cwd_is_inside_repo(root, here):
+        return None
+    return (
+        f"pytest found no Bitbank tests in this directory (cwd={here}).\n"
+        f"cd {root} or use: bash {root}/scripts/run_tests.sh\n"
+        "Do not run pytest from ~. pytest is not how you start the bot."
+    )
 
 
 def find_project_root(start: Path | None = None) -> Path:
@@ -281,8 +334,8 @@ def classify_exit(rc: int) -> str:
     return "crash"
 
 
-def child_command(forwarded: list[str]) -> list[str]:
-    return [sys.executable, "-m", "bitbank_bot", *forwarded]
+def child_command(forwarded: list[str], *, python_exe: str | None = None) -> list[str]:
+    return [python_exe or sys.executable, "-m", "bitbank_bot", *forwarded]
 
 
 def run_self_test(root: Path, extra: list[str]) -> int:
@@ -304,14 +357,19 @@ def run_self_test(root: Path, extra: list[str]) -> int:
     return int(proc.returncode)
 
 
-def run_child(forwarded: list[str], *, root: Path) -> int:
+def run_child(forwarded: list[str], *, root: Path, python_exe: str | None = None) -> int:
     env = os.environ.copy()
     env["PYTHONUNBUFFERED"] = "1"
     env["PYTHONIOENCODING"] = "utf-8"
     src = str(root / "src")
     prev = env.get("PYTHONPATH", "")
     env["PYTHONPATH"] = src if not prev else src + os.pathsep + prev
-    proc = subprocess.run(child_command(forwarded), cwd=str(root), env=env)
+    exe = python_exe or resolve_runtime_python(root)
+    proc = subprocess.run(
+        child_command(forwarded, python_exe=exe),
+        cwd=str(root),
+        env=env,
+    )
     return int(proc.returncode)
 
 
@@ -373,6 +431,7 @@ def _usage_epilog() -> str:
     return (
         "The only supported start from a Mac iTerm prompt:\n"
         "  cd <repo> && bash ./start.sh\n"
+        "  bash /absolute/path/to/start.sh\n"
         "  bash ./start.sh --help\n"
         "  bash ./start.sh --once --synthetic --skip-lock --no-screen\n"
         "  bash ./start.sh --check-config\n"
@@ -384,8 +443,10 @@ def _usage_epilog() -> str:
         "Optional home-safe wrapper: bash scripts/install_launch_alias.sh\n"
         "If zsh says 'command not found: ....' you pasted pytest dots; press Ctrl-C "
         "if stuck at '>', then cd to the repo and run bash ./start.sh.\n"
-        "pytest is not a launch step. Developer tests (repo only): "
-        "bash scripts/run_tests.sh   or   bash ./start.sh --self-test\n"
+        "pytest is not a launch step. Developer tests: "
+        "bash scripts/run_tests.sh   or   bash ./start.sh --self-test "
+        "(absolute path is fine; do not run pytest from ~).\n"
+        "Do not point CommandLineTools python3 at test_public.py / main.py.\n"
         "Do not paste pytest output or this Python source into the terminal.\n"
     )
 
@@ -450,7 +511,7 @@ def main(argv: list[str] | None = None) -> int:
         diagnostics_lines(
             cfg,
             root=root,
-            python_exe=sys.executable,
+            python_exe=resolve_runtime_python(root),
             lock_text=lock_status(Path(cfg.lock_path)),
             kill_text=kill_status(Path(cfg.kill_switch_path)),
             extra_note=note if mode != MODE_DRY_RUN else "",

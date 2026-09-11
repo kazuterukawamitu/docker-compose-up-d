@@ -20,6 +20,14 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
+if not (SRC / "bitbank_bot" / "launch.py").is_file() and not (ROOT / "run.py").is_file():
+    sys.stderr.write(
+        "main.py is not inside the Bitbank clone.\n"
+        "cd to the repo or run: bash /path/to/start.sh\n"
+        "Do not point CommandLineTools python3 at test_public.py / a copy of main.py.\n"
+    )
+    raise SystemExit(2)
+
 
 def _stdlib() -> int:
     path = ROOT / "run.py"

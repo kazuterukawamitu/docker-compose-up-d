@@ -9,9 +9,18 @@ HOLD for 15 minutes while market data and strategy are healthy is `LONG_WAIT`, n
 
 ## Start (this is the program)
 
-The only command to launch the enhanced program. **You MUST `cd` into the
-clone first.** Your Mac home `~` is not the repo. `start.sh` exists only
-inside the checkout, on branch `cursor/bitbank-closed-loop-f964` (this PR).
+### Execute on a Mac
+
+Apple `/usr/bin/python3` (Xcode CommandLineTools) must not be aimed at a
+random file while your cwd is `~` — that is
+`can't open file ... [Errno 2]` (`python3 test_public.py`,
+`python3 main.py`, `/Users/.../test_public.py`). `pytest` from `~` is
+`no tests ran`.
+
+`start.sh` always `cd`s to the repo from its own path (`BASH_SOURCE`) and
+runs `.venv/bin/python -m bitbank_bot.launch` (it creates `.venv` first).
+Either `cd` into the clone **or** call `start.sh` by absolute path from
+home. Branch `cursor/bitbank-closed-loop-f964`:
 
 ```bash
 cd ~/docker-compose-up-d
@@ -19,10 +28,14 @@ git fetch origin cursor/bitbank-closed-loop-f964
 git checkout cursor/bitbank-closed-loop-f964
 git ls-files start.sh    # must print: start.sh
 bash ./start.sh
+
+# same program from ~ or any cwd (no cd required):
+bash ~/docker-compose-up-d/start.sh
 ```
 
 `bash ./start.sh --help` prints the same instructions. A thin wrapper is
-`bash scripts/run_bot.sh` (also refuses unless cwd is this repo).
+`bash scripts/run_bot.sh` (refuses unless cwd is this repo). Tests:
+`bash ~/docker-compose-up-d/scripts/run_tests.sh` (not `pytest` from `~`).
 
 ### `bash: ./start.sh: No such file or directory`
 
@@ -38,6 +51,7 @@ Fix:
 cd ~/docker-compose-up-d
 git checkout cursor/bitbank-closed-loop-f964
 bash ./start.sh
+# or: bash ~/docker-compose-up-d/start.sh
 ```
 
 Optional: install a **home-safe finder** so `cd ~ && bash ./start.sh` prints
@@ -51,8 +65,8 @@ bash scripts/install_launch_alias.sh
 That copies `scripts/home_start.sh` to `~/start.sh` and adds a `bitbank-start`
 function. The home copy does **not** launch the bot and does **not** run tests.
 
-`bash start.sh` from `~` with no finder on `PATH` is expected to fail — there
-is no global `start.sh`.
+`bash start.sh` or `./start.sh` from `~` with no finder on `PATH` is expected
+to fail — there is no global `start.sh`. Use the absolute path shown above.
 
 One-cycle dry health check (no orders):
 
@@ -156,15 +170,15 @@ Do **not** paste a pytest command into iTerm at `~`. That is how
 `src` goes missing and a pytest line "appears" as if it were a start step.
 Launchers never run the test suite unless you pass `--self-test`.
 
-From the repo only:
+From any cwd (the script `cd`s to the repo; do not run `pytest` from `~`):
 
 ```bash
 cd ~/docker-compose-up-d
 bash scripts/run_tests.sh
+# or: bash ~/docker-compose-up-d/scripts/run_tests.sh
 ```
 
-or `bash ./start.sh --self-test`. Same thing: the script `cd`s to the repo
-root before it touches pytest. Do not paste the dots or `N passed` line
+or `bash ./start.sh --self-test`. Do not paste the dots or `N passed` line
 back into zsh.
 
 Read-only execution check (never places an order):

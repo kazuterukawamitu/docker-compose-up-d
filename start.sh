@@ -1,16 +1,20 @@
 #!/usr/bin/env bash
 # Enhanced Bitbank BTC/JPY launcher (Mac iTerm + Sakura VPS).
 #
-# The only command to run after you are in this repo:
+# Always cds to the repo that contains THIS file (BASH_SOURCE), never $PWD.
+# From the clone, or from ~ via absolute path:
 #   cd <repo> && bash ./start.sh
+#   bash /absolute/path/to/start.sh
 #   bash ./start.sh --help
 #
 # First-time clone (paste this ONE line, not pytest output):
 #   bash -lc 'REPO="$HOME/docker-compose-up-d"; set -euo pipefail; if [ ! -d "$REPO/.git" ]; then git clone https://github.com/kazuterukawamitu/docker-compose-up-d.git "$REPO"; fi; cd "$REPO"; git fetch origin cursor/bitbank-closed-loop-f964; git checkout -B cursor/bitbank-closed-loop-f964 origin/cursor/bitbank-closed-loop-f964; exec bash ./start.sh --screen'
 #
 # Locates this repo (no hardcoded /Users/... path), creates .venv if needed,
+# prefers .venv/bin/python (never CommandLineTools python when a venv exists),
 # loads .env without printing secrets, then starts the existing bot entrypoint.
 # Do not paste python3 main.py. Do not paste pytest dots. Do not use bangs.
+# Do not run /usr/bin/python3 on a random file (test_public.py, ~/main.py).
 
 if [ -z "${BASH_VERSION:-}" ]; then
   exec /usr/bin/env bash "$0" "$@"
@@ -24,12 +28,15 @@ export PYTHONIOENCODING=utf-8
 
 usage() {
   cat <<'EOF'
-Usage: cd <repo> && bash ./start.sh [options]
+Usage: bash /path/to/start.sh [options]
+       cd <repo> && bash ./start.sh [options]
 
 Enhanced launcher for the existing Bitbank BTC/JPY bot (DRY_RUN by default).
-This is the program-launching program. From the repo root only:
+This is the program-launching program. It cds to the repo from BASH_SOURCE
+(so cwd may be ~). Either cd, or pass the absolute path:
 
   bash ./start.sh
+  bash ~/docker-compose-up-d/start.sh
   bash ./start.sh --help
   bash ./start.sh --once --synthetic --skip-lock --no-screen
   bash ./start.sh --check-config
@@ -38,13 +45,14 @@ This is the program-launching program. From the repo root only:
   bash ./start.sh --self-test
 
 If bash says: ./start.sh: No such file or directory
-  You are not in the clone (often you are in ~). This file lives in the repo
-  on branch cursor/bitbank-closed-loop-f964. Confirm:
-    git ls-files start.sh
-  Then:
+  You ran ./start.sh from ~ (relative path). Use the absolute path or cd:
+    bash ~/docker-compose-up-d/start.sh
     cd ~/docker-compose-up-d && bash ./start.sh
+  Confirm branch cursor/bitbank-closed-loop-f964:
+    git ls-files start.sh
   Optional home-safe finder (so cd ~ && bash ./start.sh prints this hint):
     bash scripts/install_launch_alias.sh
+  Do not use CommandLineTools python3 on test_public.py / main.py from ~.
 
 Locates the repo from this script (not a hardcoded Mac path), uses .venv,
 loads .env without printing secrets, prints SET/UNSET diagnostics
@@ -62,9 +70,11 @@ If zsh says: command not found: ....
     cd <repo> && bash ./start.sh
   Do not paste pytest output or Python snippets into the terminal.
 
-pytest is not a launch step. Developer tests (from the repo only):
+pytest is not a launch step. Developer tests (script cds to the repo):
   bash scripts/run_tests.sh
+  bash /path/to/scripts/run_tests.sh
   bash ./start.sh --self-test
+  Do not run pytest from ~ (that is "no tests ran").
 EOF
 }
 
@@ -74,6 +84,7 @@ suggest_clones() {
   echo "  git checkout cursor/bitbank-closed-loop-f964" >&2
   echo "  git ls-files start.sh    # must print: start.sh" >&2
   echo "  bash ./start.sh" >&2
+  echo "Or from ~: bash ~/docker-compose-up-d/start.sh" >&2
   echo "If start.sh is missing, you are on main or not in the clone." >&2
   local names="docker-compose-up-d docker-compose-up-d.git bitbank-bot"
   local b n p
@@ -196,7 +207,19 @@ pick_python() {
   return 1
 }
 
-PY="$(pick_python)"
+# Prefer $ROOT/.venv/bin/python. Do not run the bot with
+# /Library/Developer/CommandLineTools/usr/bin/python3 when a venv exists.
+# Never exec a cwd-relative main.py / test_public.py (Errno 2 on Mac).
+VENV="$ROOT/.venv"
+VPY="$VENV/bin/python"
+VPIP="$VENV/bin/pip"
+
+if [[ -x "$VPY" ]]; then
+  PY="$VPY"
+else
+  PY="$(pick_python)"
+fi
+
 PY_MAJ="$("$PY" -c 'import sys; print(sys.version_info.major)')"
 PY_MIN="$("$PY" -c 'import sys; print(sys.version_info.minor)')"
 if [[ "$PY_MAJ" -lt 3 || ( "$PY_MAJ" -eq 3 && "$PY_MIN" -lt 9 ) ]]; then
@@ -207,10 +230,6 @@ fi
 if [[ "$PY_MAJ" -eq 3 && "$PY_MIN" -lt 12 ]]; then
   echo "note: $PY is $($PY -V 2>&1); 3.12 is preferred, continuing with this interpreter." >&2
 fi
-
-VENV="$ROOT/.venv"
-VPY="$VENV/bin/python"
-VPIP="$VENV/bin/pip"
 
 if [[ ! -x "$VPY" ]]; then
   echo "creating venv at $VENV with $PY"
@@ -280,6 +299,12 @@ done
 
 if ! "$VPY" -c "import dotenv, httpx" >/dev/null 2>&1; then
   echo "pip packages missing; starting stdlib DRY_RUN (python3 run.py, no orders)"
+  if [[ ! -f "$ROOT/run.py" ]]; then
+    echo "cannot start: missing $ROOT/run.py" >&2
+    echo "Do not run CommandLineTools python3 on a file under ~ (test_public.py / main.py)." >&2
+    not_in_repo
+    exit 2
+  fi
   if [[ "$oneshot" -eq 1 || "$want_stdlib_loop" -eq 0 ]]; then
     exec "$PY" "$ROOT/run.py" "$@"
   fi
@@ -363,4 +388,10 @@ echo "lock=$ROOT/data/bot.lock kill=$ROOT/data/KILL (create KILL to halt new ord
 
 # Default (no extra args): continuous loop + trading screen on a TTY.
 # Do not pass --once here. Crash backoff lives in bitbank_bot.launch.
+if [[ ! -f "$ROOT/src/bitbank_bot/launch.py" || ! -f "$ROOT/main.py" ]]; then
+  echo "cannot start: missing $ROOT/src/bitbank_bot/launch.py or $ROOT/main.py" >&2
+  echo "Do not run CommandLineTools python3 on a file under ~ (test_public.py / main.py)." >&2
+  not_in_repo
+  exit 2
+fi
 exec "$VPY" -m bitbank_bot.launch "${SUPERVISE_ARGS[@]}" "${SCREEN_ARGS[@]}" "$@"
