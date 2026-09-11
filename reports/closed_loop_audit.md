@@ -163,3 +163,42 @@ repo), iTerm/zsh host integration, live orders from this VM.
 BUY1 +3%, BUY2 +5% or +8% golden, BUY3 +4%, BUY4 +5%, SELL1–4, TP, HTF 4h+1d
 BUY block. Candidates *not* added this pass: buy-the-dip extras, scoring,
 multi-exchange.
+
+---
+
+## Second pass (full-program review)
+
+Review requested after two incomplete pasted diffs. `ReconcileReport` already
+had `bitbank_btc`, `local_btc`, `open_orders`, and `mismatches`. The pasted
+`market_data.py` hunk had no real change. This pass inspected the existing
+program and fixed confirmed bugs only.
+
+### Bugs found and fixed
+
+| Bug | Severity | Fix |
+| --- | --- | --- |
+| `if active:` treated `{"orders": []}` as open orders; `id → order` maps crashed `.get` | High | `coerce_active_orders()` in RestClient / OrderExecutor / reconcile. Empty dict → no orders. Unknown type raises (refuse live POST). |
+| BTC mismatch only when `local > 0` (flat local + Bitbank BTC ignored) | High | Flag when `abs(bitbank_btc - local_btc) > min_amount_btc`. Do not overwrite `state.position` from free BTC. |
+| Engine discarded `ReconcileReport` | High | `_apply_reconcile_report`: set `last_block_reason`, clear `pending_missing`, poll `pending_filled_unapplied`. |
+| Pending FULLY_FILLED / Bitbank `CANCELED_UNFILLED` never flagged | High | `pending_filled_unapplied` vs `pending_missing` (Bitbank statuses). |
+| Candle raise used a redundant `not any(...)` on the same list | Medium | `if not candles and last_error is not None: raise last_error`. |
+| Naive / UTC `now` produced wrong YYYYMMDD keys; `lookback_days=0` skipped today | High for 5min | `as_jst()`; `days = max(1, lookback_days)`. |
+| REST `data` can be `None` / non-dict; `.get` crashed | Medium | `_as_dict`; JSON payload must be a dict; candlestick first row guarded. |
+| ExecutionGate reason `kill_switch_clear` vs risk `kill_switch` | Low | Map failed check to `kill_switch`. |
+| `_poll_pending` swallowed balance errors | Low | Log exception type; still use ZERO/ZERO. |
+
+Dataclass fields are populated and consumed (engine + RECONCILE logs). No unused stubs.
+
+### Files changed this pass
+
+**Modified:** `rest_client.py`, `orders.py`, `reconciliation.py`, `engine.py`,
+`market_data.py`, `execution_gate.py`, `tests/test_reconciliation.py`,
+`tests/test_orders.py`, `tests/test_candle_fetch.py`,
+`tests/test_execution_gate.py`, `tests/test_engine.py`,
+`tests/test_rest_retry.py`, `reports/closed_loop_audit.md`.
+
+**Added / removed:** none.
+
+### Test results (this pass)
+
+Recorded after `compileall` + `pytest`. Public GET only; no live POST.
