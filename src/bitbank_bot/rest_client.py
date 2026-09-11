@@ -49,6 +49,42 @@ def is_auth_error(exc: BitbankAPIError) -> bool:
     return "api key" in msg or "secret missing" in msg
 
 
+def _as_dict(data: Any, what: str) -> dict[str, Any]:
+    if not isinstance(data, dict):
+        raise BitbankAPIError(f"{what}_unreadable")
+    return data
+
+
+def coerce_active_orders(payload: Any) -> list[dict[str, Any]]:
+    """Normalize Bitbank active-order payloads to a list of order dicts.
+
+    Empty list / empty dict / missing ``orders`` → no open orders.
+    A mapping of order_id → order becomes the values.
+    Unknown types raise so callers do not treat an unreadable book as empty.
+    """
+    if payload is None:
+        return []
+    if isinstance(payload, list):
+        out: list[dict[str, Any]] = []
+        for row in payload:
+            if row is None:
+                continue
+            if not isinstance(row, dict):
+                raise BitbankAPIError("active_orders_unreadable")
+            out.append(row)
+        return out
+    if isinstance(payload, dict):
+        if "orders" in payload:
+            return coerce_active_orders(payload.get("orders"))
+        if not payload:
+            return []
+        values = list(payload.values())
+        if values and all(isinstance(value, dict) for value in values):
+            return values
+        raise BitbankAPIError("active_orders_unreadable")
+    raise BitbankAPIError("active_orders_unreadable")
+
+
 def dump_json(obj: dict[str, Any]) -> str:
     return json.dumps(obj, separators=JSON_SEPARATORS, ensure_ascii=False)
 
@@ -209,6 +245,13 @@ class RestClient:
                     endpoint=endpoint,
                     retry_count=attempt,
                 ) from exc
+            if not isinstance(payload, dict):
+                raise BitbankAPIError(
+                    "invalid json payload",
+                    body=payload,
+                    endpoint=endpoint,
+                    retry_count=attempt,
+                )
             if payload.get("success") != 1:
                 data = payload.get("data") or {}
                 code = data.get("code") if isinstance(data, dict) else None
@@ -236,25 +279,31 @@ class RestClient:
         return self._request("GET", url, kind="query", public=True)
 
     def get_ticker(self, pair: str) -> dict[str, Any]:
-        data = self.public_get(f"/{pair}/ticker")
+        data = _as_dict(self.public_get(f"/{pair}/ticker"), "ticker")
         slog("PUBLIC_API", "ticker", pair=pair, last=data.get("last"))
         return data
 
     def get_candlestick(self, pair: str, candle_type: str, date_key: str) -> list[list[Any]]:
-        data = self.public_get(f"/{pair}/candlestick/{candle_type}/{date_key}")
+        data = _as_dict(
+            self.public_get(f"/{pair}/candlestick/{candle_type}/{date_key}"),
+            "candlestick",
+        )
         sticks = data.get("candlestick") or []
         if not sticks:
             return []
-        return list(sticks[0].get("ohlcv") or [])
+        first = sticks[0]
+        if not isinstance(first, dict):
+            return []
+        return list(first.get("ohlcv") or [])
 
     def get_spot_status(self, pair: str | None = None) -> dict[str, Any] | None:
         url = self.private_url + "/spot/status"
-        data = self._request("GET", url, kind="query", public=True)
+        data = _as_dict(self._request("GET", url, kind="query", public=True), "spot_status")
         statuses = data.get("statuses") or []
         if pair is None:
             return data
         for row in statuses:
-            if row.get("pair") == pair:
+            if isinstance(row, dict) and row.get("pair") == pair:
                 return row
         return None
 
@@ -309,26 +358,32 @@ class RestClient:
         )
 
     def get_assets(self) -> dict[str, Any]:
-        data = self.private_get("/user/assets")
+        data = _as_dict(self.private_get("/user/assets"), "assets")
         slog("ASSET", "assets fetched", count=len(data.get("assets") or []))
         return data
 
     def free_amount(self, asset: str) -> Decimal:
         data = self.get_assets()
         for row in data.get("assets") or []:
-            if row.get("asset") == asset:
+            if isinstance(row, dict) and row.get("asset") == asset:
                 return D(row.get("free_amount") or 0)
         return D(0)
 
     def get_order(self, pair: str, order_id: str) -> dict[str, Any]:
-        return self.private_get(
-            "/user/spot/order",
-            {"pair": pair, "order_id": order_id},
+        return _as_dict(
+            self.private_get(
+                "/user/spot/order",
+                {"pair": pair, "order_id": order_id},
+            ),
+            "order",
         )
 
     def get_trade_history(self, pair: str) -> list[dict[str, Any]]:
-        data = self.private_get("/user/spot/trade_history", {"pair": pair})
-        return list(data.get("trades") or [])
+        data = _as_dict(
+            self.private_get("/user/spot/trade_history", {"pair": pair}),
+            "trade_history",
+        )
+        return [row for row in (data.get("trades") or []) if isinstance(row, dict)]
 
     def create_order(
         self,
@@ -353,8 +408,14 @@ class RestClient:
             body["price"] = price
         if post_only is not None:
             body["post_only"] = post_only
-        return self.private_post("/user/spot/order", body, update=True, retry=False)
+        return _as_dict(
+            self.private_post("/user/spot/order", body, update=True, retry=False),
+            "order",
+        )
 
     def get_active_orders(self, pair: str) -> list[dict[str, Any]]:
-        data = self.private_get("/user/spot/active_orders", {"pair": pair})
-        return list(data.get("orders") or [])
+        data = _as_dict(
+            self.private_get("/user/spot/active_orders", {"pair": pair}),
+            "active_orders",
+        )
+        return coerce_active_orders(data.get("orders"))

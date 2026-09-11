@@ -10,6 +10,7 @@ from bitbank_bot.amounts import AmountPlan
 from bitbank_bot.config import Config
 from bitbank_bot.logging_setup import slog
 from bitbank_bot.money import D, ZERO, ensure_decimal, quantize_price
+from bitbank_bot.rest_client import BitbankAPIError, coerce_active_orders
 from bitbank_bot.strategy import Signal
 
 
@@ -62,7 +63,7 @@ class OrderExecutor:
         if self.client is None:
             return []
         try:
-            return self.client.get_active_orders(self.cfg.pair)
+            return coerce_active_orders(self.client.get_active_orders(self.cfg.pair))
         except Exception as exc:
             slog("ERROR", "active_orders failed", error=type(exc).__name__)
             raise
@@ -74,6 +75,9 @@ class OrderExecutor:
             data = self.client.get_order(self.cfg.pair, order_id)
         except Exception as exc:
             slog("ERROR", "get_order failed", error=type(exc).__name__, order_id=order_id)
+            return None
+        if not isinstance(data, dict):
+            slog("ERROR", "get_order returned non-object", order_id=order_id)
             return None
         slog("ORDER_STATUS", "refreshed from GET /user/spot/order", order_id=order_id)
         return data
@@ -233,6 +237,12 @@ class OrderExecutor:
             if recovered is not None:
                 return recovered
             raise
+        if not isinstance(raw, dict):
+            slog("ERROR", "create_order returned non-object; not retrying POST")
+            recovered = self._recover_unconfirmed_submit(plan)
+            if recovered is not None:
+                return recovered
+            raise BitbankAPIError("create_order_unreadable")
         order_id = str(raw.get("order_id") or "")
         status = str(raw.get("status") or "")
         slog("ORDER_ACCEPTED", "order accepted", order_id=order_id, status=status)
