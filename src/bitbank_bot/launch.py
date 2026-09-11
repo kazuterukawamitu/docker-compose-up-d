@@ -5,6 +5,10 @@ root, loads ``.env`` without printing secrets, prints SET/UNSET diagnostics,
 refuses LIVE without dual-auth, and optionally restarts on crash with backoff.
 
 It does not place Bitbank orders. Child process is ``python -m bitbank_bot``.
+
+Do not paste this file or pytest output into zsh. From the repo root::
+
+    bash ./start.sh
 """
 
 from __future__ import annotations
@@ -36,6 +40,13 @@ CLEAN_EXIT_CODES = frozenset({0, 130, 143, -2, -15})
 INITIAL_BACKOFF_SEC = 2.0
 MAX_BACKOFF_SEC = 30.0
 LOG_ROTATION_HINT = "logs/bot.log rotated at 5MB x 5; do not dump huge stdout"
+# ASCII-only quotes in this file. U+201C/U+201D in a paste are not from this repo.
+SMART_QUOTES = frozenset("\u201c\u201d\u2018\u2019")
+NOT_IN_REPO_HINT = (
+    "cd to the repo first, then run: bash ./start.sh\n"
+    "Do not paste pytest output (.... [ 40%] / 179 passed) into the terminal.\n"
+    "If zsh shows a lone '>' prompt, press Ctrl-C, then cd to the repo."
+)
 
 
 class LaunchError(RuntimeError):
@@ -46,6 +57,40 @@ class LaunchError(RuntimeError):
 class LaunchOpts:
     supervise: bool | None
     forwarded: list[str]
+
+
+def looks_like_repo(path: Path) -> bool:
+    """True when path is the Bitbank bot checkout (not $HOME)."""
+    resolved = path.resolve()
+    return (resolved / "src" / "bitbank_bot" / "__init__.py").is_file() and (
+        resolved / "run.py"
+    ).is_file()
+
+
+def cwd_is_inside_repo(root: Path, cwd: Path | None = None) -> bool:
+    here = (cwd or Path.cwd()).resolve()
+    try:
+        here.relative_to(root.resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def looks_like_pytest_paste(argv: list[str]) -> bool:
+    """Detect pytest progress (.... [ 40%] / 179 passed) pasted as argv."""
+    for item in argv:
+        stripped = item.strip()
+        if len(stripped) >= 2 and set(stripped) <= {".", " "}:
+            return True
+        if stripped.startswith("...."):
+            return True
+        if stripped.startswith("[") and stripped.endswith("]") and "%" in stripped:
+            return True
+        if stripped in {"passed", "failed", "error"}:
+            return True
+        if stripped[:1].isdigit() and stripped.endswith("passed"):
+            return True
+    return False
 
 
 def find_project_root(start: Path | None = None) -> Path:
@@ -63,15 +108,14 @@ def find_project_root(start: Path | None = None) -> Path:
             if resolved in seen:
                 break
             seen.add(resolved)
-            if (resolved / "src" / "bitbank_bot" / "__init__.py").is_file() and (
-                resolved / "run.py"
-            ).is_file():
+            if looks_like_repo(resolved):
                 return resolved
             if resolved.parent == resolved:
                 break
             cur = resolved.parent
     raise LaunchError(
-        "cannot locate project root (expected src/bitbank_bot and run.py next to start.sh)"
+        "cannot locate project root (expected src/bitbank_bot and run.py next to start.sh).\n"
+        + NOT_IN_REPO_HINT
     )
 
 
@@ -294,26 +338,47 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _usage_epilog() -> str:
     return (
-        "Examples:\n"
-        "  bash ./start.sh\n"
+        "The only supported start from a Mac iTerm prompt:\n"
+        "  cd <repo> && bash ./start.sh\n"
+        "  bash ./start.sh --help\n"
         "  bash ./start.sh --once --synthetic --skip-lock --no-screen\n"
-        "  PYTHONPATH=src python3 -m bitbank_bot.launch --check-config\n"
+        "  bash ./start.sh --check-config\n"
+        "RATE_MODE and RECONCILE_EVERY_CYCLES come from .env (printed SET/UNSET, no secrets).\n"
         "LIVE requires TRADING_MODE=LIVE and "
         f"LIVE_TRADING_CONFIRM={LIVE_CONFIRM_PHRASE}. Default is DRY_RUN.\n"
+        "If zsh says 'command not found: ....' you pasted pytest dots; press Ctrl-C "
+        "if stuck at '>', then cd to the repo and run bash ./start.sh.\n"
+        "Do not paste pytest output or this Python source into the terminal.\n"
     )
 
 
 def main(argv: list[str] | None = None) -> int:
+    raw = list(sys.argv[1:] if argv is None else argv)
     opts = split_launch_argv(argv)
-    if any(item in {"-h", "--help"} for item in (argv if argv is not None else sys.argv[1:])):
+    if any(item in {"-h", "--help"} for item in raw):
         build_parser().print_help()
         sys.stdout.write("\n" + _usage_epilog())
         sys.stdout.flush()
         return 0
+    if looks_like_pytest_paste(raw):
+        sys.stderr.write(
+            "launcher: that looks like pytest output pasted into the shell, "
+            "not a launcher command.\n"
+        )
+        sys.stderr.write(NOT_IN_REPO_HINT + "\n")
+        return 2
     try:
         root = find_project_root()
     except LaunchError as exc:
         sys.stderr.write(f"launcher: {exc}\n")
+        return 2
+    if not cwd_is_inside_repo(root):
+        sys.stderr.write(
+            f"launcher: current directory is not the Bitbank bot repo (cwd={Path.cwd()}).\n"
+            f"  repo is at: {root}\n"
+            f"  cd {root} && bash ./start.sh\n"
+        )
+        sys.stderr.write(NOT_IN_REPO_HINT + "\n")
         return 2
     os.chdir(root)
     ensure_src_on_path(root)

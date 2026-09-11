@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Repo-root launcher. Prefers the enhanced package launcher; falls back to stdlib run.py.
 
-    bash ./start.sh
+    cd <repo> && bash ./start.sh
     python3 main.py
     python3 run.py
 
 All stay DRY_RUN unless dual-auth LIVE is set in .env. None of these place a
-Bitbank order from defaults.
+Bitbank order from defaults. Do not paste this file or pytest output into zsh.
 """
 
 from __future__ import annotations

@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
 # Enhanced Bitbank BTC/JPY launcher (Mac iTerm + Sakura VPS).
 #
-# Paste this ONE line in iTerm (zsh is fine; this wraps bash):
+# The only command to run after you are in this repo:
+#   cd <repo> && bash ./start.sh
+#   bash ./start.sh --help
+#
+# First-time clone (paste this ONE line, not pytest output):
 #   bash -lc 'REPO="$HOME/docker-compose-up-d"; set -euo pipefail; if [ ! -d "$REPO/.git" ]; then git clone https://github.com/kazuterukawamitu/docker-compose-up-d.git "$REPO"; fi; cd "$REPO"; git fetch origin cursor/bitbank-closed-loop-f964; git checkout -B cursor/bitbank-closed-loop-f964 origin/cursor/bitbank-closed-loop-f964; exec bash ./start.sh --screen'
 #
 # Locates this repo (no hardcoded /Users/... path), creates .venv if needed,
 # loads .env without printing secrets, then starts the existing bot entrypoint.
-# Do not paste python3 main.py. Do not use history-expansion bangs.
+# Do not paste python3 main.py. Do not paste pytest dots. Do not use bangs.
 
 if [ -z "${BASH_VERSION:-}" ]; then
   exec /usr/bin/env bash "$0" "$@"
@@ -20,25 +24,40 @@ export PYTHONIOENCODING=utf-8
 
 usage() {
   cat <<'EOF'
-Usage: bash ./start.sh [options]
+Usage: cd <repo> && bash ./start.sh [options]
 
 Enhanced launcher for the existing Bitbank BTC/JPY bot (DRY_RUN by default).
+This is the program-launching program. From the repo root only:
 
   bash ./start.sh
+  bash ./start.sh --help
   bash ./start.sh --once --synthetic --skip-lock --no-screen
   bash ./start.sh --check-config
   bash ./start.sh --no-supervise
   bash ./start.sh --supervise
 
 Locates the repo from this script (not a hardcoded Mac path), uses .venv,
-loads .env without printing secrets, prints SET/UNSET diagnostics, and
-restarts on crash with backoff (not on config/lock failures). systemd
-already restarts: pass --no-supervise (or run python -m bitbank_bot).
+loads .env without printing secrets, prints SET/UNSET diagnostics
+(RATE_MODE, RECONCILE_EVERY_CYCLES, keys SET/UNSET), and restarts on crash
+with backoff (not on config/lock failures). systemd already restarts:
+pass --no-supervise (or run python -m bitbank_bot).
 
 LIVE requires TRADING_MODE=LIVE and LIVE_TRADING_CONFIRM=YES_I_ACCEPT_REAL_MONEY_RISK.
 JSON logs: logs/bot.log (rotated 5MB x 5). Ctrl-C stops. data/KILL halts new orders.
 Other flags pass through to python -m bitbank_bot.
+
+If zsh says: command not found: ....
+  You pasted pytest progress (.... [ 40%] / 179 passed), not a crash.
+  Press Ctrl-C to leave a stuck '>' prompt, then:
+    cd <repo> && bash ./start.sh
+  Do not paste pytest output or Python snippets into the terminal.
 EOF
+}
+
+not_in_repo() {
+  echo "cd to the repo first, then run: bash ./start.sh" >&2
+  echo "Do not paste pytest output (.... [ 40%] / 179 passed) into the terminal." >&2
+  echo "If zsh shows a lone '>' prompt, press Ctrl-C, then cd to the repo." >&2
 }
 
 resolve_root() {
@@ -55,28 +74,43 @@ resolve_root() {
 ROOT="$(resolve_root)"
 cd "$ROOT"
 
+home_now="$(cd "${HOME:-/}" && pwd -P 2>/dev/null || true)"
+if [[ -n "$home_now" && "$ROOT" == "$home_now" ]]; then
+  echo "start.sh must live inside the cloned repo, not your home directory." >&2
+  not_in_repo
+  exit 2
+fi
+
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   usage
   exit 0
 fi
 
+for a in "$@"; do
+  if [[ "$a" =~ ^\.+$ ]] || [[ "$a" =~ ^\[[[:space:]]*[0-9]+%\]$ ]] || [[ "$a" == "passed" || "$a" == "failed" ]]; then
+    echo "That looks like pytest output pasted into the shell, not a launcher command." >&2
+    not_in_repo
+    exit 2
+  fi
+done
+
 BOT_BRANCH="cursor/bitbank-closed-loop-f964"
 
 ensure_bot_source() {
-  if [[ -f "$ROOT/src/bitbank_bot/__init__.py" && -f "$ROOT/main.py" ]]; then
+  if [[ -f "$ROOT/src/bitbank_bot/__init__.py" && -f "$ROOT/src/bitbank_bot/launch.py" && -f "$ROOT/main.py" ]]; then
     return 0
   fi
-  echo "bot source not found at $ROOT (this clone is probably still on main / wiki dump)" >&2
+  echo "bot source not found at $ROOT (need src/bitbank_bot/launch.py next to start.sh)" >&2
   if [[ ! -d "$ROOT/.git" ]]; then
-    echo "Paste this ONE line in iTerm:" >&2
-    echo "  bash -lc 'git clone https://github.com/kazuterukawamitu/docker-compose-up-d.git \"\$HOME/docker-compose-up-d\" && bash \"\$HOME/docker-compose-up-d/start.sh\" --screen'" >&2
+    not_in_repo
     exit 2
   fi
   echo "fetching $BOT_BRANCH so the trading screen can start" >&2
   git fetch origin "$BOT_BRANCH"
   git checkout -B "$BOT_BRANCH" "origin/$BOT_BRANCH"
-  if [[ ! -f "$ROOT/src/bitbank_bot/__init__.py" || ! -f "$ROOT/main.py" ]]; then
+  if [[ ! -f "$ROOT/src/bitbank_bot/__init__.py" || ! -f "$ROOT/src/bitbank_bot/launch.py" || ! -f "$ROOT/main.py" ]]; then
     echo "still no bitbank_bot after checkout; branch may not be fetched" >&2
+    not_in_repo
     exit 2
   fi
 }
