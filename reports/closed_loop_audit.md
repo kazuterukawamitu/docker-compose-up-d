@@ -82,8 +82,10 @@ outcomes; they were easy to confuse with a broken order loop.
 
 ## F. Test results
 
-See CI / local pytest on this branch (compileall + pytest). Cloud VM tests are
-dry-run / mocked / public API only. No live Bitbank orders from this VM.
+`python3 -m compileall` PASS. `PYTHONPATH=src pytest` **136 passed**.
+Public Bitbank `btc_jpy` ticker + `5min` YYYYMMDD (today and yesterday, JST)
+succeeded from this VM. No private order POST. Cloud tests stay dry-run /
+mocked / public API only.
 
 ## G. Remaining risks
 
