@@ -19,7 +19,7 @@ from bitbank_bot.launch import (
     looks_like_pytest_paste,
     looks_like_repo,
     main,
-    pytest_invocation_guard,
+    guard_pytest_cwd,
     resolve_runtime_python,
     should_supervise,
     split_launch_argv,
@@ -225,6 +225,8 @@ def test_launch_py_has_no_smart_quotes_and_parses() -> None:
     tree = ast.parse(text)
     assert any(getattr(node, "name", "") == "evaluate_live_guard" for node in ast.walk(tree))
     assert any(getattr(node, "name", "") == "apply_cli_dry_run" for node in ast.walk(tree))
+    assert any(getattr(node, "name", "") == "resolve_runtime_python" for node in ast.walk(tree))
+    assert any(getattr(node, "name", "") == "guard_pytest_cwd" for node in ast.walk(tree))
     for rel in (
         "start.sh",
         "main.py",
@@ -516,14 +518,14 @@ def test_start_sh_absolute_path_check_config_from_other_cwd(tmp_path) -> None:
     assert "/user/spot/order" not in out
 
 
-def test_pytest_invocation_guard_from_home(tmp_path) -> None:
+def test_guard_pytest_cwd_from_home(tmp_path) -> None:
     root = find_project_root()
-    msg = pytest_invocation_guard(tmp_path)
+    msg = guard_pytest_cwd(tmp_path)
     assert msg is not None
     assert "run_tests.sh" in msg
     assert "cd" in msg.lower()
-    assert pytest_invocation_guard(root) is None
-    assert pytest_invocation_guard(root / "tests") is None
+    assert guard_pytest_cwd(root) is None
+    assert guard_pytest_cwd(root / "tests") is None
 
 
 def test_pytest_plugin_from_foreign_cwd_prints_error(tmp_path) -> None:

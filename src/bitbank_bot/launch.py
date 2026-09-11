@@ -135,7 +135,7 @@ def resolve_runtime_python(
     return fallback if fallback is not None else sys.executable
 
 
-def pytest_invocation_guard(
+def guard_pytest_cwd(
     cwd: Path | None = None,
     *,
     module_file: Path | None = None,

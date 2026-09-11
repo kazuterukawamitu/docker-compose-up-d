@@ -12,9 +12,9 @@ import sys
 
 
 def pytest_configure(config) -> None:  # noqa: ARG001
-    from bitbank_bot.launch import pytest_invocation_guard
+    from bitbank_bot.launch import guard_pytest_cwd
 
-    msg = pytest_invocation_guard()
+    msg = guard_pytest_cwd()
     if msg:
         sys.stderr.write(msg + "\n")
         raise SystemExit(2)
