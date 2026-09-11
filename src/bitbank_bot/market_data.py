@@ -54,7 +54,17 @@ class CandleFetchResult:
     closed_count: int = 0
 
 
+def as_jst(now: datetime | None = None) -> datetime:
+    """Interpret naive clocks as JST; convert aware clocks into JST."""
+    if now is None:
+        return datetime.now(JST)
+    if now.tzinfo is None:
+        return now.replace(tzinfo=JST)
+    return now.astimezone(JST)
+
+
 def candle_date_key(candle_type: str, when: datetime) -> str:
+    when = as_jst(when)
     if candle_type in SHORT_CANDLE_TYPES:
         return when.strftime("%Y%m%d")
     if candle_type in LONG_CANDLE_TYPES:
@@ -69,9 +79,10 @@ def candle_date_keys(
     latest_only: bool,
     lookback_days: int,
 ) -> list[str]:
+    now = as_jst(now)
     keys: list[str] = []
     if candle_type in SHORT_CANDLE_TYPES:
-        days = 1 if latest_only else lookback_days
+        days = 1 if latest_only else max(1, int(lookback_days))
         for i in range(days):
             keys.append(candle_date_key(candle_type, now - timedelta(days=i)))
         yesterday = candle_date_key(candle_type, now - timedelta(days=1))
@@ -134,7 +145,7 @@ def fetch_candles_detailed(
     latest_only: bool = False,
     now: datetime | None = None,
 ) -> CandleFetchResult:
-    now = now or datetime.now(JST)
+    now = as_jst(now)
     keys = candle_date_keys(
         cfg.candle_type,
         now,
@@ -188,7 +199,7 @@ def fetch_candles_detailed(
         candle_type=cfg.candle_type,
         market_data_real=bool(closed),
     )
-    if not candles and last_error is not None and not any(True for _ in candles):
+    if not candles and last_error is not None:
         raise last_error
     return CandleFetchResult(
         candles=closed,
