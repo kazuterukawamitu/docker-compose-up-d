@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
 
@@ -24,9 +25,42 @@ def test_default_is_dry_run() -> None:
     assert cfg.daily_pnl_floor == Decimal("0")
     assert cfg.pair == PAIR
     assert cfg.enable_htf_filter is True
+    assert cfg.rate_mode == "fixed"
+    assert cfg.reconcile_every_cycles == 10
     assert "secret" not in cfg.safe_dict()
     assert cfg.safe_dict()["has_api_secret"] is False
     assert cfg.safe_dict()["enable_htf_filter"] is True
+    assert cfg.safe_dict()["rate_mode"] == "fixed"
+    assert cfg.safe_dict()["reconcile_every_cycles"] == 10
+
+
+def test_rate_mode_and_reconcile_every_cycles_from_env() -> None:
+    cfg = load_config(
+        environ={"RATE_MODE": "auto", "RECONCILE_EVERY_CYCLES": "3"},
+        load_default_dotenv=False,
+    )
+    assert cfg.rate_mode == "auto"
+    assert cfg.reconcile_every_cycles == 3
+    with pytest.raises(ConfigError, match="RATE_MODE"):
+        load_config(environ={"RATE_MODE": "random"}, load_default_dotenv=False)
+
+
+def test_env_example_documents_rate_mode_and_reconcile() -> None:
+    text = (Path(__file__).resolve().parents[1] / ".env.example").read_text(encoding="utf-8")
+    assert "RATE_MODE=fixed" in text
+    assert "RECONCILE_EVERY_CYCLES=10" in text
+    parsed: dict[str, str] = {}
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, _, value = stripped.partition("=")
+        parsed[key] = value
+    cfg = load_config(environ=parsed, load_default_dotenv=False)
+    assert cfg.rate_mode == "fixed"
+    assert cfg.reconcile_every_cycles == 10
+    assert cfg.resolved_trading_mode() == MODE_DRY_RUN
+    assert cfg.may_place_live_orders is False
 
 
 def test_htf_filter_env() -> None:
