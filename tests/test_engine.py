@@ -337,6 +337,97 @@ def test_pending_unfilled_is_persisted_and_polled(tmp_path) -> None:
     assert state.position.actual_execution_jpy == Decimal("10000")
 
 
+def test_engine_clears_canceled_pending_from_reconcile(tmp_path) -> None:
+    from bitbank_bot.reconciliation import ReconcileReport
+
+    c = cfg(
+        state_path=str(tmp_path / "state.json"),
+        lock_path=str(tmp_path / "bot.lock"),
+        log_dir=str(tmp_path / "logs"),
+        enable_websocket=False,
+        dry_run=False,
+        live_trading=True,
+        api_key="k",
+        api_secret="s",
+    )
+    engine = Engine(c, client=MagicMock())
+    from bitbank_bot.engine import BotState
+
+    state = BotState(None, RiskManager(c), 0, time.monotonic())
+    state.pending = PendingOrder(
+        order_id="99",
+        side="buy",
+        kind="BUY1",
+        tp_pct=Decimal("0.03"),
+        index=1,
+        timestamp_ms=1,
+        amount=Decimal("0.001"),
+    )
+    report = ReconcileReport(
+        False,
+        "mismatch",
+        mismatches=["pending_missing"],
+        open_orders=0,
+    )
+    engine._apply_reconcile_report(report, state)
+    assert state.pending is None
+    assert engine.last_block_reason == "pending_missing"
+    saved = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
+    assert saved["pending"] is None
+
+
+def test_engine_polls_pending_filled_unapplied(tmp_path) -> None:
+    from bitbank_bot.reconciliation import ReconcileReport
+
+    c = cfg(
+        state_path=str(tmp_path / "state.json"),
+        lock_path=str(tmp_path / "bot.lock"),
+        log_dir=str(tmp_path / "logs"),
+        enable_websocket=False,
+        dry_run=False,
+        live_trading=True,
+        api_key="k",
+        api_secret="s",
+    )
+    rest = MagicMock()
+    rest.free_amount.side_effect = lambda asset: (
+        Decimal("90000") if asset == "jpy" else Decimal("0.001")
+    )
+    rest.get_order.return_value = {
+        "order_id": "42",
+        "status": "FULLY_FILLED",
+        "executed_amount": "0.001",
+        "average_price": "10000000",
+        "start_amount": "0.001",
+    }
+    engine = Engine(c, client=rest)
+    from bitbank_bot.engine import BotState
+
+    state = BotState(None, RiskManager(c), 0, time.monotonic())
+    state.pending = PendingOrder(
+        order_id="42",
+        side="buy",
+        kind="BUY1",
+        tp_pct=Decimal("0.03"),
+        index=1,
+        timestamp_ms=1,
+        amount=Decimal("0.001"),
+    )
+    report = ReconcileReport(
+        False,
+        "mismatch",
+        bitbank_btc=Decimal("0.001"),
+        local_btc=Decimal("0"),
+        open_orders=0,
+        mismatches=["pending_filled_unapplied"],
+    )
+    engine._apply_reconcile_report(report, state)
+    assert state.pending is None
+    assert state.position is not None
+    assert state.position.amount == Decimal("0.001")
+    rest.get_order.assert_called()
+
+
 def test_pending_dataclass_roundtrip() -> None:
     pending = PendingOrder(
         order_id="7",

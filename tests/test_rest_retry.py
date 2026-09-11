@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 import httpx
 import pytest
 
-from bitbank_bot.rest_client import BitbankAPIError, RestClient
+from bitbank_bot.rest_client import BitbankAPIError, RestClient, coerce_active_orders
 
 
 def test_create_order_does_not_retry_post() -> None:
@@ -35,5 +35,54 @@ def test_create_order_does_not_retry_post() -> None:
                 live_confirmed=True,
             )
         assert calls["n"] == 1
+    finally:
+        client.close()
+
+
+def test_coerce_active_orders_empty_and_unknown() -> None:
+    assert coerce_active_orders(None) == []
+    assert coerce_active_orders([]) == []
+    assert coerce_active_orders({}) == []
+    assert coerce_active_orders({"orders": []}) == []
+    assert coerce_active_orders({"orders": None}) == []
+    mapped = coerce_active_orders({"9": {"order_id": "9"}})
+    assert mapped == [{"order_id": "9"}]
+    with pytest.raises(BitbankAPIError, match="active_orders_unreadable"):
+        coerce_active_orders("nope")
+    with pytest.raises(BitbankAPIError, match="active_orders_unreadable"):
+        coerce_active_orders(["not-a-dict"])
+
+
+def test_get_ticker_rejects_non_object_data() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"success": 1, "data": None})
+
+    http = httpx.Client(transport=httpx.MockTransport(handler))
+    client = RestClient(
+        "https://public.example",
+        "https://private.example",
+        http=http,
+    )
+    try:
+        with pytest.raises(BitbankAPIError, match="ticker_unreadable"):
+            client.get_ticker("btc_jpy")
+    finally:
+        client.close()
+
+
+def test_get_active_orders_normalizes_empty_dict() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"success": 1, "data": {"orders": {}}})
+
+    http = httpx.Client(transport=httpx.MockTransport(handler))
+    client = RestClient(
+        "https://public.example",
+        "https://private.example",
+        "k",
+        "s",
+        http=http,
+    )
+    try:
+        assert client.get_active_orders("btc_jpy") == []
     finally:
         client.close()

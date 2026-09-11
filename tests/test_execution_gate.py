@@ -52,7 +52,7 @@ def test_gate_blocks_kill_and_duplicate() -> None:
     gate = ExecutionGate(cfg())
     killed = gate.evaluate(_ctx(kill_switch=True))
     assert not killed.allowed
-    assert killed.reason == "kill_switch_clear" or killed.reason == "kill_switch"
+    assert killed.reason == "kill_switch"
     pending = gate.evaluate(_ctx(pending_order=True))
     assert not pending.allowed
 

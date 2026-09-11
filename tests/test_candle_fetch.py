@@ -9,6 +9,7 @@ import pytest
 from bitbank_bot.market_data import (
     Candle,
     CandleCache,
+    as_jst,
     candle_date_keys,
     candles_are_fresh,
     fetch_candles_detailed,
@@ -79,6 +80,32 @@ def test_cache_does_not_merge_synthetic() -> None:
     assert len(out) == 1
     assert out[0].close == Decimal("1")
     assert cache.market_data_real is True
+
+
+def test_utc_now_uses_jst_date_key() -> None:
+    utc = datetime(2026, 3, 15, 16, 0, tzinfo=timezone.utc)
+    assert as_jst(utc).strftime("%Y%m%d") == "20260316"
+    keys = candle_date_keys("5min", utc, latest_only=True, lookback_days=14)
+    assert "20260316" in keys
+    assert "20260315" in keys
+    jst_keys = candle_date_keys(
+        "5min", datetime(2026, 3, 15, 16, 0, tzinfo=JST), latest_only=True, lookback_days=1
+    )
+    assert "20260315" in jst_keys
+    assert "20260316" not in jst_keys
+
+
+def test_lookback_zero_still_includes_today_and_yesterday() -> None:
+    now = datetime(2026, 9, 11, 12, 0, tzinfo=JST)
+    keys = candle_date_keys("5min", now, latest_only=False, lookback_days=0)
+    assert "20260911" in keys
+    assert "20260910" in keys
+
+
+def test_naive_datetime_is_treated_as_jst() -> None:
+    naive = datetime(2026, 9, 11, 0, 2)
+    keys = candle_date_keys("5min", naive, latest_only=True, lookback_days=1)
+    assert keys[0] == "20260911"
 
 
 def test_ticker_close_mismatch_and_freshness() -> None:
