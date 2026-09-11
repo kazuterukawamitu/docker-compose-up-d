@@ -75,6 +75,8 @@ class ExecutionGate:
                 reason = "synthetic_market_data"
             elif reason == "market_data_fresh" or reason == "not_ticker_mismatch":
                 reason = "STALE_MARKET_DATA"
+            elif reason == "kill_switch_clear":
+                reason = "kill_switch"
             slog(
                 "EXECUTION_BLOCKED",
                 "order gated",
