@@ -8,11 +8,16 @@ HOLD for 15 minutes while market data and strategy are healthy is `LONG_WAIT`, n
 
 ## Start (this is the program)
 
-Recommended launcher (venv, `.env`, diagnostics, crash backoff). From the repo root:
+The only command to launch the enhanced program. **cd into the repo first**
+(your Mac home `~` is not the repo):
 
 ```bash
+cd ~/docker-compose-up-d   # or wherever you cloned this repository
 bash ./start.sh
 ```
+
+`bash ./start.sh --help` prints the same instructions. A thin wrapper is
+`bash scripts/run_bot.sh` (also refuses unless cwd is this repo).
 
 One-cycle dry health check (no orders):
 
@@ -50,6 +55,21 @@ bash -lc 'REPO="$HOME/docker-compose-up-d"; set -euo pipefail; if [ ! -d "$REPO/
 ```
 
 HOLD/待機 is normal. Stop with Ctrl-C.
+
+### If you see `zsh: command not found: ....`
+
+That is **not** a bot crash. pytest progress (`.... [ 40%]`) and `179 passed`
+were pasted into zsh at `~`. zsh tried to run the dots as commands.
+
+1. If the prompt is a lone `>` (continuation after an unclosed quote), press **Ctrl-C**.
+2. Then start the program from the repo:
+
+```bash
+cd ~/docker-compose-up-d
+bash ./start.sh
+```
+
+Do **not** paste pytest output, Python snippets, or chat excerpts into the terminal.
 
 Live trading stays **off** unless `.env` has `TRADING_MODE=LIVE` **and**
 `LIVE_TRADING_CONFIRM=YES_I_ACCEPT_REAL_MONEY_RISK` **and** both API keys.
@@ -101,6 +121,9 @@ State-machine mapping: [docs/STRATEGY.md](docs/STRATEGY.md).
 bash ./start.sh --once --synthetic --skip-lock --no-screen
 PYTHONPATH=src python3 -m pytest -q
 ```
+
+Run those commands in the repo. Do not paste the pytest dots or `N passed` line
+back into zsh.
 
 Read-only execution check (never places an order):
 

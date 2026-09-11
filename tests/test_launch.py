@@ -9,11 +9,15 @@ from pathlib import Path
 
 from bitbank_bot.config import LIVE_CONFIRM_PHRASE, MODE_LIVE, MODE_LIVE_READY, load_config
 from bitbank_bot.launch import (
+    SMART_QUOTES,
     classify_exit,
+    cwd_is_inside_repo,
     diagnostics_lines,
     evaluate_live_guard,
     find_project_root,
     key_status,
+    looks_like_pytest_paste,
+    looks_like_repo,
     main,
     should_supervise,
     split_launch_argv,
@@ -159,6 +163,9 @@ def test_start_sh_help_smoke() -> None:
     assert proc.returncode == 0, proc.stderr + proc.stdout
     assert "DRY_RUN" in proc.stdout
     assert "start.sh" in proc.stdout
+    assert "cd <repo>" in proc.stdout
+    assert "command not found" in proc.stdout
+    assert "RATE_MODE" in proc.stdout
     assert "secret" not in proc.stdout.lower() or "without printing secrets" in proc.stdout
 
 
@@ -202,3 +209,129 @@ def test_rotating_log_handler(tmp_path) -> None:
     setup_logging("INFO", str(tmp_path), console=False)
     handlers = logging.getLogger("bitbank_bot").handlers
     assert any(isinstance(h, RotatingFileHandler) for h in handlers)
+
+
+def test_launch_py_has_no_smart_quotes_and_parses() -> None:
+    import ast
+
+    root = Path(__file__).resolve().parents[1]
+    path = root / "src" / "bitbank_bot" / "launch.py"
+    text = path.read_text(encoding="utf-8")
+    for ch in SMART_QUOTES:
+        assert ch not in text
+    tree = ast.parse(text)
+    assert any(getattr(node, "name", "") == "evaluate_live_guard" for node in ast.walk(tree))
+    assert any(getattr(node, "name", "") == "apply_cli_dry_run" for node in ast.walk(tree))
+    for rel in (
+        "start.sh",
+        "main.py",
+        "scripts/run_bot.sh",
+        "src/bitbank_bot/logging_setup.py",
+        "src/bitbank_bot/main.py",
+    ):
+        other = (root / rel).read_text(encoding="utf-8")
+        for ch in SMART_QUOTES:
+            assert ch not in other, rel
+    ast.parse((root / "main.py").read_text(encoding="utf-8"))
+    ast.parse((root / "src" / "bitbank_bot" / "logging_setup.py").read_text(encoding="utf-8"))
+    ast.parse((root / "src" / "bitbank_bot" / "main.py").read_text(encoding="utf-8"))
+
+
+def test_looks_like_pytest_paste_and_repo_cwd() -> None:
+    assert looks_like_pytest_paste(["...."])
+    assert looks_like_pytest_paste(["[ 40%]"])
+    assert looks_like_pytest_paste(["179 passed"])
+    assert looks_like_pytest_paste(["passed"])
+    assert not looks_like_pytest_paste(["--check-config", "--once"])
+    root = find_project_root()
+    assert looks_like_repo(root)
+    assert cwd_is_inside_repo(root, root)
+    assert not cwd_is_inside_repo(root, Path("/tmp"))
+
+
+def test_launch_rejects_pytest_paste() -> None:
+    assert main(["....", "[ 40%]", "passed"]) == 2
+
+
+def test_launch_from_outside_repo_says_cd_first(tmp_path) -> None:
+    root = Path(__file__).resolve().parents[1]
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+    env["PYTHONPATH"] = str(root / "src")
+    env["DRY_RUN"] = "true"
+    proc = subprocess.run(
+        [sys.executable, "-m", "bitbank_bot.launch", "--check-config"],
+        cwd=str(tmp_path),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 2, out
+    assert "cd to the repo first" in out
+    assert "[ 40%]" not in proc.stdout
+    assert "179 passed" not in out
+
+
+def test_launch_help_works_outside_repo(tmp_path) -> None:
+    root = Path(__file__).resolve().parents[1]
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+    env["PYTHONPATH"] = str(root / "src")
+    proc = subprocess.run(
+        [sys.executable, "-m", "bitbank_bot.launch", "--help"],
+        cwd=str(tmp_path),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+    out = proc.stdout
+    assert proc.returncode == 0, proc.stderr + proc.stdout
+    assert "bash ./start.sh" in out
+    assert "command not found" in out
+    assert "RATE_MODE" in out
+
+
+def test_start_sh_copy_outside_repo_says_cd_first(tmp_path) -> None:
+    root = Path(__file__).resolve().parents[1]
+    dest = tmp_path / "start.sh"
+    dest.write_text((root / "start.sh").read_text(encoding="utf-8"), encoding="utf-8")
+    proc = subprocess.run(
+        ["bash", str(dest), "--check-config"],
+        cwd=str(tmp_path),
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 2, out
+    assert "cd to the repo first" in out
+    assert "[ 40%]" not in proc.stdout
+
+
+def test_run_bot_sh_refuses_outside_repo(tmp_path) -> None:
+    root = Path(__file__).resolve().parents[1]
+    proc = subprocess.run(
+        ["bash", str(root / "scripts" / "run_bot.sh"), "--help"],
+        cwd=str(tmp_path),
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 2, out
+    assert "cd to the repo first" in out
+
+
+def test_run_bot_sh_help_from_repo() -> None:
+    root = Path(__file__).resolve().parents[1]
+    proc = subprocess.run(
+        ["bash", str(root / "scripts" / "run_bot.sh"), "--help"],
+        cwd=str(root),
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    assert proc.returncode == 0, proc.stderr + proc.stdout
+    assert "DRY_RUN" in proc.stdout
+    assert "cd <repo>" in proc.stdout

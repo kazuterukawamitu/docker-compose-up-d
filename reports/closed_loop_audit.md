@@ -290,3 +290,32 @@ Launcher additions (only what `start.sh` lacked):
 
 Start: `bash ./start.sh`. Health: `bash ./start.sh --once --synthetic --skip-lock --no-screen`.
 
+---
+
+## Fifth pass (Mac iTerm zsh paste vs launcher)
+
+### Cause of the Mac output
+
+The iTerm session was in `~` (home), not the repo. The lines
+
+```
+........................................................................ [ 80%]
+179 passed in 5.34s
+zsh: command not found: ...........................
+zsh: command not found: 179
+```
+
+are pytest progress / summary **pasted into zsh** (or typed after a test run that printed to the TTY). This repo does not emit those strings as shell commands. `start.sh`, `src/bitbank_bot/launch.py`, `main.py`, and `logging_setup.py` were already valid ASCII Python/bash (no U+201C/U+201D smart quotes, no truncated `cfg.`). The follow-on `>` prompt and the snippet with curly quotes (`return f“{path} absent”`) were a **broken chat/paste excerpt**, not the file on disk.
+
+Recovery: press **Ctrl-C** to leave zsh continuation (`>`), then `cd` to the clone and run `bash ./start.sh`. Do not paste pytest output into the terminal.
+
+### Fix (harden; repo sources were already complete)
+
+- `launch.py` refuses cwd outside the repo (`cd to the repo first`) and rejects argv that looks like pytest dots / `[ 40%]` / `passed`. `--help` still works from any directory.
+- `start.sh` prints the same recovery text; a copied `start.sh` in `$HOME` or a folder without `src/bitbank_bot/launch.py` exits 2 with that message (no pytest dump).
+- Added `scripts/run_bot.sh` (cwd must be the repo; then execs `start.sh`).
+- README documents the `zsh: command not found: ....` paste mistake.
+- Test: `launch.py` parses via `ast` and contains no smart quotes. RATE_MODE / RECONCILE_EVERY_CYCLES remain wired (config + diagnostics + engine). LIVE stays off by default. No secrets logged.
+
+Enhanced launcher paths: `start.sh`, `src/bitbank_bot/launch.py`, `scripts/run_bot.sh`.
+
