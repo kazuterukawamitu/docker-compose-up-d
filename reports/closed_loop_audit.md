@@ -319,3 +319,11 @@ Recovery: press **Ctrl-C** to leave zsh continuation (`>`), then `cd` to the clo
 
 Enhanced launcher paths: `start.sh`, `src/bitbank_bot/launch.py`, `scripts/run_bot.sh`.
 
+### Test results (this pass)
+
+`python3 -m compileall` PASS. `PYTHONPATH=src pytest` **187 passed**.
+`python -m bitbank_bot.launch --help` and `--check-config` PASS from the repo
+(RATE_MODE=fixed, RECONCILE_EVERY_CYCLES=10, keys UNSET, DRY_RUN).
+From a temp cwd, `--check-config` exits 2 with `cd to the repo first`.
+No live POST. No secrets in diagnostics.
+
