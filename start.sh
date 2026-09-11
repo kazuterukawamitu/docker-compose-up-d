@@ -22,7 +22,9 @@ fi
 
 set -euo pipefail
 
-export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:${PATH:-}"
+# Prefer Homebrew on Mac, then the caller PATH (CI hosted Python). Do not
+# put /usr/bin first — that shadows Actions' python and breaks --self-test.
+export PATH="/opt/homebrew/bin:/usr/local/bin:${PATH:-}:/usr/bin:/bin"
 export PYTHONUNBUFFERED=1
 export PYTHONIOENCODING=utf-8
 
@@ -387,7 +389,7 @@ echo "using $VPY"
 echo "lock=$ROOT/data/bot.lock kill=$ROOT/data/KILL (create KILL to halt new orders)"
 
 # Default (no extra args): continuous loop + trading screen on a TTY.
-# Do not pass --once here. Crash backoff lives in bitbank_bot.launch.
+# Crash backoff lives in bitbank_bot.launch.
 if [[ ! -f "$ROOT/src/bitbank_bot/launch.py" || ! -f "$ROOT/main.py" ]]; then
   echo "cannot start: missing $ROOT/src/bitbank_bot/launch.py or $ROOT/main.py" >&2
   echo "Do not run CommandLineTools python3 on a file under ~ (test_public.py / main.py)." >&2

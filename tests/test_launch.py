@@ -95,12 +95,14 @@ def test_live_guard_allows_dual_auth_but_tests_do_not_post() -> None:
 
 
 def test_should_supervise_skips_oneshot_and_systemd() -> None:
-    assert should_supervise(split_launch_argv([])) is True
-    assert should_supervise(split_launch_argv(["--once"])) is False
-    assert should_supervise(split_launch_argv(["--check-config"])) is False
-    assert should_supervise(split_launch_argv(["--max-cycles", "2"])) is False
-    assert should_supervise(split_launch_argv(["--no-supervise"])) is False
-    assert should_supervise(split_launch_argv(["--self-test"])) is False
+    # Empty mapping: do not read ambient INVOCATION_ID (GitHub Actions systemd).
+    clean: dict[str, str] = {}
+    assert should_supervise(split_launch_argv([]), clean) is True
+    assert should_supervise(split_launch_argv(["--once"]), clean) is False
+    assert should_supervise(split_launch_argv(["--check-config"]), clean) is False
+    assert should_supervise(split_launch_argv(["--max-cycles", "2"]), clean) is False
+    assert should_supervise(split_launch_argv(["--no-supervise"]), clean) is False
+    assert should_supervise(split_launch_argv(["--self-test"]), clean) is False
     assert should_supervise(split_launch_argv(["--supervise"]), {"INVOCATION_ID": "x"}) is True
     assert should_supervise(split_launch_argv([]), {"INVOCATION_ID": "x"}) is False
 

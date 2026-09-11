@@ -31,19 +31,22 @@ cd "$root"
 export PYTHONPATH="$root/src${PYTHONPATH:+:$PYTHONPATH}"
 
 choose_pytest_python() {
-  local c
-  for c in "$root/.venv/bin/python" python3 python; do
-    if [[ "$c" == /* ]]; then
-      if [[ ! -x "$c" ]]; then
-        continue
+  local c path_dir
+  if [[ -x "$root/.venv/bin/python" ]] && \
+     "$root/.venv/bin/python" -c "import pytest" >/dev/null 2>&1; then
+    echo "$root/.venv/bin/python"
+    return 0
+  fi
+  # Walk PATH so a leading /usr/bin/python3 without pytest does not win.
+  local IFS=:
+  for path_dir in ${PATH:-}; do
+    [[ -n "$path_dir" ]] || continue
+    for c in "$path_dir/python3" "$path_dir/python"; do
+      if [[ -x "$c" ]] && "$c" -c "import pytest" >/dev/null 2>&1; then
+        echo "$c"
+        return 0
       fi
-    elif ! command -v "$c" >/dev/null 2>&1; then
-      continue
-    fi
-    if "$c" -c "import pytest" >/dev/null 2>&1; then
-      echo "$c"
-      return 0
-    fi
+    done
   done
   return 1
 }
