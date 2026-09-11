@@ -14,7 +14,7 @@ from bitbank_bot.config import Config, LONG_CANDLE_TYPES, SHORT_CANDLE_TYPES
 from bitbank_bot.indicators import Trend, ma_trend, moving_average
 from bitbank_bot.logging_setup import slog
 from bitbank_bot.market_data import CANDLE_MS, Candle, candle_date_key, parse_ohlcv
-from bitbank_bot.rest_client import RestClient
+from bitbank_bot.rest_client import BitbankAPIError, RestClient
 
 JST = timezone(timedelta(hours=9))
 
@@ -46,7 +46,19 @@ def _fetch_type(client: RestClient, pair: str, candle_type: str) -> list[Candle]
         try:
             rows = client.get_candlestick(pair, candle_type, key)
         except Exception as exc:
-            slog("MARKET", "htf fetch skipped", candle_type=candle_type, error=type(exc).__name__)
+            endpoint = exc.endpoint if isinstance(exc, BitbankAPIError) else ""
+            slog(
+                "CANDLE_API_ERROR",
+                "htf candlestick fetch failed",
+                endpoint=endpoint or f"/{pair}/candlestick/{candle_type}/{key}",
+                http_status=exc.http_status if isinstance(exc, BitbankAPIError) else None,
+                bitbank_code=exc.code if isinstance(exc, BitbankAPIError) else None,
+                pair=pair,
+                candle_type=candle_type,
+                date=key,
+                retry_count=exc.retry_count if isinstance(exc, BitbankAPIError) else 0,
+                error=type(exc).__name__,
+            )
             continue
         for row in rows:
             try:

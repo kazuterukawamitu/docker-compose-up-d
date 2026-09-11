@@ -4,7 +4,16 @@ from decimal import Decimal
 
 import pytest
 
-from bitbank_bot.config import PAIR, ConfigError, load_config, normalize_pair
+from bitbank_bot.config import (
+    LIVE_CONFIRM_PHRASE,
+    MODE_DRY_RUN,
+    MODE_LIVE,
+    MODE_LIVE_READY,
+    PAIR,
+    ConfigError,
+    load_config,
+    normalize_pair,
+)
 
 
 def test_default_is_dry_run() -> None:
@@ -48,6 +57,64 @@ def test_dual_flag_required_for_live() -> None:
             environ={"DRY_RUN": "false", "LIVE_TRADING": "true"},
             load_default_dotenv=False,
         )
+
+
+def test_trading_mode_live_without_confirm_is_live_ready() -> None:
+    cfg = load_config(
+        environ={
+            "TRADING_MODE": "LIVE",
+            "BITBANK_API_KEY": "k",
+            "BITBANK_API_SECRET": "s",
+        },
+        load_default_dotenv=False,
+    )
+    assert cfg.resolved_trading_mode() == MODE_LIVE_READY
+    assert cfg.may_place_live_orders is False
+    assert cfg.is_live_ready is True
+
+
+def test_trading_mode_live_dual_auth() -> None:
+    cfg = load_config(
+        environ={
+            "TRADING_MODE": "LIVE",
+            "LIVE_TRADING_CONFIRM": LIVE_CONFIRM_PHRASE,
+            "BITBANK_API_KEY": "k",
+            "BITBANK_API_SECRET": "s",
+        },
+        load_default_dotenv=False,
+    )
+    assert cfg.resolved_trading_mode() == MODE_LIVE
+    assert cfg.may_place_live_orders is True
+    assert cfg.safe_dict()["trading_mode"] == MODE_LIVE
+    assert "YES_I_ACCEPT" not in repr(cfg)
+
+
+def test_signal_only_maps_to_live_ready() -> None:
+    cfg = load_config(
+        environ={"TRADING_MODE": "SIGNAL_ONLY"},
+        load_default_dotenv=False,
+    )
+    assert cfg.resolved_trading_mode() == MODE_LIVE_READY
+    assert cfg.may_place_live_orders is False
+
+
+def test_default_resolved_mode_is_dry_run() -> None:
+    cfg = load_config(environ={}, load_default_dotenv=False)
+    assert cfg.resolved_trading_mode() == MODE_DRY_RUN
+
+
+def test_legacy_live_flags_without_confirm_are_live_ready() -> None:
+    cfg = load_config(
+        environ={
+            "DRY_RUN": "false",
+            "LIVE_TRADING": "true",
+            "BITBANK_API_KEY": "k",
+            "BITBANK_API_SECRET": "s",
+        },
+        load_default_dotenv=False,
+    )
+    assert cfg.resolved_trading_mode() == MODE_LIVE_READY
+    assert cfg.may_place_live_orders is False
 
 
 def test_balance_usage_alias() -> None:

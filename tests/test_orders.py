@@ -190,6 +190,43 @@ def test_poll_partial_stays_open() -> None:
     assert result.status == "PARTIALLY_FILLED"
 
 
+def test_live_ready_logs_would_submit_without_create_order() -> None:
+    client = MagicMock()
+    c = cfg(
+        dry_run=False,
+        live_trading=True,
+        api_key="k",
+        api_secret="s",
+        trading_mode="LIVE_READY",
+        live_trading_confirm=False,
+    )
+    assert c.is_live_ready
+    assert not c.may_place_live_orders
+    result = OrderExecutor(c, client).place(
+        Signal("BUY1", "buy", Decimal("0.03"), "test"), _plan()
+    )
+    assert result.reason == "would_submit"
+    assert result.executed_amount == Decimal("0")
+    client.create_order.assert_not_called()
+
+
+def test_submit_timeout_does_not_repost() -> None:
+    client = MagicMock()
+    client.get_active_orders.side_effect = [
+        [],
+        [{"order_id": "77", "side": "buy", "executed_amount": "0", "average_price": "0", "start_amount": "0.001", "status": "UNFILLED"}],
+    ]
+    client.create_order.side_effect = RuntimeError("timeout after POST")
+    c = cfg(dry_run=False, live_trading=True, api_key="k", api_secret="s")
+    result = OrderExecutor(c, client).place(
+        Signal("BUY1", "buy", Decimal("0.03"), "test"), _plan()
+    )
+    assert result.ok
+    assert result.reason == "accepted_unfilled"
+    assert result.order_id == "77"
+    assert client.create_order.call_count == 1
+
+
 def test_poll_failed() -> None:
     client = MagicMock()
     client.get_order.side_effect = RuntimeError("offline")

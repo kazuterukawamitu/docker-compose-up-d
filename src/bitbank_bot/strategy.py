@@ -7,6 +7,7 @@ from decimal import Decimal
 from typing import Sequence
 
 from bitbank_bot.config import Config
+from bitbank_bot.logging_setup import slog
 from bitbank_bot.indicators import (
     Trend,
     crossed_down,
@@ -41,6 +42,7 @@ class MarketSnapshot:
     dead_cross: bool
     cross_price: Decimal | None
     crossover_price_bp: Decimal | None = None
+    volume: Decimal | None = None
 
 
 @dataclass
@@ -270,6 +272,7 @@ class Strategy:
         buy = self._buy_signal(snap)
         if buy.kind != "HOLD":
             return buy
+        self._log_buy_gate(snap)
         return Signal.hold("no_buy_setup")
 
     def _tp_signal(self, snap: MarketSnapshot, position: Position) -> Signal:
@@ -323,6 +326,7 @@ class Strategy:
                 "failed recovery below MA; sell all at post-peak decline",
                 peak_price=self._peak,
             )
+        self._log_sell_gate(snap)
         return Signal.hold("no_sell_setup")
 
     def _buy_signal(self, snap: MarketSnapshot) -> Signal:
@@ -370,11 +374,51 @@ class Strategy:
             )
         return Signal.hold("no_buy_setup")
 
+    def _log_buy_gate(self, snap: MarketSnapshot) -> None:
+        buy1 = (
+            snap.prev_ma_trend == Trend.DOWN
+            and snap.ma_trend in {Trend.FLAT, Trend.UP}
+            and snap.crossed_up
+        )
+        buy2 = snap.ma_trend == Trend.UP and snap.crossed_down
+        slog(
+            "BUY_GATE",
+            "no_buy_setup",
+            trend=snap.ma_trend.value,
+            prev_trend=snap.prev_ma_trend.value,
+            crossed_up=snap.crossed_up,
+            crossed_down=snap.crossed_down,
+            golden_cross=snap.golden_cross,
+            buy1=buy1,
+            buy2=buy2,
+            buy3=self._buy3,
+            buy4=self._buy4,
+            close=str(snap.close),
+            ma=str(snap.ma),
+            volume=str(snap.volume) if snap.volume is not None else None,
+        )
+
+    def _log_sell_gate(self, snap: MarketSnapshot) -> None:
+        slog(
+            "SELL_GATE",
+            "no_sell_setup",
+            trend=snap.ma_trend.value,
+            crossed_up=snap.crossed_up,
+            crossed_down=snap.crossed_down,
+            sell1=self._sell1,
+            sell2=self._sell2,
+            sell3=snap.ma_trend == Trend.DOWN and snap.crossed_up,
+            sell4=self._sell4,
+            close=str(snap.close),
+            ma=str(snap.ma),
+        )
+
 
 def build_snapshots(
     closes: Sequence[Decimal],
     timestamps: Sequence[int],
     cfg: Config,
+    volumes: Sequence[Decimal] | None = None,
 ) -> list[MarketSnapshot]:
     primary = moving_average(closes, cfg.ma_period, cfg.ma_kind)
     short = moving_average(closes, cfg.short_ma_period, cfg.ma_kind)
@@ -422,6 +466,7 @@ def build_snapshots(
                 dead_cross=is_dead_cross(s_prev, l_prev, s_ma, l_ma),
                 cross_price=cross_price,
                 crossover_price_bp=crossover_price_bp(cross_price),
+                volume=volumes[i] if volumes is not None and i < len(volumes) else None,
             )
         )
         prev_trend = trend

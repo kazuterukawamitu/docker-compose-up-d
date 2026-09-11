@@ -122,13 +122,35 @@ class OrderExecutor:
                 None,
             )
         if not self.cfg.may_place_live_orders:
+            mode = self.cfg.resolved_trading_mode()
+            if self.cfg.is_live_ready:
+                slog(
+                    "WOULD_SUBMIT_ORDER",
+                    "LIVE_READY: not calling Bitbank create_order",
+                    side=plan.side,
+                    amount=str(plan.amount),
+                    price=str(plan.price),
+                    mode="LIVE_READY",
+                )
+                return OrderResult(
+                    True,
+                    "would_submit",
+                    True,
+                    False,
+                    None,
+                    "UNFILLED",
+                    ZERO,
+                    ZERO,
+                    None,
+                    None,
+                )
             slog(
                 "ORDER_INTENT",
                 "DRY_RUN: not calling Bitbank create_order",
                 side=plan.side,
                 amount=str(plan.amount),
                 price=str(plan.price),
-                mode="DRY_RUN" if self.cfg.dry_run else "LIVE_BLOCKED",
+                mode=mode,
             )
             if self.cfg.dry_run and self.cfg.simulate_fill:
                 actual = plan.amount * plan.price
@@ -191,15 +213,26 @@ class OrderExecutor:
         if self.cfg.order_type == "limit":
             q = quantize_price(plan.price, self.cfg.price_tick)
             price_str = str(int(q)) if q == q.to_integral_value() else str(q)
-        raw = self.client.create_order(
-            pair=self.cfg.pair,
-            amount=str(plan.amount),
-            side=plan.side,
-            order_type=self.cfg.order_type,
-            price=price_str,
-            post_only=self.cfg.post_only if self.cfg.order_type == "limit" else None,
-            live_confirmed=True,
-        )
+        try:
+            raw = self.client.create_order(
+                pair=self.cfg.pair,
+                amount=str(plan.amount),
+                side=plan.side,
+                order_type=self.cfg.order_type,
+                price=price_str,
+                post_only=self.cfg.post_only if self.cfg.order_type == "limit" else None,
+                live_confirmed=True,
+            )
+        except Exception as exc:
+            slog(
+                "ERROR",
+                "create_order failed; not retrying POST",
+                error=type(exc).__name__,
+            )
+            recovered = self._recover_unconfirmed_submit(plan)
+            if recovered is not None:
+                return recovered
+            raise
         order_id = str(raw.get("order_id") or "")
         status = str(raw.get("status") or "")
         slog("ORDER_ACCEPTED", "order accepted", order_id=order_id, status=status)
@@ -241,6 +274,39 @@ class OrderExecutor:
         return OrderResult(
             True, reason, False, False, order_id, status, executed, avg, actual, raw
         )
+
+    def _recover_unconfirmed_submit(self, plan: AmountPlan) -> OrderResult | None:
+        """After a POST timeout, inspect open orders. Never POST again."""
+        try:
+            active = self.active_orders()
+        except Exception as exc:
+            slog("ERROR", "cannot list open orders after submit error", error=type(exc).__name__)
+            return None
+        match = None
+        for row in active:
+            if str(row.get("side") or "") == plan.side:
+                match = row
+                break
+        if match is None:
+            slog("ORDER_STATUS", "no matching open order after submit error")
+            return None
+        order_id = str(match.get("order_id") or "")
+        slog(
+            "ORDER_STATUS",
+            "recovered order via active_orders; not re-posting",
+            order_id=order_id,
+        )
+        executed = D(match.get("executed_amount") or 0)
+        avg = D(match.get("average_price") or 0)
+        ordered = D(match.get("start_amount") or plan.amount)
+        status = _fill_status(str(match.get("status") or ""), executed, ordered)
+        if executed <= ZERO:
+            return OrderResult(
+                True, "accepted_unfilled", False, False, order_id, status, ZERO, ZERO, None, match
+            )
+        actual = executed * avg
+        reason = "partial_fill" if status == "PARTIALLY_FILLED" else "fill"
+        return OrderResult(True, reason, False, False, order_id, status, executed, avg, actual, match)
 
     def poll(self, order_id: str, fallback_amount: Decimal) -> OrderResult:
         """Re-read a live order. Does not place a new order."""
