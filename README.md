@@ -4,6 +4,14 @@ Bitbank-only `btc_jpy` bot. Default is a **continuous DRY_RUN loop** with an iTe
 
 HOLD for 15 minutes while market data and strategy are healthy is `LONG_WAIT`, not a crash. Public-API fallback candles never place orders. Live UNFILLED limits are persisted and polled. New BUY is blocked when both 4h and 1d SMA slopes are down (`ENABLE_HTF_FILTER`).
 
+Launchable closed-loop verifier (no live orders by default):
+
+```bash
+python3 closed_loop.py
+python3 closed_loop.py --review
+python3 closed_loop.py --run --once --synthetic --skip-lock --no-screen
+```
+
 ## Start (this is the program)
 
 **Live or paper orders require the full package:** `python3 main.py` or `./start.sh`. `run.py` is a stdlib-only 取引画面. It **never** calls `create_order`, even if `.env` says LIVE.

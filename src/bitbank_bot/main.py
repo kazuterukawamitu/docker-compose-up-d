@@ -10,6 +10,7 @@ from bitbank_bot.engine import Engine, install_signal_handlers
 from bitbank_bot.instance_lock import InstanceLock, InstanceLockError
 from bitbank_bot.logging_setup import setup_logging, slog
 from bitbank_bot.preflight import preflight
+from bitbank_bot.exchange import BitbankAdapter
 from bitbank_bot.rest_client import RestClient
 from bitbank_bot.screen import TradingScreen, should_use_screen
 
@@ -51,6 +52,11 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=None,
         help="stop after N loop cycles (tests/smoke; default: run forever)",
+    )
+    parser.add_argument(
+        "--verify-closed-loop",
+        action="store_true",
+        help="run the launchable closed-loop verifier (no live orders) and exit",
     )
     return parser
 
@@ -96,17 +102,29 @@ def main(argv: list[str] | None = None) -> int:
             init_sentry(cfg.sentry_dsn)
         except Exception as exc:
             slog("BOOT", "sentry skipped", error=type(exc).__name__)
-    rest = RestClient(
-        public_url=cfg.public_url,
-        private_url=cfg.private_url,
-        api_key=cfg.api_key,
-        api_secret=cfg.api_secret,
-        access_time_window_ms=cfg.access_time_window_ms,
-        timeout_sec=cfg.http_timeout_sec,
-        max_retries=cfg.max_retries,
-        query_rps=cfg.query_rps,
-        update_rps=cfg.update_rps,
+    rest = BitbankAdapter(
+        RestClient(
+            public_url=cfg.public_url,
+            private_url=cfg.private_url,
+            api_key=cfg.api_key,
+            api_secret=cfg.api_secret,
+            access_time_window_ms=cfg.access_time_window_ms,
+            timeout_sec=cfg.http_timeout_sec,
+            max_retries=cfg.max_retries,
+            query_rps=cfg.query_rps,
+            update_rps=cfg.update_rps,
+        )
     )
+    if args.verify_closed_loop:
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parents[2]
+        if str(root) not in sys.path:
+            sys.path.insert(0, str(root))
+        from closed_loop import verify
+
+        rest.close()
+        return verify()
     if args.check_config:
         slog("BOOT", "config ok", **cfg.safe_dict())
         rest.close()

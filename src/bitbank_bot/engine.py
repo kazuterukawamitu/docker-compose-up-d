@@ -36,6 +36,7 @@ from bitbank_bot.trade_signal_executor import TradeSignalExecutor
 from bitbank_bot.trade_state import TradePhase, TradeStateMachine
 from bitbank_bot.watchdog import RuntimeWatchdog
 from bitbank_bot.watchdog import classify as classify_watchdog
+from bitbank_bot.websocket_client import BitbankWebsocket
 
 _LOG = logging.getLogger("bitbank_bot")
 

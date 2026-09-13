@@ -21,6 +21,7 @@ runnable bot lives in `src/bitbank_bot/`. This branch is Bitbank `btc_jpy` only.
 | 4h+1d filter | `multi_timeframe.py` | Hard BUY block when both HTF SMAs slope down, or HTF data missing |
 | Watchdog | `watchdog.py` | HOLD past 15 minutes is `LONG_WAIT`, not `FAIL`; `RuntimeWatchdog` thread |
 | Read-only audit | `scripts/bitbank_execution_audit.py` | ticker / assets / active_orders / trade_history |
+| Closed-loop launcher | `closed_loop.py` | verify + optional `--run`; never flips LIVE by default |
 
 `run.py` is a stdlib-only DRY_RUN 取引画面. It is the program that
 runs with plain `python3` when pip/httpx/the feature-branch checkout

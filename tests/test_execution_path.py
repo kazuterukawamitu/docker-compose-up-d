@@ -181,11 +181,15 @@ def test_cached_candles_not_replaced_by_synthetic(tmp_path) -> None:
     engine = Engine(c, client=rest)
     real = synthetic_candles(10)
     engine.cache.merge(real)
+    before = list(engine.cache.candles)
     incoming = engine._candles_for_cycle(rest, latest_only=True, force_synthetic=False)
     assert incoming == []
     assert engine.used_synthetic_fallback is False
     assert engine.market_data_real is True
+    assert engine.market_data_stale is True
     assert engine.cache.candles
+    assert engine.cache.candles == before
+    assert len(engine.cache.candles) == 10
 
 
 def test_executor_live_submits_when_gates_pass() -> None:
