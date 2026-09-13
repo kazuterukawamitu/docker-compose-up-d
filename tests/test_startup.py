@@ -53,7 +53,7 @@ def test_start_sh_is_venv_loop_launcher() -> None:
     assert ".env.example" in text
     assert "python3.12" in text
     assert "python3" in text
-    assert 'BOT_BRANCH="cursor/bitbank-audit-unify-f5fd"' in text
+    assert 'BOT_BRANCH="cursor/bitbank-closed-loop-4205"' in text
     assert "run.py" in text
 
 
@@ -102,6 +102,60 @@ def test_main_py_runs_without_pythonpath(tmp_path) -> None:
     assert proc.returncode == 0, proc.stderr + proc.stdout
     assert "may_place_live_orders" in proc.stdout
     assert "run_once complete" in proc.stdout
+
+
+def test_package_main_runs_without_pythonpath(tmp_path) -> None:
+    root = Path(__file__).resolve().parents[1]
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+    env["STATE_PATH"] = str(tmp_path / "state.json")
+    env["LOCK_PATH"] = str(tmp_path / "bot.lock")
+    env["LOG_DIR"] = str(tmp_path / "logs")
+    env["DRY_RUN"] = "true"
+    env["LIVE_TRADING"] = "false"
+    env["ENABLE_WEBSOCKET"] = "false"
+    proc = subprocess.run(
+        [sys.executable, str(root / "src" / "bitbank_bot" / "main.py"), "--check-config"],
+        cwd=str(tmp_path),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=45,
+    )
+    assert proc.returncode == 0, proc.stderr + proc.stdout
+    assert "No module named 'bitbank_bot'" not in proc.stderr
+    assert "config ok" in proc.stdout or "may_place_live_orders" in proc.stdout
+
+
+def test_closed_loop_default_is_startup_not_verify(tmp_path) -> None:
+    root = Path(__file__).resolve().parents[1]
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+    env["STATE_PATH"] = str(tmp_path / "state.json")
+    env["LOCK_PATH"] = str(tmp_path / "bot.lock")
+    env["LOG_DIR"] = str(tmp_path / "logs")
+    env["DRY_RUN"] = "true"
+    env["LIVE_TRADING"] = "false"
+    env["ENABLE_WEBSOCKET"] = "false"
+    proc = subprocess.run(
+        [sys.executable, str(root / "closed_loop.py"), "--check-config", "--no-screen"],
+        cwd=str(tmp_path),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=45,
+    )
+    assert proc.returncode == 0, proc.stderr + proc.stdout
+    assert "STARTUP" in proc.stderr
+    assert "config ok" in proc.stdout or "may_place_live_orders" in proc.stdout
+
+
+def test_root_main_refuses_run_py_when_live(tmp_path, monkeypatch) -> None:
+    from bitbank_bot.launch import live_intent, refuse_run_py_fallback
+
+    env_file = tmp_path / ".env"
+    env_file.write_text("DRY_RUN=false\nLIVE_TRADING=true\n", encoding="utf-8")
+    assert live_intent(environ={}, env_file=env_file) is True
+    assert live_intent(environ={"DRY_RUN": "true", "LIVE_TRADING": "false"}, env_file=tmp_path / "missing") is False
+    assert refuse_run_py_fallback("test") == 2
 
 
 def test_audit_script_runs_without_pythonpath() -> None:

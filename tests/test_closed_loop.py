@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import closed_loop
+from bitbank_bot.closed_loop import review_source
 
 
 def test_closed_loop_verify_without_public(tmp_path, monkeypatch) -> None:
@@ -17,6 +17,7 @@ def test_closed_loop_verify_without_public(tmp_path, monkeypatch) -> None:
 def test_closed_loop_review_json() -> None:
     assert closed_loop.main(["--review"]) == 0
     assert "closed_loop.py" in closed_loop.PROGRAM_REVIEW["added"]
+    assert "src/bitbank_bot/launch.py" in closed_loop.PROGRAM_REVIEW["added"]
     assert closed_loop.PROGRAM_REVIEW["removed"] == []
 
 
@@ -26,3 +27,9 @@ def test_closed_loop_source_is_launchable() -> None:
     compile(source, str(path), "exec")
     assert "if __name__ == \"__main__\"" in source
     assert "may_place_live_orders" in source
+    assert "bitbank_bot.launch" in source
+
+
+def test_closed_loop_source_review_passes() -> None:
+    report = review_source()
+    assert report["ok"] is True, report["failed"]

@@ -1,9 +1,18 @@
-"""CLI entry. Default is a continuous DRY_RUN loop; live orders require dual flags."""
+"""CLI entry. Default is a continuous DRY_RUN loop; live orders require dual flags.
+
+``python3 src/bitbank_bot/main.py`` works without PYTHONPATH: this file inserts
+``src/`` onto ``sys.path`` before importing the package.
+"""
 
 from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
+
+_SRC = Path(__file__).resolve().parent.parent
+if _SRC.name == "src" and str(_SRC) not in sys.path:
+    sys.path.insert(0, str(_SRC))
 
 from bitbank_bot.config import ConfigError, load_config
 from bitbank_bot.engine import Engine, install_signal_handlers
@@ -56,7 +65,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--verify-closed-loop",
         action="store_true",
-        help="run the launchable closed-loop verifier (no live orders) and exit",
+        help="run the package closed-loop verifier (no live orders) and exit",
+    )
+    parser.add_argument(
+        "--no-public",
+        action="store_true",
+        help="with --verify-closed-loop, skip the public Bitbank ping",
     )
     return parser
 
@@ -116,15 +130,10 @@ def main(argv: list[str] | None = None) -> int:
         )
     )
     if args.verify_closed_loop:
-        from pathlib import Path
-
-        root = Path(__file__).resolve().parents[2]
-        if str(root) not in sys.path:
-            sys.path.insert(0, str(root))
-        from closed_loop import verify
+        from bitbank_bot.closed_loop import verify
 
         rest.close()
-        return verify()
+        return verify(public=not args.no_public)
     if args.check_config:
         slog("BOOT", "config ok", **cfg.safe_dict())
         rest.close()

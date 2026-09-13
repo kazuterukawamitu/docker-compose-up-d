@@ -15,7 +15,8 @@ Do **not** paste the bot into chat. The project is already in this git repo.
 ## What this bot actually is
 
 - Pair: Bitbank `btc_jpy` only.
-- Live program: `python3 main.py` or `./start.sh` (needs httpx).
+- Live program: `python3 main.py`, `python3 src/bitbank_bot/main.py`,
+  `python3 closed_loop.py`, or `./start.sh` (needs httpx).
 - `run.py` is a DRY_RUN 取引画面. It never calls `create_order`.
 - Default: `DRY_RUN=true`. LIVE needs keys plus
   `LIVE_TRADING_CONFIRM=YES_I_ACCEPT_REAL_MONEY_RISK`.

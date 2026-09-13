@@ -21,7 +21,7 @@ runnable bot lives in `src/bitbank_bot/`. This branch is Bitbank `btc_jpy` only.
 | 4h+1d filter | `multi_timeframe.py` | Hard BUY block when both HTF SMAs slope down, or HTF data missing |
 | Watchdog | `watchdog.py` | HOLD past 15 minutes is `LONG_WAIT`, not `FAIL`; `RuntimeWatchdog` thread |
 | Read-only audit | `scripts/bitbank_execution_audit.py` | ticker / assets / active_orders / trade_history |
-| Closed-loop launcher | `closed_loop.py` | verify + optional `--run`; never flips LIVE by default |
+| Closed-loop launcher | `closed_loop.py`, `src/bitbank_bot/launch.py` | default **starts the bot**; `--verify` / `--review` are opt-in; never flips LIVE |
 
 `run.py` is a stdlib-only DRY_RUN 取引画面. It is the program that
 runs with plain `python3` when pip/httpx/the feature-branch checkout
@@ -81,6 +81,10 @@ bitFlyer, Coincheck, and GMO are not imported and are not executed.
     (kill switch / halt).
 18. **`run.py` fallback.** `start.sh` will not start `run.py` when live flags
     are set, because that program never posts orders.
+19. **Package file launch.** `python3 src/bitbank_bot/main.py` inserts `src/`
+    onto `sys.path`, so iTerm does not need `PYTHONPATH`. `closed_loop.py`
+    now starts the bot by default (`--verify` is the review pass). Root
+    `main.py` refuses `run.py` fallback when live flags are set.
 
 ## What this bot does not do
 
@@ -117,6 +121,9 @@ them in git, screenshots, or logs.
 | `tests/test_rate_engine.py` | Rate modes |
 | `tests/test_self_healing.py` | Error class + circuit |
 | `tests/test_runtime.py` | Adapter, managers, state machine, faults |
+| `src/bitbank_bot/paths.py` | `sys.path` bootstrap; repo/src helpers |
+| `src/bitbank_bot/launch.py` | Startup program; live-intent; no live `run.py` fallback |
+| `src/bitbank_bot/closed_loop.py` | Package verifier (no repo-root import) |
 
 **Modified (kept, not replaced):** `config.py`, `engine.py`, `orders.py`,
 `rest_client.py`, `market_data.py`, `strategy.py`, `amounts.py`,

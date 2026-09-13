@@ -41,6 +41,7 @@ review for addition/removal and the closed-loop work.
 - `rate_engine.py`, `execution_gate.py`, `reconciliation.py`, `self_healing.py`, `sentry_setup.py`
 - `RuntimeWatchdog` in `watchdog.py` — separate thread, no orders
 - `tests/test_runtime.py`, `docs/PROMPT_INTAKE.md`, this file
+- `src/bitbank_bot/paths.py`, `src/bitbank_bot/launch.py`, package `closed_loop.py`
 
 **Kept:** `run.py`, README BUY1–4 / SELL1–4, `rest_client.py` as the only HMAC/HTTP layer.
 `OrderExecutor` is the only live `create_order` caller.
@@ -67,6 +68,8 @@ review for addition/removal and the closed-loop work.
 - Full `pytest` on the package.
 - Public ticker, yesterday 5min bars, today 404/10000, depth 200/200.
 - `main.py --once --synthetic --skip-lock --no-screen` → HOLD, no `create_order`.
+- `python3 src/bitbank_bot/main.py --check-config` works without `PYTHONPATH`.
+- `python3 closed_loop.py` starts the bot; `--verify` is the review pass.
 - No live POST: no keys in this VM.
 
 ## G. Remaining risks
@@ -79,7 +82,7 @@ review for addition/removal and the closed-loop work.
 
 ## H. Pre-LIVE checklist
 
-1. VPS runs `./start.sh` or `python3 main.py` (httpx installed).
+1. VPS runs `./start.sh`, `python3 main.py`, or `python3 closed_loop.py` (httpx). Do not run `run.py` for live.
 2. Boot log: `DRY_RUN`, `LIVE_TRADING`, `LIVE_TRADING_CONFIRM`, `TRADING_MODE`, `may_place_live_orders`.
 3. `LIVE_READY` first: `WOULD_SUBMIT_ORDER` on a real BUY/SELL.
 4. Then LIVE + confirm + min lot `0.0001` BTC.

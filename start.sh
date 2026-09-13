@@ -2,7 +2,7 @@
 # Bitbank BTC/JPY launcher — opens the iTerm 取引画面 (trading screen).
 #
 # Paste this ONE line in iTerm (zsh is fine; this wraps bash):
-#   bash -lc 'REPO="$HOME/docker-compose-up-d"; set -euo pipefail; if [ ! -d "$REPO/.git" ]; then git clone https://github.com/kazuterukawamitu/docker-compose-up-d.git "$REPO"; fi; cd "$REPO"; git fetch origin cursor/bitbank-audit-unify-f5fd; git checkout -B cursor/bitbank-audit-unify-f5fd origin/cursor/bitbank-audit-unify-f5fd; exec bash ./start.sh --screen'
+#   bash -lc 'REPO="$HOME/docker-compose-up-d"; set -euo pipefail; if [ ! -d "$REPO/.git" ]; then git clone https://github.com/kazuterukawamitu/docker-compose-up-d.git "$REPO"; fi; cd "$REPO"; git fetch origin cursor/bitbank-closed-loop-4205; git checkout -B cursor/bitbank-closed-loop-4205 origin/cursor/bitbank-closed-loop-4205; exec bash ./start.sh --screen'
 #
 # That line clones if needed, checks out the bot branch (main is wiki HTML only),
 # then opens the trading dashboard. Do not paste python3 main.py. Do not use !.
@@ -20,7 +20,7 @@ export PYTHONIOENCODING=utf-8
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT"
 
-BOT_BRANCH="cursor/bitbank-audit-unify-f5fd"
+BOT_BRANCH="cursor/bitbank-closed-loop-4205"
 
 ensure_bot_source() {
   if [[ -f "$ROOT/src/bitbank_bot/__init__.py" && -f "$ROOT/main.py" ]]; then
@@ -165,7 +165,7 @@ if [[ -t 1 ]]; then
 fi
 for a in "$@"; do
   case "$a" in
-    --once|--check-config|--preflight|--backtest|--no-screen)
+    --once|--check-config|--preflight|--backtest|--no-screen|--verify|--verify-closed-loop|--review)
       want_screen=0
       ;;
     --screen)
@@ -189,6 +189,7 @@ fi
 
 echo "opening Bitbank BTC/JPY 取引画面 (Ctrl-C to stop)"
 echo "HOLD/WAIT is normal. JSON detail is logs/bot.log"
+echo "python3 src/bitbank_bot/main.py also works (bootstraps src/)."
 echo "using $VPY"
 
 # Default (no extra args): continuous loop + trading screen on a TTY.
