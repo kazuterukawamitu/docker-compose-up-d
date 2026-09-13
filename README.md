@@ -2,31 +2,45 @@
 
 Bitbank-only `btc_jpy` bot. Default is a **continuous DRY_RUN loop** with an iTerm **取引画面** (trading dashboard). HOLD/WAIT on a bar is normal. JSON lines are written to `logs/bot.log`, not the dashboard.
 
-`main` on GitHub is still wiki HTML. The runnable bot is branch `cursor/bitbank-audit-unify-f5fd`.
-
 HOLD for 15 minutes while market data and strategy are healthy is `LONG_WAIT`, not a crash. Public-API fallback candles never place orders. Live UNFILLED limits are persisted and polled. New BUY is blocked when both 4h and 1d SMA slopes are down (`ENABLE_HTF_FILTER`).
+
+Startup (any of these; default is a continuous DRY_RUN loop):
+
+```bash
+python3 main.py
+python3 src/bitbank_bot/main.py
+python3 closed_loop.py
+python3 -m bitbank_bot
+./start.sh --screen
+```
+
+Closed-loop review (no live orders):
+
+```bash
+python3 closed_loop.py --verify
+python3 closed_loop.py --verify --no-public
+python3 closed_loop.py --review
+python3 closed_loop.py --once --synthetic --skip-lock --no-screen
+```
 
 ## Start (this is the program)
 
-`main` on GitHub is wiki HTML. You do **not** need pip, venv, or `start.sh` for the bot to run.
-
-Paste **this one line** in iTerm. It downloads `run.py` and starts a DRY_RUN 取引画面 (no orders):
+**Live or paper orders require the full package:** `python3 main.py` or `./start.sh`. `run.py` is a stdlib-only 取引画面. It **never** calls `create_order`, even if `.env` says LIVE.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/kazuterukawamitu/docker-compose-up-d/cursor/bitbank-audit-unify-f5fd/run.py -o "$HOME/bitbank_run.py" && python3 "$HOME/bitbank_run.py"
+cd ~/docker-compose-up-d
+./start.sh --screen
 ```
 
-You should see `Bitbank  BTC/JPY  取引画面`. HOLD/待機 is normal. Stop with Ctrl-C.
+`start.sh` refuses to fall back to `run.py` when `DRY_RUN=false` or `LIVE_TRADING=true`.
 
-If this repo is already checked out on this branch:
+A DRY_RUN screen with no order path:
 
 ```bash
 python3 run.py
 ```
 
-`python3 main.py` also works: it uses the full package when httpx is installed, otherwise the same stdlib `run.py`.
-
-Live trading stays **off** unless `.env` has `DRY_RUN=false` **and** `LIVE_TRADING=true` **and** both API keys.
+Live trading stays **off** unless `.env` has `DRY_RUN=false` **and** `LIVE_TRADING=true` **and** `LIVE_TRADING_CONFIRM=YES_I_ACCEPT_REAL_MONEY_RISK` **and** both API keys. Missing confirm becomes `LIVE_READY` (full path, `WOULD_SUBMIT_ORDER` only). `RATE_MODE` is `fixed` (default README percents), `dynamic` (ATR/ADX clamps), or `auto`.
 
 `--once --synthetic` is a one-cycle smoke test that **exits on purpose**. The launcher above does **not** use `--once`.
 
@@ -76,7 +90,7 @@ Read-only execution check (never places an order):
 python3 scripts/bitbank_execution_audit.py
 ```
 
-Audit notes: [docs/AUDIT.md](docs/AUDIT.md).
+Audit notes: [docs/AUDIT.md](docs/AUDIT.md). Closed-loop A–H: [docs/CLOSED_LOOP.md](docs/CLOSED_LOOP.md). Large specs belong in git, not New Chat: [docs/PROMPT_INTAKE.md](docs/PROMPT_INTAKE.md).
 
 systemd example (not installed by this repo): [deploy/bitbank-bot.service](deploy/bitbank-bot.service).
 

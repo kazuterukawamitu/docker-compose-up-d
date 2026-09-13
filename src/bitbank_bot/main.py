@@ -1,15 +1,25 @@
-"""CLI entry. Default is a continuous DRY_RUN loop; live orders require dual flags."""
+"""CLI entry. Default is a continuous DRY_RUN loop; live orders require dual flags.
+
+``python3 src/bitbank_bot/main.py`` works without PYTHONPATH: this file inserts
+``src/`` onto ``sys.path`` before importing the package.
+"""
 
 from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
+
+_SRC = Path(__file__).resolve().parent.parent
+if _SRC.name == "src" and str(_SRC) not in sys.path:
+    sys.path.insert(0, str(_SRC))
 
 from bitbank_bot.config import ConfigError, load_config
 from bitbank_bot.engine import Engine, install_signal_handlers
 from bitbank_bot.instance_lock import InstanceLock, InstanceLockError
 from bitbank_bot.logging_setup import setup_logging, slog
 from bitbank_bot.preflight import preflight
+from bitbank_bot.exchange import BitbankAdapter
 from bitbank_bot.rest_client import RestClient
 from bitbank_bot.screen import TradingScreen, should_use_screen
 
@@ -52,6 +62,16 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="stop after N loop cycles (tests/smoke; default: run forever)",
     )
+    parser.add_argument(
+        "--verify-closed-loop",
+        action="store_true",
+        help="run the package closed-loop verifier (no live orders) and exit",
+    )
+    parser.add_argument(
+        "--no-public",
+        action="store_true",
+        help="with --verify-closed-loop, skip the public Bitbank ping",
+    )
     return parser
 
 
@@ -80,19 +100,40 @@ def main(argv: list[str] | None = None) -> int:
         synthetic=bool(args.synthetic),
         loop=not args.once,
         dry_run=cfg.dry_run,
+        DRY_RUN=cfg.dry_run,
+        LIVE_TRADING=cfg.live_trading,
+        LIVE_TRADING_CONFIRM=cfg.live_trading_confirm,
+        TRADING_MODE=cfg.resolved_trading_mode(),
+        RATE_MODE=cfg.rate_mode,
+        SIGNAL_ONLY=cfg.signal_only,
+        may_place_live_orders=cfg.may_place_live_orders,
         screen=use_screen,
     )
-    rest = RestClient(
-        public_url=cfg.public_url,
-        private_url=cfg.private_url,
-        api_key=cfg.api_key,
-        api_secret=cfg.api_secret,
-        access_time_window_ms=cfg.access_time_window_ms,
-        timeout_sec=cfg.http_timeout_sec,
-        max_retries=cfg.max_retries,
-        query_rps=cfg.query_rps,
-        update_rps=cfg.update_rps,
+    if cfg.sentry_dsn:
+        try:
+            from bitbank_bot.sentry_setup import init_sentry
+
+            init_sentry(cfg.sentry_dsn)
+        except Exception as exc:
+            slog("BOOT", "sentry skipped", error=type(exc).__name__)
+    rest = BitbankAdapter(
+        RestClient(
+            public_url=cfg.public_url,
+            private_url=cfg.private_url,
+            api_key=cfg.api_key,
+            api_secret=cfg.api_secret,
+            access_time_window_ms=cfg.access_time_window_ms,
+            timeout_sec=cfg.http_timeout_sec,
+            max_retries=cfg.max_retries,
+            query_rps=cfg.query_rps,
+            update_rps=cfg.update_rps,
+        )
     )
+    if args.verify_closed_loop:
+        from bitbank_bot.closed_loop import verify
+
+        rest.close()
+        return verify(public=not args.no_public)
     if args.check_config:
         slog("BOOT", "config ok", **cfg.safe_dict())
         rest.close()

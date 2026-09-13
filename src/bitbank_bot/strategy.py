@@ -7,6 +7,7 @@ from decimal import Decimal
 from typing import Sequence
 
 from bitbank_bot.config import Config
+from bitbank_bot.logging_setup import slog
 from bitbank_bot.indicators import (
     Trend,
     crossed_down,
@@ -65,12 +66,19 @@ class Signal:
     peak_price: Decimal | None = None
     origin_price: Decimal | None = None
     crossover_price_bp: Decimal | None = None
+    signal_strength: int = 0
 
     @staticmethod
-    def hold(reason: str = "no_setup") -> "Signal":
+    def hold(reason: str = "no_setup", signal_strength: int = 0) -> "Signal":
         if not reason:
             raise ValueError("WAIT/HOLD requires an explicit reason")
-        return Signal(kind="HOLD", side=None, tp_pct=None, reason=reason)
+        return Signal(
+            kind="HOLD",
+            side=None,
+            tp_pct=None,
+            reason=reason,
+            signal_strength=signal_strength,
+        )
 
 
 class Buy3Machine:
@@ -254,11 +262,17 @@ class Strategy:
         self._sell4 = self.sell4.update(snap.close, snap.ma)
         self._peak = self.sell4.last_peak or self.sell4.peak
 
-    def evaluate(self, snap: MarketSnapshot, position: Position | None) -> Signal:
+    def evaluate(
+        self,
+        snap: MarketSnapshot,
+        position: Position | None,
+        *,
+        log_gates: bool = False,
+    ) -> Signal:
         self.observe(snap)
         same_entry = position is not None and snap.index == position.entry_candle_index
         if position is not None and not same_entry:
-            sell = self._sell_signal(snap)
+            sell = self._sell_signal(snap, log_gates=log_gates)
             if sell.kind != "HOLD":
                 return sell
             tp = self._tp_signal(snap, position)
@@ -267,10 +281,10 @@ class Strategy:
             return Signal.hold("in_position_no_sell_or_tp")
         if position is not None and same_entry:
             return Signal.hold("same_entry_candle_no_sell")
-        buy = self._buy_signal(snap)
+        buy = self._buy_signal(snap, log_gates=log_gates)
         if buy.kind != "HOLD":
             return buy
-        return Signal.hold("no_buy_setup")
+        return Signal.hold("no_buy_setup", signal_strength=buy.signal_strength)
 
     def _tp_signal(self, snap: MarketSnapshot, position: Position) -> Signal:
         target = pct_offset(position.average_price, position.tp_pct)
@@ -286,7 +300,27 @@ class Strategy:
             )
         return Signal.hold("tp_not_hit")
 
-    def _sell_signal(self, snap: MarketSnapshot) -> Signal:
+    def _sell_signal(self, snap: MarketSnapshot, *, log_gates: bool = False) -> Signal:
+        sell1 = self._sell1
+        sell3 = snap.ma_trend == Trend.DOWN and snap.crossed_up
+        sell2 = self._sell2
+        sell4 = self._sell4
+        score = sum((sell1, sell2, sell3, sell4))
+        if log_gates:
+            slog(
+                "SELL_GATE",
+                "sell conditions",
+                extend_then_down=sell1,
+                fall_cross_continue=sell2,
+                downtrend_cross_up=sell3,
+                failed_recovery=sell4,
+                trend=snap.ma_trend.value,
+                crossed_up=snap.crossed_up,
+                crossed_down=snap.crossed_down,
+                close=str(snap.close),
+                ma=str(snap.ma),
+                score=f"{score}/4",
+            )
         if self._sell1:
             return Signal(
                 "SELL1",
@@ -323,9 +357,37 @@ class Strategy:
                 "failed recovery below MA; sell all at post-peak decline",
                 peak_price=self._peak,
             )
-        return Signal.hold("no_sell_setup")
+        return Signal.hold("no_sell_setup", signal_strength=score)
 
-    def _buy_signal(self, snap: MarketSnapshot) -> Signal:
+    def _buy_signal(self, snap: MarketSnapshot, *, log_gates: bool = False) -> Signal:
+        buy1 = (
+            snap.prev_ma_trend == Trend.DOWN
+            and snap.ma_trend in {Trend.FLAT, Trend.UP}
+            and snap.crossed_up
+        )
+        buy2 = snap.ma_trend == Trend.UP and snap.crossed_down
+        buy3 = self._buy3
+        buy4 = self._buy4
+        score = sum((buy1, buy2, buy3, buy4))
+        if log_gates:
+            slog(
+                "BUY_GATE",
+                "buy conditions",
+                granville_turn_cross_up=buy1,
+                uptrend_cross_down=buy2,
+                pullback_bounce=buy3,
+                downtrend_dip_rise=buy4,
+                trend=snap.ma_trend.value,
+                prev_trend=snap.prev_ma_trend.value,
+                crossed_up=snap.crossed_up,
+                crossed_down=snap.crossed_down,
+                close=str(snap.close),
+                ma=str(snap.ma),
+                short_ma=str(snap.short_ma),
+                long_ma=str(snap.long_ma),
+                golden_cross=snap.golden_cross,
+                score=f"{score}/4",
+            )
         if (
             snap.prev_ma_trend == Trend.DOWN
             and snap.ma_trend in {Trend.FLAT, Trend.UP}
@@ -368,7 +430,7 @@ class Strategy:
                 "downtrend MA, price >=5% below, then rising",
                 origin_price=self.buy4.origin,
             )
-        return Signal.hold("no_buy_setup")
+        return Signal.hold("no_buy_setup", signal_strength=score)
 
 
 def build_snapshots(

@@ -7,6 +7,7 @@ import logging
 import re
 import sys
 from datetime import datetime, timezone
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any
 
@@ -55,7 +56,12 @@ def setup_logging(
         stream.setFormatter(formatter)
         stream.addFilter(_RedactFilter())
         root.addHandler(stream)
-    file_handler = logging.FileHandler(Path(log_dir) / "bot.log", encoding="utf-8")
+    file_handler = RotatingFileHandler(
+        Path(log_dir) / "bot.log",
+        maxBytes=5_000_000,
+        backupCount=5,
+        encoding="utf-8",
+    )
     file_handler.setFormatter(formatter)
     file_handler.addFilter(_RedactFilter())
     root.addHandler(file_handler)

@@ -12,7 +12,8 @@ ExecStart=/opt/bitbank-bot/.venv/bin/python -m bitbank_bot
 Restart=always
 RestartSec=10
 # Example unit only. Do not enable on this Cloud Agent VM.
-# Copy to the VPS and keep DRY_RUN=true unless LIVE_TRADING is set in .env.
+# Copy to the VPS. Keep DRY_RUN=true unless LIVE_TRADING and
+# LIVE_TRADING_CONFIRM=YES_I_ACCEPT_REAL_MONEY_RISK are set in .env.
 NoNewPrivileges=true
 
 [Install]

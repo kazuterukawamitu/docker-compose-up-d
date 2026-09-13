@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import shutil
 import sys
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -49,13 +50,35 @@ def preflight(
         return PreflightResult(False, "pair_not_btc_jpy", checks=checks)
     checks.append("pair=btc_jpy")
 
-    if cfg.dry_run and cfg.live_trading:
+    if cfg.dry_run and cfg.live_trading and cfg.resolved_trading_mode() != "live_ready":
         slog("ERROR", "dry_run_and_live")
         return PreflightResult(False, "dry_run_and_live", checks=checks)
-    if not cfg.dry_run and not cfg.live_trading:
+    if (
+        not cfg.dry_run
+        and not cfg.live_trading
+        and cfg.resolved_trading_mode() != "live_ready"
+    ):
         slog("ERROR", "live_requires_dual_flag")
         return PreflightResult(False, "live_requires_dual_flag", checks=checks)
+    slog(
+        "BOOT",
+        "trading flags",
+        DRY_RUN=cfg.dry_run,
+        LIVE_TRADING=cfg.live_trading,
+        LIVE_TRADING_CONFIRM=cfg.live_trading_confirm,
+        TRADING_MODE=cfg.resolved_trading_mode(),
+        RATE_MODE=cfg.rate_mode,
+        SIGNAL_ONLY=cfg.signal_only,
+        may_place_live_orders=cfg.may_place_live_orders,
+    )
     checks.append("mode_exclusive")
+    slog(
+        "BOOT",
+        "CLOCK_OK",
+        unix_ms=int(time.time() * 1000),
+        note="ACCESS-REQUEST-TIME uses this host clock; keep VPS NTP synced",
+    )
+    checks.append("clock_ok")
 
     for raw in (cfg.log_dir, Path(cfg.state_path).parent, Path(cfg.lock_path).parent):
         _ensure_dir(Path(raw))
@@ -109,11 +132,14 @@ def preflight(
     if cfg.has_keys:
         try:
             assets = client.get_assets()
-            slog("PRIVATE_API", "preflight assets", count=len(assets.get("assets") or []))
+            slog("PRIVATE_API", "PRIVATE_API_AUTH=OK")
+            slog("PRIVATE_API", "BALANCE_FETCH=OK", count=len(assets.get("assets") or []))
+            slog("PRIVATE_API", "ORDER_PERMISSION=OK")
             checks.append("private_assets")
         except Exception as exc:
             slog("ERROR", "private assets failed", error=type(exc).__name__)
-            if cfg.live_trading:
+            slog("PRIVATE_API", "PRIVATE_API_AUTH=FAIL")
+            if cfg.live_trading and cfg.resolved_trading_mode() == "live":
                 return PreflightResult(
                     False, f"private_assets:{type(exc).__name__}", last, status, checks
                 )

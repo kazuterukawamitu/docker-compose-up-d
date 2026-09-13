@@ -8,10 +8,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
 from bitbank_bot.config import Config
 from bitbank_bot.money import D, ONE, ZERO, meets_min_amount, truncate
 from bitbank_bot.risk import RiskManager
+
+if TYPE_CHECKING:
+    from bitbank_bot.rate_engine import RateDecision
 
 
 @dataclass
@@ -38,6 +42,7 @@ def plan_buy(
     cfg: Config,
     risk: RiskManager,
     target_jpy: Decimal | None = None,
+    rate: "RateDecision | None" = None,
 ) -> AmountPlan:
     available_jpy = D(available_jpy)
     available_btc = D(available_btc)
@@ -58,7 +63,28 @@ def plan_buy(
             reason="invalid_price",
         )
     max_usable_jpy = available_jpy * cfg.max_balance_usage * (ONE - cfg.fee_buffer)
-    if target_jpy is None:
+    if rate is not None and rate.ok and rate.mode == "dynamic":
+        equity = available_jpy + available_btc * price
+        risk_jpy = equity * rate.risk_pct
+        loss_per_btc = price * rate.stop_loss_pct
+        if loss_per_btc <= ZERO:
+            return AmountPlan(
+                side="buy",
+                amount=ZERO,
+                price=price,
+                available_jpy=available_jpy,
+                available_btc=available_btc,
+                target_jpy=ZERO,
+                planned_order_jpy=ZERO,
+                actual_execution_jpy=None,
+                actual_balance_jpy=available_jpy,
+                actual_balance_btc=available_btc,
+                ok=False,
+                reason="invalid_stop_loss",
+            )
+        sized = (risk_jpy / loss_per_btc) * rate.position_scale
+        target_jpy = min(sized * price, max_usable_jpy)
+    elif target_jpy is None:
         target_jpy = max_usable_jpy
     else:
         target_jpy = D(target_jpy)
@@ -152,6 +178,7 @@ class PositionSizer:
         available_btc: Decimal,
         price: Decimal,
         target_jpy: Decimal | None = None,
+        rate: "RateDecision | None" = None,
     ) -> AmountPlan:
         return plan_buy(
             available_jpy=available_jpy,
@@ -160,6 +187,7 @@ class PositionSizer:
             cfg=self.cfg,
             risk=self.risk,
             target_jpy=target_jpy,
+            rate=rate,
         )
 
     def plan_sell(
