@@ -122,6 +122,28 @@ class OrderExecutor:
                 None,
             )
         if not self.cfg.may_place_live_orders:
+            if self.cfg.live_ready:
+                slog(
+                    "WOULD_SUBMIT_ORDER",
+                    "LIVE_READY: not calling Bitbank create_order",
+                    pair=self.cfg.pair,
+                    side=plan.side,
+                    amount=str(plan.amount),
+                    price=str(plan.price),
+                    kind=signal.kind,
+                )
+                return OrderResult(
+                    True,
+                    "would_submit",
+                    True,
+                    False,
+                    None,
+                    "UNFILLED",
+                    ZERO,
+                    ZERO,
+                    None,
+                    None,
+                )
             slog(
                 "ORDER_INTENT",
                 "DRY_RUN: not calling Bitbank create_order",
@@ -191,15 +213,67 @@ class OrderExecutor:
         if self.cfg.order_type == "limit":
             q = quantize_price(plan.price, self.cfg.price_tick)
             price_str = str(int(q)) if q == q.to_integral_value() else str(q)
-        raw = self.client.create_order(
-            pair=self.cfg.pair,
-            amount=str(plan.amount),
-            side=plan.side,
-            order_type=self.cfg.order_type,
-            price=price_str,
-            post_only=self.cfg.post_only if self.cfg.order_type == "limit" else None,
-            live_confirmed=True,
-        )
+        try:
+            raw = self.client.create_order(
+                pair=self.cfg.pair,
+                amount=str(plan.amount),
+                side=plan.side,
+                order_type=self.cfg.order_type,
+                price=price_str,
+                post_only=self.cfg.post_only if self.cfg.order_type == "limit" else None,
+                live_confirmed=True,
+            )
+        except Exception as exc:
+            slog(
+                "ERROR",
+                "create_order exception; reconciling active orders (no POST retry)",
+                error=type(exc).__name__,
+                pair=self.cfg.pair,
+                side=plan.side,
+            )
+            try:
+                recovered = self.active_orders()
+            except Exception as recon_exc:
+                slog(
+                    "ERROR",
+                    "active_orders reconcile failed",
+                    error=type(recon_exc).__name__,
+                )
+                recovered = []
+            match = next(
+                (
+                    row
+                    for row in recovered
+                    if str(row.get("side") or "").lower() == plan.side
+                    and row.get("order_id")
+                ),
+                None,
+            )
+            if match is None:
+                slog(
+                    "TRADE_BLOCKED",
+                    "order POST failed and no matching active order",
+                    reason="ORDER_SUBMIT_FAILED",
+                )
+                return OrderResult(
+                    False,
+                    "order_submit_failed",
+                    False,
+                    False,
+                    None,
+                    None,
+                    ZERO,
+                    ZERO,
+                    None,
+                    None,
+                )
+            slog(
+                "ORDER_ACCEPTED",
+                "recovered order after POST failure",
+                order_id=str(match.get("order_id")),
+                status=str(match.get("status") or ""),
+            )
+            raw = match
         order_id = str(raw.get("order_id") or "")
         status = str(raw.get("status") or "")
         slog("ORDER_ACCEPTED", "order accepted", order_id=order_id, status=status)

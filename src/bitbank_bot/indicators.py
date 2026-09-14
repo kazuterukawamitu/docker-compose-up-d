@@ -122,3 +122,30 @@ def interpolate_crossover(
     if t < ZERO or t > ONE:
         return None
     return prev_price + t * dp
+
+
+def true_range(high: Decimal, low: Decimal, prev_close: Decimal) -> Decimal:
+    high = D(high)
+    low = D(low)
+    prev_close = D(prev_close)
+    span = high - low
+    up = abs(high - prev_close)
+    down = abs(low - prev_close)
+    return max(span, up, down)
+
+
+def atr(
+    highs: Sequence[Decimal],
+    lows: Sequence[Decimal],
+    closes: Sequence[Decimal],
+    period: int = 14,
+) -> Decimal | None:
+    n = min(len(highs), len(lows), len(closes))
+    if period < 1 or n < period + 1:
+        return None
+    trs: list[Decimal] = []
+    for i in range(1, n):
+        trs.append(true_range(highs[i], lows[i], closes[i - 1]))
+    if len(trs) < period:
+        return None
+    return sum(trs[-period:], ZERO) / D(period)

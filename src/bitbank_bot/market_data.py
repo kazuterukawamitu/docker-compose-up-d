@@ -15,7 +15,7 @@ from bitbank_bot.config import (
 )
 from bitbank_bot.logging_setup import slog
 from bitbank_bot.money import D
-from bitbank_bot.rest_client import RestClient
+from bitbank_bot.rest_client import BitbankAPIError, RestClient
 
 JST = timezone(timedelta(hours=9))
 
@@ -87,8 +87,29 @@ def fetch_candles(
     for key in keys:
         try:
             rows = client.get_candlestick(cfg.pair, cfg.candle_type, key)
+        except BitbankAPIError as exc:
+            slog(
+                "CANDLE_API_ERROR",
+                "candlestick fetch skipped",
+                pair=cfg.pair,
+                candle_type=cfg.candle_type,
+                date=key,
+                http_status=exc.http_status,
+                bitbank_code=exc.code,
+                endpoint=exc.endpoint,
+                retry_count=getattr(client, "max_retries", 0),
+                error=type(exc).__name__,
+            )
+            continue
         except Exception as exc:
-            slog("MARKET", "candlestick fetch skipped", date_key=key, error=type(exc).__name__)
+            slog(
+                "CANDLE_API_ERROR",
+                "candlestick fetch skipped",
+                pair=cfg.pair,
+                candle_type=cfg.candle_type,
+                date=key,
+                error=type(exc).__name__,
+            )
             continue
         for row in rows:
             try:

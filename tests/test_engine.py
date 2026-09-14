@@ -351,6 +351,40 @@ def test_pending_dataclass_roundtrip() -> None:
     assert pending.filled_amount == Decimal("0")
 
 
+def test_live_ready_engine_does_not_call_create_order(tmp_path) -> None:
+    c = cfg(
+        state_path=str(tmp_path / "state.json"),
+        lock_path=str(tmp_path / "bot.lock"),
+        log_dir=str(tmp_path / "logs"),
+        enable_websocket=False,
+        enable_htf_filter=False,
+        dry_run=True,
+        live_trading=False,
+        live_ready=True,
+        api_key="k",
+        api_secret="s",
+        ma_period=3,
+        short_ma_period=3,
+        long_ma_period=5,
+    )
+    rest = MagicMock()
+    rest.free_amount.side_effect = lambda asset: (
+        Decimal("100000") if asset == "jpy" else Decimal("0")
+    )
+    rest.create_order.side_effect = AssertionError("live order")
+    engine = Engine(c, client=rest)
+    from bitbank_bot.engine import BotState
+
+    state = BotState(None, RiskManager(c), 0, time.monotonic())
+    with patch(
+        "bitbank_bot.strategy.Strategy.evaluate",
+        return_value=Signal("BUY1", "buy", Decimal("0.03"), "forced"),
+    ):
+        engine.process_candles(synthetic_candles(40), state, execute=True, persist=False)
+    rest.create_order.assert_not_called()
+    assert state.position is None
+
+
 def test_dry_run_sell_uses_position_amount(tmp_path) -> None:
     from bitbank_bot.engine import BotState
     from bitbank_bot.strategy import Position

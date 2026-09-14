@@ -14,6 +14,7 @@ from typing import Any
 
 from bitbank_bot.amounts import AmountPlan, PositionSizer
 from bitbank_bot.config import Config
+from bitbank_bot import execution_gate
 from bitbank_bot.logging_setup import slog
 from bitbank_bot.market_data import (
     Candle,
@@ -26,10 +27,12 @@ from bitbank_bot.money import D, ZERO
 from bitbank_bot.multi_timeframe import evaluate_htf
 from bitbank_bot.orders import OrderExecutor, OrderResult
 from bitbank_bot.preflight import preflight
+from bitbank_bot.rate_engine import decide as decide_rate
 from bitbank_bot.rest_client import BitbankAPIError, RestClient, is_auth_error
 from bitbank_bot.risk import RiskManager
 from bitbank_bot.screen import TradingScreen, view_from_engine
 from bitbank_bot.strategy import Position, Signal, Strategy, build_snapshots
+from bitbank_bot.trace import new_trace_id
 from bitbank_bot.watchdog import classify as classify_watchdog
 from bitbank_bot.websocket_client import BitbankWebsocket
 
@@ -172,6 +175,7 @@ class Engine:
         self.last_signal = Signal.hold("starting")
         self.last_public_last: str = "-"
         self.last_error = ""
+        self._last_candles: list[Candle] = []
 
     def request_stop(self, *_args: object) -> None:
         slog("BOOT", "shutdown requested")
@@ -228,6 +232,7 @@ class Engine:
         persist: bool = True,
     ) -> Signal:
         candles = drop_incomplete_candle(candles, self.cfg.candle_type)
+        self._last_candles = list(candles)
         closes = [c.close for c in candles]
         stamps = [c.timestamp_ms for c in candles]
         snaps = build_snapshots(closes, stamps, self.cfg)
@@ -282,6 +287,11 @@ class Engine:
                         save_state(self.cfg.state_path, state)
                     continue
                 if state.pending:
+                    slog(
+                        "TRADE_BLOCKED",
+                        "pending live order; skip new signal",
+                        reason="ACTIVE_ORDER_EXISTS",
+                    )
                     slog("ORDER_STATUS", "pending live order; skip new signal")
                     self.last_block_reason = "pending_order"
                     signal = Signal.hold("pending_order")
@@ -297,6 +307,11 @@ class Engine:
                     verdict = evaluate_htf(self._rest(), self.cfg)
                     if not verdict.allow_buy:
                         self.last_block_reason = verdict.reason
+                        slog(
+                            "TRADE_BLOCKED",
+                            "BUY blocked by HTF",
+                            reason=verdict.reason,
+                        )
                         slog("STRATEGY", "BUY blocked by HTF", reason=verdict.reason)
                         signal = Signal.hold(verdict.reason)
                         state.last_candle_ts = snap.timestamp_ms
@@ -305,6 +320,7 @@ class Engine:
                         continue
                 if self.ws is not None and self.cfg.enable_websocket and self.ws.is_stale():
                     slog("WEBSOCKET", "stale data; skipping orders")
+                    slog("TRADE_BLOCKED", "stale websocket", reason="STALE_MARKET_DATA")
                     self.last_block_reason = "stale_websocket"
                     signal = Signal.hold("stale_websocket")
                     break
@@ -364,8 +380,82 @@ class Engine:
         if not plan.ok:
             self.last_block_reason = plan.reason
             slog("RISK", "order blocked", reason=plan.reason, side=signal.side)
+            slog(
+                "ORDER_BLOCKED",
+                "sizer rejected",
+                reason=plan.reason,
+                side=signal.side,
+                amount=str(plan.amount),
+            )
             return
+        market_data_real = not (
+            self.used_synthetic_fallback or self._explicit_synthetic
+        )
+        halt = state.risk.halt_reason()
+        gate = execution_gate.evaluate(
+            self.cfg,
+            signal,
+            market_data_real=market_data_real,
+            kill_switch=halt == "kill_switch",
+            pending_order=state.pending is not None,
+            private_api_ok=halt not in {"auth_failure", "circuit_breaker"},
+            amount_ok=plan.ok,
+            amount_reason=plan.reason,
+        )
+        if not gate.allowed:
+            self.last_block_reason = gate.reason
+            return
+        rate = decide_rate(
+            self.cfg,
+            signal,
+            price=price,
+            candles=self._last_candles,
+            trend=str(self.last_trend),
+        )
+        if rate.take_profit_pct is not None and signal.side == "buy":
+            signal = Signal(
+                signal.kind,
+                signal.side,
+                rate.take_profit_pct,
+                signal.reason,
+                golden_cross=signal.golden_cross,
+                cross_price=signal.cross_price,
+                peak_price=signal.peak_price,
+                origin_price=signal.origin_price,
+                crossover_price_bp=signal.crossover_price_bp,
+            )
+        if rate.size_mult < 1 and signal.side == "buy":
+            scaled = plan.target_jpy * rate.size_mult
+            plan = sizer.plan_buy(
+                available_jpy=jpy,
+                available_btc=btc,
+                price=price,
+                target_jpy=scaled,
+            )
+            slog(
+                "RISK",
+                "dynamic size applied",
+                size_mult=str(rate.size_mult),
+                amount=str(plan.amount),
+                ok=plan.ok,
+                reason=plan.reason,
+            )
+            if not plan.ok:
+                self.last_block_reason = plan.reason
+                slog("ORDER_BLOCKED", "sizer rejected after rate", reason=plan.reason)
+                return
         self.last_block_reason = ""
+        trace_id = new_trace_id()
+        slog(
+            "ORDER_REQUEST",
+            "execution path",
+            trace_id=trace_id,
+            gate=gate.reason,
+            live=gate.live,
+            would_submit=gate.would_submit,
+            kind=signal.kind,
+            side=signal.side,
+        )
         order_client = rest if self.cfg.has_keys else None
         executor = OrderExecutor(self.cfg, order_client)
         try:
@@ -470,6 +560,14 @@ class Engine:
             kind=signal.kind,
             uptime_sec=report.uptime_sec,
         )
+        if report.status == "LONG_WAIT":
+            slog(
+                "WATCHDOG",
+                "STATUS=STALLED",
+                HOLD_SECONDS=report.uptime_sec,
+                ROOT_CAUSE=self.last_block_reason or signal.reason or report.reason,
+                FIRST_BLOCKING_STAGE="STRATEGY" if signal.kind == "HOLD" else "GATE",
+            )
         self.last_watchdog = report.status
 
     def _apply_fill(
@@ -756,8 +854,10 @@ class Engine:
             reason=signal.reason,
             in_position=bool(state.position),
             uptime_sec=int(time.monotonic() - state.started_at),
-            mode="DRY_RUN" if self.cfg.dry_run else "LIVE",
-            bitbank_jpy_unchanged=self.cfg.dry_run,
+            mode=self.cfg.trading_mode.upper() if self.cfg.trading_mode else (
+                "DRY_RUN" if self.cfg.dry_run else "LIVE"
+            ),
+            bitbank_jpy_unchanged=not self.cfg.may_place_live_orders,
             utc=datetime.now(timezone.utc).isoformat(),
         )
         slog("HEARTBEAT", "WebSocket CONNECTED" if ws_ok else "WebSocket DISCONNECTED")
@@ -802,6 +902,7 @@ class Engine:
             block_reason=self.last_block_reason,
             error=self.last_error,
             candle_type=self.cfg.candle_type,
+            trading_mode=self.cfg.trading_mode,
         )
         self.screen.render(view)
 
