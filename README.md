@@ -6,23 +6,41 @@ Start with `python3 launch.py`. HOLD for 15 minutes while market data and strate
 
 ## Start (this is the program)
 
-From this checkout, start DRY_RUN with:
+Do **not** run these from the home folder (`~`). `~/main.py` is often a different app (Sentry). Paste **one line at a time**. Do not paste lines that start with `#`.
+
+First clone (only needed once):
 
 ```bash
-python3 launch.py
+git clone https://github.com/kazuterukawamitu/docker-compose-up-d.git
 ```
 
-or:
+Then every time:
+
+```bash
+cd docker-compose-up-d
+```
 
 ```bash
 bash start.sh
 ```
 
+`bash start.sh` installs a venv if needed and opens the DRY_RUN 取引画面. You can also run `python3 launch.py` after `cd docker-compose-up-d`.
+
 You should see `Bitbank BTC/JPY 起動プログラム` then `Bitbank  BTC/JPY  取引画面`. HOLD/待機 is normal. Stop with Ctrl-C.
 
-`python3 main.py` is the same launcher. `python3 run.py` is the stdlib-only DRY_RUN screen (no pip).
+If Apple `python3` is 3.9 (LibreSSL warning), install 3.12 then start with it:
 
-`python3 launch.py --doctor` prints a safe environment check (no secrets).
+```bash
+brew install python@3.12
+```
+
+```bash
+/opt/homebrew/bin/python3.12 launch.py
+```
+
+`python3 run.py` is the stdlib-only DRY_RUN screen (no pip). Do not run `python3 main.py` from `~`.
+
+`python3 launch.py --doctor` prints a safe environment check (no secrets). If you copied `launch.py` to another folder, it looks for `~/docker-compose-up-d` and clones there when missing.
 
 Live trading stays **off** unless `.env` has `TRADING_MODE=live` **and**
 `DRY_RUN=false` **and** `LIVE_TRADING=true` **and**

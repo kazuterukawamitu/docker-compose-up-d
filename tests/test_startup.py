@@ -68,6 +68,8 @@ def test_start_sh_is_venv_loop_launcher() -> None:
     assert "launch.py" in text
     assert "bitbank-audit-unify-f5fd" not in text
     assert "run.py" in text
+    assert "git clone" in text
+    assert "~/main.py" in text
 
 
 def test_loop_cli_exits_after_max_cycles(tmp_path, monkeypatch) -> None:

@@ -1,12 +1,8 @@
 #!/usr/bin/env python3
-"""Repo-root launcher. Prefer `python3 launch.py`.
+"""Repo-root alias for launch.py. Prefer `python3 launch.py` or `bash start.sh`.
 
-    python3 launch.py
-    python3 main.py
-    python3 run.py
-
-All three stay DRY_RUN unless .env is fully armed for LIVE. None of these
-files place a Bitbank order by themselves.
+Do not run `python3 main.py` from your home folder. ~/main.py is often a
+different program. This file only works inside the Bitbank git checkout.
 """
 
 from __future__ import annotations

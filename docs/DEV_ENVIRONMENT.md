@@ -5,14 +5,18 @@ This repository is the bot. It does **not** install a machine-wide `.zshrc`.
 ## Local (MacBook Air + iTerm)
 
 ```bash
-cd /path/to/docker-compose-up-d
-python3 -m venv .venv
+cd "$HOME/docker-compose-up-d"
+python3.12 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements-dev.txt
 cp -n .env.example .env
-python3 run.py
-# or full package:
-PYTHONPATH=src python3 -m bitbank_bot --dry-run --skip-lock --max-cycles 1 --synthetic --no-screen
+python3 launch.py
+```
+
+Do not run `python3 main.py` from `~`. Smoke (exits on purpose):
+
+```bash
+python3 launch.py --once --synthetic --skip-lock --no-screen
 ```
 
 Optional zsh snippet (append yourself):

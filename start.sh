@@ -17,7 +17,46 @@ export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:${PATH:-}"
 export PYTHONUNBUFFERED=1
 export PYTHONIOENCODING=utf-8
 
+REPO_URL="https://github.com/kazuterukawamitu/docker-compose-up-d.git"
 ROOT="$(cd "$(dirname "$0")" && pwd)"
+
+ensure_root() {
+  if [[ -f "$ROOT/src/bitbank_bot/__init__.py" && -f "$ROOT/launch.py" ]]; then
+    return 0
+  fi
+  if [[ -n "${BITBANK_BOT_ROOT:-}" && -f "${BITBANK_BOT_ROOT}/src/bitbank_bot/__init__.py" ]]; then
+    ROOT="$(cd "${BITBANK_BOT_ROOT}" && pwd)"
+    return 0
+  fi
+  local d
+  for d in \
+    "${PWD}/docker-compose-up-d" \
+    "${HOME}/docker-compose-up-d" \
+    "${HOME}/Documents/docker-compose-up-d" \
+    "${HOME}/src/docker-compose-up-d"
+  do
+    if [[ -f "$d/src/bitbank_bot/__init__.py" ]]; then
+      ROOT="$(cd "$d" && pwd)"
+      return 0
+    fi
+  done
+  local dest="${BITBANK_BOT_ROOT:-$HOME/docker-compose-up-d}"
+  if [[ ! -e "$dest" ]] && command -v git >/dev/null 2>&1; then
+    echo "bot source not in $(pwd); cloning $REPO_URL -> $dest"
+    git clone --depth 1 "$REPO_URL" "$dest"
+    ROOT="$(cd "$dest" && pwd)"
+    return 0
+  fi
+  echo "Bitbank ボットのソースが見つかりません。ホーム (~) で実行しています。" >&2
+  echo "~/main.py は別プログラムです。実行しないでください。" >&2
+  echo "iTerm に次を 1 行ずつ貼り付けてください:" >&2
+  echo "  git clone $REPO_URL" >&2
+  echo "  cd docker-compose-up-d" >&2
+  echo "  bash start.sh" >&2
+  exit 2
+}
+
+ensure_root
 cd "$ROOT"
 
 if [[ ! -f "$ROOT/launch.py" || ! -f "$ROOT/src/bitbank_bot/__init__.py" ]]; then
