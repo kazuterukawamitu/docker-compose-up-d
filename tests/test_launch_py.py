@@ -74,6 +74,9 @@ def test_apply_live_degrades_on_bad_confirm(monkeypatch) -> None:
     monkeypatch.setenv("BITBANK_API_KEY", "k")
     monkeypatch.setenv("BITBANK_API_SECRET", "s")
     monkeypatch.setenv("LIVE_TRADING_CONFIRM", "no")
+    monkeypatch.setenv("DRY_RUN", "true")
+    monkeypatch.setenv("LIVE_TRADING", "false")
+    monkeypatch.setenv("LIVE_READY", "false")
     args, _ = _split_argv(["--live"])
     mode = _apply_mode(args, {"BITBANK_API_KEY": "k", "BITBANK_API_SECRET": "s"})
     assert mode == "live_ready"
@@ -95,6 +98,8 @@ def test_launch_check_config_subprocess(tmp_path) -> None:
     env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
     env["DRY_RUN"] = "true"
     env["LIVE_TRADING"] = "false"
+    env["LIVE_READY"] = "false"
+    env["TRADING_MODE"] = "dry_run"
     env["ENABLE_WEBSOCKET"] = "false"
     env["STATE_PATH"] = str(tmp_path / "state.json")
     env["LOCK_PATH"] = str(tmp_path / "bot.lock")
@@ -135,6 +140,8 @@ def test_launch_live_without_keys_exits_2(tmp_path) -> None:
 def test_launch_module_main_check(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("DRY_RUN", "true")
     monkeypatch.setenv("LIVE_TRADING", "false")
+    monkeypatch.setenv("LIVE_READY", "false")
+    monkeypatch.setenv("TRADING_MODE", "dry_run")
     monkeypatch.setenv("ENABLE_WEBSOCKET", "false")
     monkeypatch.setenv("STATE_PATH", str(tmp_path / "state.json"))
     monkeypatch.setenv("LOCK_PATH", str(tmp_path / "bot.lock"))
