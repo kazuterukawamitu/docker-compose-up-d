@@ -453,6 +453,9 @@ class Engine:
         if outcome.blocked:
             self.last_block_reason = outcome.blocked
             slog("TRADE_BLOCKED", "executor blocked", reason=outcome.blocked)
+            if outcome.blocked in {"open_order_conflict", "pending_order"}:
+                self.order_manager_ok = False
+                slog("HEARTBEAT", "ORDER MANAGER DEGRADED", reason=outcome.blocked)
             return
         result = outcome.result
         if result is None:

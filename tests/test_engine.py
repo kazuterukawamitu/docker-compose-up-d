@@ -604,7 +604,7 @@ def test_failed_order_result_does_not_claim_manager_ok(tmp_path, caplog) -> None
         )
         engine._heartbeat(state, Signal.hold("active_orders"))
     rest.create_order.assert_not_called()
-    assert engine.last_block_reason == "active_orders"
+    assert engine.last_block_reason == "open_order_conflict"
     assert engine.order_manager_ok is False
     assert "ORDER MANAGER DEGRADED" in caplog.text
     assert caplog.text.count("ORDER MANAGER OK") == 0
