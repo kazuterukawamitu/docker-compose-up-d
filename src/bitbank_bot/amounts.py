@@ -6,7 +6,7 @@ Never treat TARGET/PLANNED as a fill — those fields are telemetry only.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal
 
 from bitbank_bot.config import Config
@@ -136,6 +136,33 @@ def plan_sell(
         ok=ok,
         reason=reason,
     )
+
+
+def apply_size_mult(plan: AmountPlan, cfg: Config, size_mult: Decimal) -> AmountPlan:
+    """Shrink a BUY plan in high volatility. SELL flatten is unchanged."""
+    if not plan.ok or plan.side != "buy":
+        return plan
+    mult = D(size_mult)
+    if mult >= ONE:
+        return plan
+    if mult <= ZERO:
+        return replace(
+            plan,
+            ok=False,
+            amount=ZERO,
+            planned_order_jpy=ZERO,
+            reason="invalid_size_mult",
+        )
+    amount = truncate(plan.amount * mult, cfg.amount_precision)
+    if not meets_min_amount(amount, cfg.min_amount_btc):
+        return replace(
+            plan,
+            ok=False,
+            amount=ZERO,
+            planned_order_jpy=ZERO,
+            reason="below_min_amount",
+        )
+    return replace(plan, amount=amount, planned_order_jpy=amount * plan.price)
 
 
 class PositionSizer:

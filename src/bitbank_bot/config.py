@@ -68,6 +68,10 @@ DEFAULT_MAX_SL = "0.20"
 DEFAULT_MIN_RISK = "0.05"
 DEFAULT_MAX_RISK = "1"
 DEFAULT_ATR_PERIOD = 14
+DEFAULT_ATR_BASELINE_PCT = "0.01"
+DEFAULT_LOW_VOL_ATR_PCT = "0.005"
+DEFAULT_HIGH_VOL_ATR_PCT = "0.02"
+DEFAULT_HIGH_VOL_SIZE_MULT = "0.5"
 DEFAULT_STALE_PRICE_PCT = "0.03"
 DEFAULT_RECONCILE_EVERY = 10
 
@@ -213,6 +217,10 @@ class Config:
     min_risk_pct: Decimal = D(DEFAULT_MIN_RISK)
     max_risk_pct: Decimal = D(DEFAULT_MAX_RISK)
     atr_period: int = DEFAULT_ATR_PERIOD
+    atr_baseline_pct: Decimal = D(DEFAULT_ATR_BASELINE_PCT)
+    low_vol_atr_pct: Decimal = D(DEFAULT_LOW_VOL_ATR_PCT)
+    high_vol_atr_pct: Decimal = D(DEFAULT_HIGH_VOL_ATR_PCT)
+    high_vol_size_mult: Decimal = D(DEFAULT_HIGH_VOL_SIZE_MULT)
     stale_price_pct: Decimal = D(DEFAULT_STALE_PRICE_PCT)
     reconcile_every_cycles: int = DEFAULT_RECONCILE_EVERY
 
@@ -454,6 +462,10 @@ def load_config(
         min_risk_pct=_dec(env, "MIN_RISK_PCT", DEFAULT_MIN_RISK),
         max_risk_pct=_dec(env, "MAX_RISK_PCT", DEFAULT_MAX_RISK),
         atr_period=_int(env, "ATR_PERIOD", DEFAULT_ATR_PERIOD),
+        atr_baseline_pct=_dec(env, "ATR_BASELINE_PCT", DEFAULT_ATR_BASELINE_PCT),
+        low_vol_atr_pct=_dec(env, "LOW_VOL_ATR_PCT", DEFAULT_LOW_VOL_ATR_PCT),
+        high_vol_atr_pct=_dec(env, "HIGH_VOL_ATR_PCT", DEFAULT_HIGH_VOL_ATR_PCT),
+        high_vol_size_mult=_dec(env, "HIGH_VOL_SIZE_MULT", DEFAULT_HIGH_VOL_SIZE_MULT),
         stale_price_pct=_dec(env, "STALE_PRICE_PCT", DEFAULT_STALE_PRICE_PCT),
         reconcile_every_cycles=_int(env, "RECONCILE_EVERY_CYCLES", DEFAULT_RECONCILE_EVERY),
     )
@@ -471,6 +483,10 @@ def load_config(
         raise ConfigError("MIN_SL_PCT / MAX_SL_PCT are invalid")
     if cfg.min_risk_pct <= D(0) or cfg.max_risk_pct < cfg.min_risk_pct:
         raise ConfigError("MIN_RISK_PCT / MAX_RISK_PCT are invalid")
+    if cfg.high_vol_size_mult <= D(0) or cfg.high_vol_size_mult > D(1):
+        raise ConfigError("HIGH_VOL_SIZE_MULT must be in (0, 1]")
+    if cfg.low_vol_atr_pct <= D(0) or cfg.high_vol_atr_pct <= cfg.low_vol_atr_pct:
+        raise ConfigError("LOW_VOL_ATR_PCT / HIGH_VOL_ATR_PCT are invalid")
     if cfg.ma_period < 2 or cfg.short_ma_period < 2 or cfg.long_ma_period < 2:
         raise ConfigError("MA periods must be >= 2")
     if cfg.long_ma_period < cfg.short_ma_period:

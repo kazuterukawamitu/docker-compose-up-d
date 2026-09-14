@@ -55,6 +55,10 @@ def test_gate_blocks_kill_and_duplicate() -> None:
     assert killed.reason == "kill_switch"
     pending = gate.evaluate(_ctx(pending_order=True))
     assert not pending.allowed
+    assert pending.reason == "pending_order"
+    conflict = gate.evaluate(_ctx(open_order_conflict=True))
+    assert not conflict.allowed
+    assert conflict.reason == "open_order_conflict"
 
 
 def test_live_ready_still_requires_real_data() -> None:

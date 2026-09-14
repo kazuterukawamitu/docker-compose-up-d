@@ -77,6 +77,10 @@ class ExecutionGate:
                 reason = "STALE_MARKET_DATA"
             elif reason == "kill_switch_clear":
                 reason = "kill_switch"
+            elif reason == "no_open_conflict":
+                reason = "open_order_conflict"
+            elif reason == "no_pending":
+                reason = "pending_order"
             slog(
                 "EXECUTION_BLOCKED",
                 "order gated",
