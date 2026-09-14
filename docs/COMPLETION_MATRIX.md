@@ -30,7 +30,7 @@ Status is evidence-based: PASS / PARTIAL / FAIL / UNKNOWN.
 | 23 | WebSocket reconnect | PASS | exponential backoff in `websocket_client.py` |
 | 24 | Kill switch | PASS | `KILL_SWITCH` / `data/KILL` |
 | 25 | HTF BUY filter | PASS | 4h+1d; `--synthetic` skips |
-| 26 | Unified launcher | PASS | `launch.py` + `start.sh` |
+| 26 | Unified launcher | PASS | `launch.py` is canonical; `main.py` aliases it; `start.sh` execs it |
 | 27 | Secrets | PASS | `safe_dict`, logging redact |
 | 28 | pytest | PASS | `tests/` |
 | 29 | Live order in CI | PASS | never; FakeRest / MagicMock |
@@ -42,7 +42,7 @@ Status is evidence-based: PASS / PARTIAL / FAIL / UNKNOWN.
 ## Order path (actual)
 
 ```
-launch.py / start.sh / main.py
+launch.py (main.py alias / start.sh exec)
   → Engine.run_forever
     → fetch_candles (Bitbank public) or synthetic (no execute)
     → Strategy.evaluate (BUY/SELL/HOLD + BUY_GATE)

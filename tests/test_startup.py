@@ -100,6 +100,7 @@ def test_main_py_runs_without_pythonpath(tmp_path) -> None:
         timeout=45,
     )
     assert proc.returncode == 0, proc.stderr + proc.stdout
+    assert "Bitbank BTC/JPY launcher" in proc.stdout
     assert "may_place_live_orders" in proc.stdout
     assert "run_once complete" in proc.stdout
 

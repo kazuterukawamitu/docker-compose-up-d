@@ -2,7 +2,7 @@
 
 Bitbank-only `btc_jpy` bot. Default is a **continuous DRY_RUN loop** with an iTerm **取引画面** (trading dashboard). HOLD/WAIT on a bar is normal. JSON lines are written to `logs/bot.log`, not the dashboard.
 
-The program that starts the bot is `launch.py` (also `bash ./start.sh`).
+The program that starts the bot is `launch.py` (`python3 main.py` is the same program; `bash ./start.sh` creates a venv then execs it).
 
 HOLD for 15 minutes while market data and strategy are healthy is `LONG_WAIT`, not a crash. Public-API fallback candles never place orders. Live UNFILLED limits are persisted and polled. New BUY is blocked when both 4h and 1d SMA slopes are down (`ENABLE_HTF_FILTER`).
 
@@ -12,6 +12,7 @@ You do **not** need pip for DRY_RUN. `python3 launch.py` uses the full package w
 
 ```bash
 python3 launch.py
+python3 launch.py --doctor
 ```
 
 Or:
@@ -25,6 +26,8 @@ You should see `Bitbank  BTC/JPY  取引画面`. HOLD/待機 is normal. Stop wit
 | Command | Orders |
 | --- | --- |
 | `python3 launch.py` | never (DRY_RUN) |
+| `python3 main.py` | same as `launch.py` |
+| `python3 launch.py --doctor` | never; prints program map + public ticker |
 | `python3 launch.py --live-ready` | never; logs `WOULD_SUBMIT_ORDER` |
 | `python3 launch.py --live` | **yes**, only if `.env` has API keys |
 

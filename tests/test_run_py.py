@@ -55,3 +55,5 @@ def test_start_sh_falls_back_to_run_py() -> None:
     assert "launch.py" in text
     launch = Path(__file__).resolve().parents[1].joinpath("launch.py").read_text(encoding="utf-8")
     assert "stdlib DRY_RUN" in launch
+    assert "filter_stdlib_argv" in launch
+    assert "--doctor" in launch

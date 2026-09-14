@@ -141,7 +141,7 @@ if [[ -t 1 ]]; then
 fi
 for a in "$@"; do
   case "$a" in
-    --once|--check-config|--check|--preflight|--backtest|--no-screen)
+    --once|--check-config|--check|--preflight|--backtest|--no-screen|--doctor|--programs)
       want_screen=0
       ;;
     --screen)

@@ -62,6 +62,9 @@ Bitbank from strategy code.
 
 ## Launcher
 
-`python3 launch.py` is the program that starts the bot. `start.sh` execs it
-after venv/deps. If httpx is missing, DRY_RUN falls back to stdlib `run.py`
-(no orders). Live without httpx exits with a reason (no second live client).
+`python3 launch.py` is the program that starts the bot. `python3 main.py` is
+an alias of the same launcher. `start.sh` execs `launch.py` after venv/deps.
+`--doctor` checks programs/files/mode/public ticker and never prints secrets.
+If httpx is missing, DRY_RUN falls back to stdlib `run.py` (package-only
+flags are stripped so argparse does not crash). Live and live-ready without
+httpx exit with a reason (no second live client).
