@@ -11,6 +11,7 @@ from decimal import Decimal
 
 from bitbank_bot.config import Config
 from bitbank_bot.money import D, ONE, ZERO, meets_min_amount, truncate
+from bitbank_bot.rate_engine import RateDecision
 from bitbank_bot.risk import RiskManager
 
 
@@ -38,6 +39,7 @@ def plan_buy(
     cfg: Config,
     risk: RiskManager,
     target_jpy: Decimal | None = None,
+    rate: RateDecision | None = None,
 ) -> AmountPlan:
     available_jpy = D(available_jpy)
     available_btc = D(available_btc)
@@ -58,6 +60,13 @@ def plan_buy(
             reason="invalid_price",
         )
     max_usable_jpy = available_jpy * cfg.max_balance_usage * (ONE - cfg.fee_buffer)
+    if rate is not None and rate.mode == "dynamic" and rate.stop_loss_pct and rate.stop_loss_pct > ZERO:
+        equity = available_jpy + available_btc * price
+        risk_jpy = equity * rate.risk_pct
+        loss_per_btc = price * rate.stop_loss_pct
+        if loss_per_btc > ZERO:
+            sized_jpy = (risk_jpy / loss_per_btc) * price * rate.size_mult
+            target_jpy = min(sized_jpy, max_usable_jpy)
     if target_jpy is None:
         target_jpy = max_usable_jpy
     else:
@@ -152,6 +161,7 @@ class PositionSizer:
         available_btc: Decimal,
         price: Decimal,
         target_jpy: Decimal | None = None,
+        rate: RateDecision | None = None,
     ) -> AmountPlan:
         return plan_buy(
             available_jpy=available_jpy,
@@ -160,6 +170,7 @@ class PositionSizer:
             cfg=self.cfg,
             risk=self.risk,
             target_jpy=target_jpy,
+            rate=rate,
         )
 
     def plan_sell(

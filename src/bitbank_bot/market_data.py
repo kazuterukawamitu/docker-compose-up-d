@@ -15,7 +15,7 @@ from bitbank_bot.config import (
 )
 from bitbank_bot.logging_setup import slog
 from bitbank_bot.money import D
-from bitbank_bot.rest_client import RestClient
+from bitbank_bot.rest_client import BitbankAPIError, RestClient
 
 JST = timezone(timedelta(hours=9))
 
@@ -74,7 +74,7 @@ def fetch_candles(
     now = datetime.now(JST)
     keys: list[str] = []
     if cfg.candle_type in SHORT_CANDLE_TYPES:
-        days = 1 if latest_only else cfg.candle_lookback_days
+        days = 2 if latest_only else cfg.candle_lookback_days
         for i in range(days):
             keys.append(candle_date_key(cfg.candle_type, now - timedelta(days=i)))
     else:
@@ -84,11 +84,36 @@ def fetch_candles(
 
     seen: set[int] = set()
     candles: list[Candle] = []
+    last_error: Exception | None = None
+    ok_keys = 0
     for key in keys:
         try:
             rows = client.get_candlestick(cfg.pair, cfg.candle_type, key)
+            ok_keys += 1
+        except BitbankAPIError as exc:
+            last_error = exc
+            slog(
+                "CANDLE_API_ERROR",
+                "candlestick fetch skipped",
+                pair=cfg.pair,
+                candle_type=cfg.candle_type,
+                date=key,
+                endpoint=exc.endpoint,
+                http_status=exc.http_status,
+                bitbank_code=exc.code,
+                error=type(exc).__name__,
+            )
+            continue
         except Exception as exc:
-            slog("MARKET", "candlestick fetch skipped", date_key=key, error=type(exc).__name__)
+            last_error = exc
+            slog(
+                "CANDLE_API_ERROR",
+                "candlestick fetch skipped",
+                pair=cfg.pair,
+                candle_type=cfg.candle_type,
+                date=key,
+                error=type(exc).__name__,
+            )
             continue
         for row in rows:
             try:
@@ -100,6 +125,8 @@ def fetch_candles(
                 continue
             seen.add(candle.timestamp_ms)
             candles.append(candle)
+    if ok_keys == 0 and last_error is not None:
+        raise last_error
     candles.sort(key=lambda c: c.timestamp_ms)
     slog("MARKET", "candles loaded", count=len(candles), candle_type=cfg.candle_type)
     return drop_incomplete_candle(candles, cfg.candle_type)
@@ -140,6 +167,22 @@ class CandleCache:
             self._by_ts[candle.timestamp_ms] = candle
         self.candles = sorted(self._by_ts.values(), key=lambda c: c.timestamp_ms)
         return self.candles
+
+    def age_ms(self, now_ms: int | None = None) -> int | None:
+        if not self.candles:
+            return None
+        if now_ms is None:
+            now_ms = int(datetime.now(JST).timestamp() * 1000)
+        return max(0, now_ms - self.candles[-1].timestamp_ms)
+
+    def is_fresh(self, candle_type: str, now_ms: int | None = None) -> bool:
+        width = CANDLE_MS.get(candle_type)
+        if width is None or not self.candles:
+            return False
+        age = self.age_ms(now_ms)
+        if age is None:
+            return False
+        return age <= width * 2
 
 
 def synthetic_candles(n: int = 80) -> list[Candle]:

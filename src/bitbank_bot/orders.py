@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, Protocol
@@ -25,6 +26,8 @@ class OrderClient(Protocol):
     def get_active_orders(self, pair: str) -> list[dict[str, Any]]: ...
 
     def get_order(self, pair: str, order_id: str) -> dict[str, Any]: ...
+
+    def get_trade_history(self, pair: str) -> list[dict[str, Any]]: ...
 
     def create_order(
         self,
@@ -66,6 +69,100 @@ class OrderExecutor:
         except Exception as exc:
             slog("ERROR", "active_orders failed", error=type(exc).__name__)
             raise
+
+    def _recover_from_trades(self, side: str) -> dict[str, Any] | None:
+        """If the POST filled immediately, it is gone from active_orders."""
+        if self.client is None or not hasattr(self.client, "get_trade_history"):
+            return None
+        try:
+            trades = list(self.client.get_trade_history(self.cfg.pair) or [])
+        except Exception as exc:
+            slog("ERROR", "trade_history failed during POST recovery", error=type(exc).__name__)
+            return None
+        now_ms = int(time.time() * 1000)
+        window_ms = 120_000
+        matches: list[dict[str, Any]] = []
+        for row in trades:
+            if str(row.get("side") or "").lower() != side.lower():
+                continue
+            if str(row.get("pair") or self.cfg.pair) != self.cfg.pair:
+                continue
+            executed_at = int(row.get("executed_at") or 0)
+            if executed_at and executed_at < 10**12:
+                executed_at *= 1000
+            if not executed_at or now_ms - executed_at > window_ms:
+                continue
+            matches.append(row)
+        order_ids = {str(row.get("order_id") or "") for row in matches if row.get("order_id")}
+        if len(order_ids) != 1:
+            slog(
+                "ORDER_STATUS",
+                "ambiguous post-timeout trades; refusing duplicate POST",
+                count=len(matches),
+                order_ids=len(order_ids),
+                side=side,
+            )
+            return None
+        order_id = next(iter(order_ids))
+        refreshed = self._refresh_order(order_id)
+        if refreshed:
+            slog(
+                "ORDER_ACCEPTED",
+                "recovered filled order after uncertain POST",
+                order_id=order_id,
+            )
+            return refreshed
+        filled = ZERO
+        notional = ZERO
+        for row in matches:
+            amt = D(row.get("amount") or 0)
+            px = D(row.get("price") or 0)
+            filled += amt
+            notional += amt * px
+        avg = (notional / filled) if filled > ZERO else ZERO
+        slog(
+            "ORDER_ACCEPTED",
+            "recovered fill from trade_history after uncertain POST",
+            order_id=order_id,
+        )
+        return {
+            "order_id": order_id,
+            "pair": self.cfg.pair,
+            "side": side,
+            "status": "FULLY_FILLED",
+            "executed_amount": str(filled),
+            "average_price": str(avg),
+            "start_amount": str(filled),
+        }
+
+    def _recover_uncertain_order(self, side: str) -> dict[str, Any] | None:
+        """After a POST timeout, reuse a matching open or just-filled order. Never POST again."""
+        try:
+            active = self.active_orders()
+        except Exception:
+            active = []
+        matches = [
+            row
+            for row in active
+            if str(row.get("side") or "").lower() == side.lower()
+            and str(row.get("pair") or self.cfg.pair) == self.cfg.pair
+        ]
+        if len(matches) == 1:
+            slog(
+                "ORDER_ACCEPTED",
+                "recovered order after uncertain POST",
+                order_id=str(matches[0].get("order_id") or ""),
+            )
+            return matches[0]
+        if len(matches) > 1:
+            slog(
+                "ORDER_STATUS",
+                "ambiguous post-timeout orders; refusing duplicate POST",
+                count=len(matches),
+                side=side,
+            )
+            return None
+        return self._recover_from_trades(side)
 
     def _refresh_order(self, order_id: str) -> dict[str, Any] | None:
         if self.client is None or not hasattr(self.client, "get_order"):
@@ -122,15 +219,27 @@ class OrderExecutor:
                 None,
             )
         if not self.cfg.may_place_live_orders:
+            if self.cfg.is_live_ready:
+                slog(
+                    "WOULD_SUBMIT_ORDER",
+                    "LIVE_READY: not calling Bitbank create_order",
+                    side=plan.side,
+                    amount=str(plan.amount),
+                    price=str(plan.price),
+                    kind=signal.kind,
+                    pair=self.cfg.pair,
+                )
             slog(
                 "ORDER_INTENT",
-                "DRY_RUN: not calling Bitbank create_order",
+                "DRY_RUN: not calling Bitbank create_order"
+                if not self.cfg.is_live_ready
+                else "LIVE_READY intent only",
                 side=plan.side,
                 amount=str(plan.amount),
                 price=str(plan.price),
-                mode="DRY_RUN" if self.cfg.dry_run else "LIVE_BLOCKED",
+                mode=self.cfg.trading_mode.upper(),
             )
-            if self.cfg.dry_run and self.cfg.simulate_fill:
+            if self.cfg.dry_run and self.cfg.simulate_fill and not self.cfg.is_live_ready:
                 actual = plan.amount * plan.price
                 slog(
                     "SIMULATED_FILL",
@@ -191,15 +300,56 @@ class OrderExecutor:
         if self.cfg.order_type == "limit":
             q = quantize_price(plan.price, self.cfg.price_tick)
             price_str = str(int(q)) if q == q.to_integral_value() else str(q)
-        raw = self.client.create_order(
-            pair=self.cfg.pair,
-            amount=str(plan.amount),
-            side=plan.side,
-            order_type=self.cfg.order_type,
-            price=price_str,
-            post_only=self.cfg.post_only if self.cfg.order_type == "limit" else None,
-            live_confirmed=True,
-        )
+        try:
+            raw = self.client.create_order(
+                pair=self.cfg.pair,
+                amount=str(plan.amount),
+                side=plan.side,
+                order_type=self.cfg.order_type,
+                price=price_str,
+                post_only=self.cfg.post_only if self.cfg.order_type == "limit" else None,
+                live_confirmed=True,
+            )
+        except Exception as exc:
+            slog(
+                "ERROR",
+                "create_order failed; reconciling before any retry",
+                error=type(exc).__name__,
+            )
+            recovered = self._recover_uncertain_order(plan.side)
+            if recovered is None:
+                detail = f"{type(exc).__name__} {exc}".lower()
+                transient = any(
+                    token in detail
+                    for token in (
+                        "timeout",
+                        "timed out",
+                        "connecterror",
+                        "network",
+                        "temporarily",
+                    )
+                )
+                if transient:
+                    slog(
+                        "TRADE_BLOCKED",
+                        "EXECUTION_BLOCKED",
+                        reason="uncertain_order",
+                        error=type(exc).__name__,
+                    )
+                    return OrderResult(
+                        False,
+                        "uncertain_order",
+                        False,
+                        False,
+                        None,
+                        None,
+                        ZERO,
+                        ZERO,
+                        None,
+                        None,
+                    )
+                raise
+            raw = recovered
         order_id = str(raw.get("order_id") or "")
         status = str(raw.get("status") or "")
         slog("ORDER_ACCEPTED", "order accepted", order_id=order_id, status=status)

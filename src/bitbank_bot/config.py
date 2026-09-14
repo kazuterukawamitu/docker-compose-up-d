@@ -60,6 +60,20 @@ DEFAULT_LOOKBACK_DAYS = 14
 DEFAULT_ACCESS_WINDOW_MS = 5000
 DEFAULT_CIRCUIT_BREAKER_ERRORS = 5
 DEFAULT_MAX_DRAWDOWN_JPY = "0"
+LIVE_CONFIRM_PHRASE = "YES_I_ACCEPT_REAL_MONEY_RISK"
+TRADING_MODES = frozenset({"dry_run", "live_ready", "live"})
+RATE_MODES = frozenset({"fixed", "dynamic", "auto"})
+DEFAULT_ATR_PERIOD = 14
+DEFAULT_MIN_TP_PCT = "0.01"
+DEFAULT_MAX_TP_PCT = "0.12"
+DEFAULT_MIN_SL_PCT = "0.01"
+DEFAULT_MAX_SL_PCT = "0.08"
+DEFAULT_MIN_RISK_PCT = "0.002"
+DEFAULT_MAX_RISK_PCT = "0.02"
+DEFAULT_RISK_PCT = "0.005"
+DEFAULT_HIGH_VOL_ATR_PCT = "0.03"
+DEFAULT_ATR_REF_PCT = "0.015"
+DEFAULT_HIGH_VOL_SIZE_MULT = "0.5"
 
 SHORT_CANDLE_TYPES = frozenset({"1min", "5min", "15min", "30min", "1hour"})
 LONG_CANDLE_TYPES = frozenset({"4hour", "8hour", "12hour", "1day", "1week", "1month"})
@@ -123,7 +137,21 @@ class Config:
     api_secret: str = field(default="", repr=False)
     dry_run: bool = True
     live_trading: bool = False
+    live_trading_confirm: bool = False
+    trading_mode: str = "dry_run"
+    rate_mode: str = "fixed"
     simulate_fill: bool = True
+    atr_period: int = DEFAULT_ATR_PERIOD
+    min_tp_pct: Decimal = D(DEFAULT_MIN_TP_PCT)
+    max_tp_pct: Decimal = D(DEFAULT_MAX_TP_PCT)
+    min_sl_pct: Decimal = D(DEFAULT_MIN_SL_PCT)
+    max_sl_pct: Decimal = D(DEFAULT_MAX_SL_PCT)
+    min_risk_pct: Decimal = D(DEFAULT_MIN_RISK_PCT)
+    max_risk_pct: Decimal = D(DEFAULT_MAX_RISK_PCT)
+    risk_pct: Decimal = D(DEFAULT_RISK_PCT)
+    high_vol_atr_pct: Decimal = D(DEFAULT_HIGH_VOL_ATR_PCT)
+    atr_ref_pct: Decimal = D(DEFAULT_ATR_REF_PCT)
+    high_vol_size_mult: Decimal = D(DEFAULT_HIGH_VOL_SIZE_MULT)
     candle_type: str = DEFAULT_CANDLE_TYPE
     ma_period: int = DEFAULT_MA_PERIOD
     short_ma_period: int = DEFAULT_SHORT_MA_PERIOD
@@ -175,7 +203,10 @@ class Config:
     ws_rooms: tuple[str, ...] = ("ticker_btc_jpy",)
 
     def __str__(self) -> str:
-        return f"Config(pair={self.pair}, dry_run={self.dry_run}, live_trading={self.live_trading})"
+        return (
+            f"Config(pair={self.pair}, trading_mode={self.trading_mode}, "
+            f"dry_run={self.dry_run}, live_trading={self.live_trading})"
+        )
 
     def __repr__(self) -> str:
         return self.__str__()
@@ -185,7 +216,13 @@ class Config:
         return bool(self.api_key) and bool(self.api_secret)
 
     @property
+    def is_live_ready(self) -> bool:
+        return self.trading_mode == "live_ready"
+
+    @property
     def may_place_live_orders(self) -> bool:
+        if self.trading_mode == "live_ready":
+            return False
         return (not self.dry_run) and self.live_trading and self.has_keys
 
     def safe_dict(self) -> dict[str, object]:
@@ -195,6 +232,10 @@ class Config:
             "has_api_secret": bool(self.api_secret),
             "dry_run": self.dry_run,
             "live_trading": self.live_trading,
+            "live_trading_confirm": self.live_trading_confirm,
+            "trading_mode": self.trading_mode,
+            "rate_mode": self.rate_mode,
+            "is_live_ready": self.is_live_ready,
             "may_place_live_orders": self.may_place_live_orders,
             "simulate_fill": self.simulate_fill,
             "candle_type": self.candle_type,
@@ -235,10 +276,46 @@ def load_config(
 
     dry_run = _bool(env, "DRY_RUN", True)
     live_trading = _bool(env, "LIVE_TRADING", False)
-    if dry_run and live_trading:
-        raise ConfigError("LIVE_TRADING and DRY_RUN cannot both be true")
-    if not live_trading and not dry_run:
-        raise ConfigError("DRY_RUN=false requires LIVE_TRADING=true (dual confirmation).")
+    live_confirm = (_env(env, "LIVE_TRADING_CONFIRM", "") or "") == LIVE_CONFIRM_PHRASE
+    mode_raw = (_env(env, "TRADING_MODE") or "").lower()
+    if mode_raw and mode_raw not in TRADING_MODES:
+        raise ConfigError("TRADING_MODE must be dry_run, live_ready, or live")
+
+    if mode_raw == "live":
+        if live_confirm:
+            dry_run = False
+            live_trading = True
+            trading_mode = "live"
+        else:
+            dry_run = True
+            live_trading = False
+            trading_mode = "live_ready"
+    elif mode_raw == "live_ready":
+        dry_run = True
+        live_trading = False
+        trading_mode = "live_ready"
+    elif mode_raw == "dry_run":
+        dry_run = True
+        live_trading = False
+        trading_mode = "dry_run"
+    else:
+        if dry_run and live_trading:
+            raise ConfigError("LIVE_TRADING and DRY_RUN cannot both be true")
+        if not live_trading and not dry_run:
+            raise ConfigError("DRY_RUN=false requires LIVE_TRADING=true (dual confirmation).")
+        if live_trading and not dry_run:
+            if live_confirm:
+                trading_mode = "live"
+            else:
+                dry_run = True
+                live_trading = False
+                trading_mode = "live_ready"
+        else:
+            trading_mode = "dry_run"
+
+    rate_mode = (_env(env, "RATE_MODE", "fixed") or "fixed").lower()
+    if rate_mode not in RATE_MODES:
+        raise ConfigError("RATE_MODE must be fixed, dynamic, or auto")
 
     candle_type = _env(env, "CANDLE_TYPE", DEFAULT_CANDLE_TYPE) or DEFAULT_CANDLE_TYPE
     if candle_type not in CANDLE_TYPES:
@@ -276,7 +353,21 @@ def load_config(
         api_secret=_env(env, "BITBANK_API_SECRET", "") or "",
         dry_run=dry_run,
         live_trading=live_trading,
+        live_trading_confirm=live_confirm and trading_mode == "live",
+        trading_mode=trading_mode,
+        rate_mode=rate_mode,
         simulate_fill=_bool(env, "DRY_RUN_SIMULATE_FILL", True),
+        atr_period=_int(env, "ATR_PERIOD", DEFAULT_ATR_PERIOD),
+        min_tp_pct=_dec(env, "MIN_TP_PCT", DEFAULT_MIN_TP_PCT),
+        max_tp_pct=_dec(env, "MAX_TP_PCT", DEFAULT_MAX_TP_PCT),
+        min_sl_pct=_dec(env, "MIN_SL_PCT", DEFAULT_MIN_SL_PCT),
+        max_sl_pct=_dec(env, "MAX_SL_PCT", DEFAULT_MAX_SL_PCT),
+        min_risk_pct=_dec(env, "MIN_RISK_PCT", DEFAULT_MIN_RISK_PCT),
+        max_risk_pct=_dec(env, "MAX_RISK_PCT", DEFAULT_MAX_RISK_PCT),
+        risk_pct=_dec(env, "RISK_PCT", DEFAULT_RISK_PCT),
+        high_vol_atr_pct=_dec(env, "HIGH_VOL_ATR_PCT", DEFAULT_HIGH_VOL_ATR_PCT),
+        atr_ref_pct=_dec(env, "ATR_REF_PCT", DEFAULT_ATR_REF_PCT),
+        high_vol_size_mult=_dec(env, "HIGH_VOL_SIZE_MULT", DEFAULT_HIGH_VOL_SIZE_MULT),
         candle_type=candle_type,
         ma_period=_int(env, "MA_PERIOD", DEFAULT_MA_PERIOD),
         short_ma_period=_int(
@@ -336,6 +427,8 @@ def load_config(
         ),
         max_drawdown_jpy=_dec(env, "MAX_DRAWDOWN_JPY", DEFAULT_MAX_DRAWDOWN_JPY),
     )
+    if trading_mode == "live" and not cfg.has_keys:
+        raise ConfigError("LIVE_TRADING requires BITBANK_API_KEY and BITBANK_API_SECRET")
     if live_trading and not cfg.has_keys:
         raise ConfigError("LIVE_TRADING requires BITBANK_API_KEY and BITBANK_API_SECRET")
     if cfg.ma_period < 2 or cfg.short_ma_period < 2 or cfg.long_ma_period < 2:

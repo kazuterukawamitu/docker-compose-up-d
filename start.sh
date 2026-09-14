@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Bitbank BTC/JPY launcher — opens the iTerm 取引画面 (trading screen).
 #
-# Paste this ONE line in iTerm (zsh is fine; this wraps bash):
-#   bash -lc 'REPO="$HOME/docker-compose-up-d"; set -euo pipefail; if [ ! -d "$REPO/.git" ]; then git clone https://github.com/kazuterukawamitu/docker-compose-up-d.git "$REPO"; fi; cd "$REPO"; git fetch origin cursor/bitbank-audit-unify-f5fd; git checkout -B cursor/bitbank-audit-unify-f5fd origin/cursor/bitbank-audit-unify-f5fd; exec bash ./start.sh --screen'
+# From a checkout of this repository:
+#   python3 launch.py
+#   bash start.sh
 #
-# That line clones if needed, checks out the bot branch (main is wiki HTML only),
-# then opens the trading dashboard. Do not paste python3 main.py. Do not use !.
+# Default is DRY_RUN. This script never sets LIVE_TRADING or the confirm phrase.
 
 if [ -z "${BASH_VERSION:-}" ]; then
   exec /usr/bin/env bash "$0" "$@"
@@ -17,31 +17,53 @@ export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:${PATH:-}"
 export PYTHONUNBUFFERED=1
 export PYTHONIOENCODING=utf-8
 
+REPO_URL="https://github.com/kazuterukawamitu/docker-compose-up-d.git"
 ROOT="$(cd "$(dirname "$0")" && pwd)"
-cd "$ROOT"
 
-BOT_BRANCH="cursor/bitbank-audit-unify-f5fd"
-
-ensure_bot_source() {
-  if [[ -f "$ROOT/src/bitbank_bot/__init__.py" && -f "$ROOT/main.py" ]]; then
+ensure_root() {
+  if [[ -f "$ROOT/src/bitbank_bot/__init__.py" && -f "$ROOT/launch.py" ]]; then
     return 0
   fi
-  echo "bot source not found at $ROOT (this clone is probably still on main / wiki dump)" >&2
-  if [[ ! -d "$ROOT/.git" ]]; then
-    echo "Paste this ONE line in iTerm:" >&2
-    echo "  bash -lc 'git clone https://github.com/kazuterukawamitu/docker-compose-up-d.git \"\$HOME/docker-compose-up-d\" && bash \"\$HOME/docker-compose-up-d/start.sh\" --screen'" >&2
-    exit 2
+  if [[ -n "${BITBANK_BOT_ROOT:-}" && -f "${BITBANK_BOT_ROOT}/src/bitbank_bot/__init__.py" ]]; then
+    ROOT="$(cd "${BITBANK_BOT_ROOT}" && pwd)"
+    return 0
   fi
-  echo "fetching $BOT_BRANCH so the trading screen can start" >&2
-  git fetch origin "$BOT_BRANCH"
-  git checkout -B "$BOT_BRANCH" "origin/$BOT_BRANCH"
-  if [[ ! -f "$ROOT/src/bitbank_bot/__init__.py" || ! -f "$ROOT/main.py" ]]; then
-    echo "still no bitbank_bot after checkout; branch may not be fetched" >&2
-    exit 2
+  local d
+  for d in \
+    "${PWD}/docker-compose-up-d" \
+    "${HOME}/docker-compose-up-d" \
+    "${HOME}/Documents/docker-compose-up-d" \
+    "${HOME}/src/docker-compose-up-d"
+  do
+    if [[ -f "$d/src/bitbank_bot/__init__.py" ]]; then
+      ROOT="$(cd "$d" && pwd)"
+      return 0
+    fi
+  done
+  local dest="${BITBANK_BOT_ROOT:-$HOME/docker-compose-up-d}"
+  if [[ ! -e "$dest" ]] && command -v git >/dev/null 2>&1; then
+    echo "bot source not in $(pwd); cloning $REPO_URL -> $dest"
+    git clone --depth 1 "$REPO_URL" "$dest"
+    ROOT="$(cd "$dest" && pwd)"
+    return 0
   fi
+  echo "Bitbank ボットのソースが見つかりません。ホーム (~) で実行しています。" >&2
+  echo "~/main.py は別プログラムです。実行しないでください。" >&2
+  echo "iTerm に次を 1 行ずつ貼り付けてください:" >&2
+  echo "  git clone $REPO_URL" >&2
+  echo "  cd docker-compose-up-d" >&2
+  echo "  bash start.sh" >&2
+  exit 2
 }
 
-ensure_bot_source
+ensure_root
+cd "$ROOT"
+
+if [[ ! -f "$ROOT/launch.py" || ! -f "$ROOT/src/bitbank_bot/__init__.py" ]]; then
+  echo "bot source not found at $ROOT" >&2
+  echo "cd into the Bitbank bot checkout, then: python3 launch.py" >&2
+  exit 2
+fi
 
 pick_python() {
   local c
@@ -151,7 +173,7 @@ if [[ -t 1 ]]; then
 fi
 for a in "$@"; do
   case "$a" in
-    --once|--check-config|--preflight|--backtest|--no-screen)
+    --once|--check-config|--preflight|--backtest|--no-screen|--doctor|--version)
       want_screen=0
       ;;
     --screen)
@@ -173,10 +195,10 @@ if [[ "$want_screen" -eq 1 ]]; then
   fi
 fi
 
-echo "opening Bitbank BTC/JPY 取引画面 (Ctrl-C to stop)"
+echo "opening Bitbank BTC/JPY 取引画面 via launch.py (Ctrl-C to stop)"
 echo "HOLD/WAIT is normal. JSON detail is logs/bot.log"
 echo "using $VPY"
 
 # Default (no extra args): continuous loop + trading screen on a TTY.
 # Do not pass --once here.
-exec "$VPY" "$ROOT/main.py" "${SCREEN_ARGS[@]}" "$@"
+exec "$VPY" "$ROOT/launch.py" "${SCREEN_ARGS[@]}" "$@"

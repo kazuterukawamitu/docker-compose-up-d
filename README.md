@@ -2,31 +2,55 @@
 
 Bitbank-only `btc_jpy` bot. Default is a **continuous DRY_RUN loop** with an iTerm **取引画面** (trading dashboard). HOLD/WAIT on a bar is normal. JSON lines are written to `logs/bot.log`, not the dashboard.
 
-`main` on GitHub is still wiki HTML. The runnable bot is branch `cursor/bitbank-audit-unify-f5fd`.
-
-HOLD for 15 minutes while market data and strategy are healthy is `LONG_WAIT`, not a crash. Public-API fallback candles never place orders. Live UNFILLED limits are persisted and polled. New BUY is blocked when both 4h and 1d SMA slopes are down (`ENABLE_HTF_FILTER`).
+Start with `python3 launch.py`. HOLD for 15 minutes while market data and strategy are healthy is `LONG_WAIT`, not a crash. Public-API fallback candles never place orders. Live UNFILLED limits are persisted and polled. New BUY is blocked when both 4h and 1d SMA slopes are down (`ENABLE_HTF_FILTER`).
 
 ## Start (this is the program)
 
-`main` on GitHub is wiki HTML. You do **not** need pip, venv, or `start.sh` for the bot to run.
+Do **not** run these from the home folder (`~`). `~/main.py` is often a different app (Sentry). Paste **one line at a time**. Do not paste lines that start with `#`.
 
-Paste **this one line** in iTerm. It downloads `run.py` and starts a DRY_RUN 取引画面 (no orders):
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/kazuterukawamitu/docker-compose-up-d/cursor/bitbank-audit-unify-f5fd/run.py -o "$HOME/bitbank_run.py" && python3 "$HOME/bitbank_run.py"
-```
-
-You should see `Bitbank  BTC/JPY  取引画面`. HOLD/待機 is normal. Stop with Ctrl-C.
-
-If this repo is already checked out on this branch:
+First clone (only needed once):
 
 ```bash
-python3 run.py
+git clone https://github.com/kazuterukawamitu/docker-compose-up-d.git
 ```
 
-`python3 main.py` also works: it uses the full package when httpx is installed, otherwise the same stdlib `run.py`.
+Then every time:
 
-Live trading stays **off** unless `.env` has `DRY_RUN=false` **and** `LIVE_TRADING=true` **and** both API keys.
+```bash
+cd docker-compose-up-d
+```
+
+```bash
+bash start.sh
+```
+
+`bash start.sh` installs a venv if needed and opens the DRY_RUN 取引画面. You can also run `python3 launch.py` after `cd docker-compose-up-d`.
+
+You should see `Bitbank BTC/JPY 起動プログラム` then `Bitbank  BTC/JPY  取引画面`. HOLD/待機 is normal. Stop with Ctrl-C.
+
+If Apple `python3` is 3.9 (LibreSSL warning), install 3.12 then start with it:
+
+```bash
+brew install python@3.12
+```
+
+```bash
+/opt/homebrew/bin/python3.12 launch.py
+```
+
+`python3 run.py` is the stdlib-only DRY_RUN screen (no pip). Do not run `python3 main.py` from `~`.
+
+`python3 launch.py --doctor` prints a safe environment check (no secrets). If you copied `launch.py` to another folder, it looks for `~/docker-compose-up-d` and clones there when missing.
+
+Live trading stays **off** unless `.env` has `TRADING_MODE=live` **and**
+`DRY_RUN=false` **and** `LIVE_TRADING=true` **and**
+`LIVE_TRADING_CONFIRM=YES_I_ACCEPT_REAL_MONEY_RISK` **and** both API keys.
+
+Without the confirm phrase, `DRY_RUN=false` + `LIVE_TRADING=true` becomes
+**LIVE_READY** (full path, `WOULD_SUBMIT_ORDER`, no `create_order`).
+
+`RATE_MODE=fixed` (default) keeps README take-profits (+3/+4/+5/+8).
+`dynamic` / `auto` only scale TP/size from ATR; they do not change entry rules.
 
 `--once --synthetic` is a one-cycle smoke test that **exits on purpose**. The launcher above does **not** use `--once`.
 
@@ -66,8 +90,9 @@ State-machine mapping: [docs/STRATEGY.md](docs/STRATEGY.md).
 ## Tests
 
 ```bash
-bash ~/docker-compose-up-d/start.sh --once --synthetic --skip-lock
-PYTHONPATH=src .venv/bin/python -m pytest -q
+bash start.sh --once --synthetic --skip-lock
+python3 launch.py --once --synthetic --skip-lock --no-screen
+PYTHONPATH=src python3 -m pytest -q
 ```
 
 Read-only execution check (never places an order):

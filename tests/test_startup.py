@@ -15,12 +15,25 @@ def test_compileall_src() -> None:
     for path in (root / "src").rglob("*.py"):
         py_compile.compile(str(path), doraise=True)
     py_compile.compile(str(root / "main.py"), doraise=True)
+    py_compile.compile(str(root / "launch.py"), doraise=True)
     py_compile.compile(str(root / "run.py"), doraise=True)
     diag = root / "diagnostics.py"
     if diag.is_file():
         py_compile.compile(str(diag), doraise=True)
     for path in (root / "scripts").rglob("*.py"):
         py_compile.compile(str(path), doraise=True)
+
+
+def test_cli_dry_run_forces_dry_run_mode(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("STATE_PATH", str(tmp_path / "state.json"))
+    monkeypatch.setenv("LOCK_PATH", str(tmp_path / "bot.lock"))
+    monkeypatch.setenv("LOG_DIR", str(tmp_path / "logs"))
+    monkeypatch.setenv("TRADING_MODE", "live_ready")
+    rc = main(["--check-config", "--dry-run"])
+    assert rc == 0
+    text = capsys.readouterr().out
+    assert '"trading_mode": "dry_run"' in text
+    assert '"may_place_live_orders": false' in text
 
 
 def test_check_config_exit_zero() -> None:
@@ -52,8 +65,11 @@ def test_start_sh_is_venv_loop_launcher() -> None:
     assert ".env.example" in text
     assert "python3.12" in text
     assert "python3" in text
-    assert 'BOT_BRANCH="cursor/bitbank-audit-unify-f5fd"' in text
+    assert "launch.py" in text
+    assert "bitbank-audit-unify-f5fd" not in text
     assert "run.py" in text
+    assert "git clone" in text
+    assert "~/main.py" in text
 
 
 def test_loop_cli_exits_after_max_cycles(tmp_path, monkeypatch) -> None:
@@ -101,6 +117,7 @@ def test_main_py_runs_without_pythonpath(tmp_path) -> None:
     assert proc.returncode == 0, proc.stderr + proc.stdout
     assert "may_place_live_orders" in proc.stdout
     assert "run_once complete" in proc.stdout
+    assert "起動プログラム" in proc.stdout
 
 
 def test_audit_script_runs_without_pythonpath() -> None:

@@ -29,11 +29,13 @@ class BitbankAPIError(RuntimeError):
         code: int | None = None,
         http_status: int | None = None,
         body: Any = None,
+        endpoint: str | None = None,
     ) -> None:
         super().__init__(message)
         self.code = code
         self.http_status = http_status
         self.body = body
+        self.endpoint = endpoint
 
 
 def is_auth_error(exc: BitbankAPIError) -> bool:
@@ -126,6 +128,8 @@ class RestClient:
         self._owns_http = http is None
         self.http = http or httpx.Client(timeout=timeout_sec)
         self.limiter = limiter or RateLimiter(query_rps, update_rps)
+        self.last_success_mono = 0.0
+        self.last_error_kind = ""
 
     def close(self) -> None:
         if self._owns_http:
@@ -146,9 +150,12 @@ class RestClient:
         headers: dict[str, str] | None = None,
         content: bytes | None = None,
         public: bool = False,
+        idempotent: bool = True,
+        endpoint: str = "",
     ) -> Any:
         last_error: Exception | None = None
-        attempts = max(1, self.max_retries)
+        attempts = max(1, self.max_retries) if idempotent else 1
+        path = endpoint or url.split(".cc")[-1][:80]
         for attempt in range(attempts):
             self.limiter.wait(kind)
             try:
@@ -157,26 +164,37 @@ class RestClient:
                 )
             except httpx.HTTPError as exc:
                 last_error = exc
-                slog("ERROR", "http transport error", error=type(exc).__name__)
+                self.last_error_kind = type(exc).__name__
+                slog(
+                    "ERROR",
+                    "http transport error",
+                    error=type(exc).__name__,
+                    endpoint=path,
+                    attempt=attempt,
+                )
                 if attempt + 1 >= attempts:
                     break
                 time.sleep(_backoff_seconds(attempt))
                 continue
             if response.status_code == 429:
-                slog("ERROR", "HTTP 429 rate limited", attempt=attempt)
+                slog("ERROR", "HTTP 429 rate limited", attempt=attempt, endpoint=path)
                 if attempt + 1 >= attempts:
                     raise BitbankAPIError(
-                        "rate limited", http_status=429, body=response.text
+                        "rate limited",
+                        http_status=429,
+                        body=response.text,
+                        endpoint=path,
                     )
                 time.sleep(_backoff_seconds(attempt))
                 continue
             if response.status_code >= 500:
-                slog("ERROR", "HTTP 5xx", status=response.status_code, attempt=attempt)
+                slog("ERROR", "HTTP 5xx", status=response.status_code, attempt=attempt, endpoint=path)
                 if attempt + 1 >= attempts:
                     raise BitbankAPIError(
                         "server error",
                         http_status=response.status_code,
                         body=response.text,
+                        endpoint=path,
                     )
                 time.sleep(_backoff_seconds(attempt))
                 continue
@@ -185,11 +203,14 @@ class RestClient:
                     f"http {response.status_code}",
                     http_status=response.status_code,
                     body=response.text,
+                    endpoint=path,
                 )
             try:
                 payload = response.json()
             except json.JSONDecodeError as exc:
-                raise BitbankAPIError("invalid json", body=response.text) from exc
+                raise BitbankAPIError(
+                    "invalid json", body=response.text, endpoint=path
+                ) from exc
             if payload.get("success") != 1:
                 data = payload.get("data") or {}
                 code = data.get("code") if isinstance(data, dict) else None
@@ -198,17 +219,24 @@ class RestClient:
                     code=code,
                     http_status=response.status_code,
                     body=payload,
+                    endpoint=path,
                 )
             stage = "PUBLIC_API" if public else "PRIVATE_API"
-            slog(stage, f"{method} ok", url_path=url.split(".cc")[-1][:80])
+            slog(stage, f"{method} ok", url_path=path)
+            self.last_success_mono = time.monotonic()
+            self.last_error_kind = ""
             return payload.get("data")
-        raise BitbankAPIError(f"request failed: {last_error}")
+        raise BitbankAPIError(
+            f"request failed: {last_error}", endpoint=path
+        )
 
     def public_get(self, path: str) -> Any:
         if not path.startswith("/"):
             path = "/" + path
         url = self.public_url + path
-        return self._request("GET", url, kind="query", public=True)
+        return self._request(
+            "GET", url, kind="query", public=True, idempotent=True, endpoint=path
+        )
 
     def get_ticker(self, pair: str) -> dict[str, Any]:
         data = self.public_get(f"/{pair}/ticker")
@@ -216,15 +244,36 @@ class RestClient:
         return data
 
     def get_candlestick(self, pair: str, candle_type: str, date_key: str) -> list[list[Any]]:
-        data = self.public_get(f"/{pair}/candlestick/{candle_type}/{date_key}")
+        path = f"/{pair}/candlestick/{candle_type}/{date_key}"
+        try:
+            data = self.public_get(path)
+        except BitbankAPIError as exc:
+            slog(
+                "CANDLE_API_ERROR",
+                "candlestick request failed",
+                pair=pair,
+                candle_type=candle_type,
+                date=date_key,
+                endpoint=exc.endpoint or path,
+                http_status=exc.http_status,
+                bitbank_code=exc.code,
+            )
+            raise
         sticks = data.get("candlestick") or []
         if not sticks:
             return []
-        return list(sticks[0].get("ohlcv") or [])
+        chosen = sticks[0]
+        for row in sticks:
+            if str(row.get("type") or "") == candle_type:
+                chosen = row
+                break
+        return list(chosen.get("ohlcv") or [])
 
     def get_spot_status(self, pair: str | None = None) -> dict[str, Any] | None:
         url = self.private_url + "/spot/status"
-        data = self._request("GET", url, kind="query", public=True)
+        data = self._request(
+            "GET", url, kind="query", public=True, endpoint="/spot/status", idempotent=True
+        )
         statuses = data.get("statuses") or []
         if pair is None:
             return data
@@ -258,7 +307,7 @@ class RestClient:
             qs = "?" + urlencode(query, doseq=True)
         url = self.private_url + path + qs
         headers = self._private_headers(payload)
-        return self._request("GET", url, kind="query", headers=headers)
+        return self._request("GET", url, kind="query", headers=headers, endpoint=path, idempotent=True)
 
     def private_post(self, path: str, body: dict[str, Any], *, update: bool = True) -> Any:
         if not path.startswith("/"):
@@ -273,6 +322,8 @@ class RestClient:
             kind=kind,
             headers=headers,
             content=raw.encode("utf-8"),
+            endpoint=path,
+            idempotent=False,
         )
 
     def get_assets(self) -> dict[str, Any]:

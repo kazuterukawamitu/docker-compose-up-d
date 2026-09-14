@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Sequence
 
 from bitbank_bot.config import Config
+from bitbank_bot.logging_setup import slog
 from bitbank_bot.indicators import (
     Trend,
     crossed_down,
@@ -65,6 +66,9 @@ class Signal:
     peak_price: Decimal | None = None
     origin_price: Decimal | None = None
     crossover_price_bp: Decimal | None = None
+    gates: dict[str, bool] = field(default_factory=dict)
+    score: int = 0
+    score_max: int = 0
 
     @staticmethod
     def hold(reason: str = "no_setup") -> "Signal":
@@ -270,7 +274,11 @@ class Strategy:
         buy = self._buy_signal(snap)
         if buy.kind != "HOLD":
             return buy
-        return Signal.hold("no_buy_setup")
+        hold = Signal.hold("no_buy_setup")
+        hold.gates = buy.gates
+        hold.score = buy.score
+        hold.score_max = buy.score_max
+        return hold
 
     def _tp_signal(self, snap: MarketSnapshot, position: Position) -> Signal:
         target = pct_offset(position.average_price, position.tp_pct)
@@ -326,11 +334,41 @@ class Strategy:
         return Signal.hold("no_sell_setup")
 
     def _buy_signal(self, snap: MarketSnapshot) -> Signal:
-        if (
-            snap.prev_ma_trend == Trend.DOWN
-            and snap.ma_trend in {Trend.FLAT, Trend.UP}
-            and snap.crossed_up
-        ):
+        prev_turned = snap.prev_ma_trend == Trend.DOWN and snap.ma_trend in {
+            Trend.FLAT,
+            Trend.UP,
+        }
+        buy1 = prev_turned and snap.crossed_up
+        buy2 = snap.ma_trend == Trend.UP and snap.crossed_down
+        buy3 = bool(self._buy3)
+        buy4 = bool(self._buy4)
+        gates = {
+            "granville_turn": prev_turned,
+            "crossed_up": snap.crossed_up,
+            "ma_uptrend": snap.ma_trend == Trend.UP,
+            "crossed_down": snap.crossed_down,
+            "buy3_pullback": buy3,
+            "buy4_dip": buy4,
+            "golden_cross": snap.golden_cross,
+        }
+        score = sum(1 for v in gates.values() if v)
+        score_max = len(gates)
+        slog(
+            "STRATEGY",
+            "BUY_GATE",
+            granville_turn=prev_turned,
+            crossed_up=snap.crossed_up,
+            ma_uptrend=snap.ma_trend.value,
+            crossed_down=snap.crossed_down,
+            buy3_pullback=buy3,
+            buy4_dip=buy4,
+            golden_cross=snap.golden_cross,
+            trend=snap.ma_trend.value,
+            close=str(snap.close),
+            ma=str(snap.ma),
+            score=f"{score}/{score_max}",
+        )
+        if buy1:
             return Signal(
                 "BUY1",
                 "buy",
@@ -339,8 +377,11 @@ class Strategy:
                 cross_price=snap.cross_price,
                 crossover_price_bp=snap.crossover_price_bp
                 or crossover_price_bp(snap.cross_price),
+                gates=gates,
+                score=score,
+                score_max=score_max,
             )
-        if snap.ma_trend == Trend.UP and snap.crossed_down:
+        if buy2:
             tp = self.cfg.buy2_golden_tp if snap.golden_cross else self.cfg.buy2_tp
             return Signal(
                 "BUY2",
@@ -351,24 +392,37 @@ class Strategy:
                 cross_price=snap.cross_price,
                 crossover_price_bp=snap.crossover_price_bp
                 or crossover_price_bp(snap.cross_price),
+                gates=gates,
+                score=score,
+                score_max=score_max,
             )
-        if self._buy3:
+        if buy3:
             return Signal(
                 "BUY3",
                 "buy",
                 self.cfg.buy3_tp,
                 "pullback then bounce above MA",
                 origin_price=self.buy3.origin,
+                gates=gates,
+                score=score,
+                score_max=score_max,
             )
-        if self._buy4:
+        if buy4:
             return Signal(
                 "BUY4",
                 "buy",
                 self.cfg.buy4_tp,
                 "downtrend MA, price >=5% below, then rising",
                 origin_price=self.buy4.origin,
+                gates=gates,
+                score=score,
+                score_max=score_max,
             )
-        return Signal.hold("no_buy_setup")
+        hold = Signal.hold("no_buy_setup")
+        hold.gates = gates
+        hold.score = score
+        hold.score_max = score_max
+        return hold
 
 
 def build_snapshots(
