@@ -16,7 +16,7 @@ fi
 
 set -euo pipefail
 
-BOT_BRANCH="cursor/bitbank-closed-loop-f964"
+BOT_BRANCH="cursor/closed-loop-launcher-563e"
 
 not_in_repo() {
   echo "cd to the repo first, then run: bash ./start.sh" >&2

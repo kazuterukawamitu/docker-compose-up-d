@@ -56,7 +56,7 @@ NOT_IN_REPO_HINT = (
     "Typical clone name: docker-compose-up-d\n"
     "  cd ~/docker-compose-up-d && bash ./start.sh\n"
     "Or from ~ (no cd): bash ~/docker-compose-up-d/start.sh\n"
-    "start.sh is on branch cursor/bitbank-closed-loop-f964 "
+    "start.sh is on branch cursor/closed-loop-launcher-563e "
     "(git ls-files start.sh must print start.sh).\n"
     "If you are on main, checkout that branch or merge the PR.\n"
     "Do not paste pytest output (.... [ 40%] / 179 passed) into the terminal.\n"
@@ -291,6 +291,32 @@ def env_file_from_argv(forwarded: list[str]) -> str | None:
     return None
 
 
+ADDED_OUTPUT_PROGRAMS = (
+    "src/bitbank_bot/launch.py",
+    "scripts/home_start.sh",
+    "scripts/install_launch_alias.sh",
+    "scripts/run_bot.sh",
+    "scripts/run_tests.sh",
+)
+REMOVED_OUTPUT_PROGRAMS: tuple[str, ...] = ()
+
+
+def program_inventory_lines() -> list[str]:
+    """Disclose output-program count vs origin/main (6 launchers)."""
+    added = len(ADDED_OUTPUT_PROGRAMS)
+    removed = len(REMOVED_OUTPUT_PROGRAMS)
+    now = 6 + added - removed
+    delta = f"+{added}" if added else "0"
+    return [
+        "PROGRAM_INVENTORY vs origin/main",
+        "  output_programs: 6 -> "
+        f"{now} ({delta}; removed {removed})",
+        "  added: " + ", ".join(ADDED_OUTPUT_PROGRAMS),
+        "  removed: " + (", ".join(REMOVED_OUTPUT_PROGRAMS) if REMOVED_OUTPUT_PROGRAMS else "none"),
+        "  取引画面 still: python3 run.py | python3 main.py | bash ./start.sh",
+    ]
+
+
 def diagnostics_lines(
     cfg: Config,
     *,
@@ -317,6 +343,7 @@ def diagnostics_lines(
         f"  lock: {lock_text}",
         f"  kill_switch: {kill_text}",
         f"  log_dir: {cfg.log_dir} ({LOG_ROTATION_HINT})",
+        *program_inventory_lines(),
         *( [f"  note: {extra_note}"] if extra_note else [] ),
     ]
 

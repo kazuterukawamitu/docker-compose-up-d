@@ -63,6 +63,9 @@ def test_diagnostics_hide_secrets_and_show_modes() -> None:
     assert "RECONCILE_EVERY_CYCLES: 10" in text
     assert "CANDLE_TYPE: 1hour" in text
     assert "DRY_RUN/LIVE_READY/LIVE: DRY_RUN" in text
+    assert "PROGRAM_INVENTORY vs origin/main" in text
+    assert "output_programs: 6 -> 11" in text
+    assert "removed: none" in text
     assert key_status("") == "UNSET"
 
 

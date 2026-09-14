@@ -54,7 +54,7 @@ def test_start_sh_is_venv_loop_launcher() -> None:
     assert ".env.example" in text
     assert "python3.12" in text
     assert "python3" in text
-    assert 'BOT_BRANCH="cursor/bitbank-closed-loop-f964"' in text
+    assert 'BOT_BRANCH="cursor/closed-loop-launcher-563e"' in text
     assert "run.py" in text
     assert "bitbank_bot.launch" in text
     assert "/Users/kazuteru" not in text

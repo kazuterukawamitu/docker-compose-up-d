@@ -18,7 +18,7 @@ fi
 
 set -euo pipefail
 
-BOT_BRANCH="cursor/bitbank-closed-loop-f964"
+BOT_BRANCH="cursor/closed-loop-launcher-563e"
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root="$(cd "$here/.." && pwd)"
 finder="$here/home_start.sh"

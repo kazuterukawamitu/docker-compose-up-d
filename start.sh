@@ -8,7 +8,7 @@
 #   bash ./start.sh --help
 #
 # First-time clone (paste this ONE line, not pytest output):
-#   bash -lc 'REPO="$HOME/docker-compose-up-d"; set -euo pipefail; if [ ! -d "$REPO/.git" ]; then git clone https://github.com/kazuterukawamitu/docker-compose-up-d.git "$REPO"; fi; cd "$REPO"; git fetch origin cursor/bitbank-closed-loop-f964; git checkout -B cursor/bitbank-closed-loop-f964 origin/cursor/bitbank-closed-loop-f964; exec bash ./start.sh --screen'
+#   bash -lc 'REPO="$HOME/docker-compose-up-d"; set -euo pipefail; if [ ! -d "$REPO/.git" ]; then git clone https://github.com/kazuterukawamitu/docker-compose-up-d.git "$REPO"; fi; cd "$REPO"; git fetch origin cursor/closed-loop-launcher-563e; git checkout -B cursor/closed-loop-launcher-563e origin/cursor/closed-loop-launcher-563e; exec bash ./start.sh --screen'
 #
 # Locates this repo (no hardcoded /Users/... path), creates .venv if needed,
 # prefers .venv/bin/python (never CommandLineTools python when a venv exists),
@@ -50,7 +50,7 @@ If bash says: ./start.sh: No such file or directory
   You ran ./start.sh from ~ (relative path). Use the absolute path or cd:
     bash ~/docker-compose-up-d/start.sh
     cd ~/docker-compose-up-d && bash ./start.sh
-  Confirm branch cursor/bitbank-closed-loop-f964:
+  Confirm branch cursor/closed-loop-launcher-563e:
     git ls-files start.sh
   Optional home-safe finder (so cd ~ && bash ./start.sh prints this hint):
     bash scripts/install_launch_alias.sh
@@ -83,7 +83,7 @@ EOF
 suggest_clones() {
   echo "Typical clone name: docker-compose-up-d" >&2
   echo "  cd ~/docker-compose-up-d" >&2
-  echo "  git checkout cursor/bitbank-closed-loop-f964" >&2
+  echo "  git checkout cursor/closed-loop-launcher-563e" >&2
   echo "  git ls-files start.sh    # must print: start.sh" >&2
   echo "  bash ./start.sh" >&2
   echo "Or from ~: bash ~/docker-compose-up-d/start.sh" >&2
@@ -145,7 +145,7 @@ for a in "$@"; do
   fi
 done
 
-BOT_BRANCH="cursor/bitbank-closed-loop-f964"
+BOT_BRANCH="cursor/closed-loop-launcher-563e"
 
 ensure_bot_source() {
   if [[ -f "$ROOT/src/bitbank_bot/__init__.py" && -f "$ROOT/src/bitbank_bot/launch.py" && -f "$ROOT/main.py" ]]; then

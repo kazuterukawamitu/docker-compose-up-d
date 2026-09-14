@@ -17,6 +17,10 @@ runnable bot lives in `src/bitbank_bot/`. This branch is Bitbank `btc_jpy` only.
 | Screen | `screen.py` | iTerm 取引画面; JSON stays in `logs/bot.log` |
 | 4h+1d filter | `multi_timeframe.py` | Hard BUY block when both HTF SMAs slope down, or HTF data missing |
 | Watchdog | `watchdog.py` | HOLD past 15 minutes is `LONG_WAIT`, not `FAIL` |
+| RateEngine | `rate_engine.py` | FIXED keeps 3/4/5/8% TPs; DYNAMIC/AUTO scale from ATR |
+| Execution gate | `execution_gate.py` | Last checks before OrderExecutor |
+| Reconcile | `reconciliation.py` | Bitbank balances/open orders are source of truth |
+| Launcher | `launch.py` + `start.sh` | Enhanced start; prints PROGRAM_INVENTORY |
 | Read-only audit | `scripts/bitbank_execution_audit.py` | ticker / assets / active_orders / trade_history |
 
 `run.py` is a stdlib-only DRY_RUN 取引画面. It is the program that

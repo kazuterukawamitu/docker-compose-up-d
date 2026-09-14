@@ -3,7 +3,7 @@
 Bitbank-only `btc_jpy` bot. Default is a **continuous DRY_RUN loop** with an iTerm **取引画面** (trading dashboard). HOLD/WAIT on a bar is normal. JSON lines are written to `logs/bot.log`, not the dashboard.
 
 `main` on GitHub is still mostly wiki HTML plus an older launcher. The
-runnable bot on this PR is branch `cursor/bitbank-closed-loop-f964`.
+runnable bot on this PR is branch `cursor/closed-loop-launcher-563e`.
 
 HOLD for 15 minutes while market data and strategy are healthy is `LONG_WAIT`, not a crash. Public-API fallback candles never place orders. Live UNFILLED limits are persisted and polled. New BUY is blocked when both 4h and 1d SMA slopes are down (`ENABLE_HTF_FILTER`).
 
@@ -20,12 +20,12 @@ random file while your cwd is `~` — that is
 `start.sh` always `cd`s to the repo from its own path (`BASH_SOURCE`) and
 runs `.venv/bin/python -m bitbank_bot.launch` (it creates `.venv` first).
 Either `cd` into the clone **or** call `start.sh` by absolute path from
-home. Branch `cursor/bitbank-closed-loop-f964`:
+home. Branch `cursor/closed-loop-launcher-563e`:
 
 ```bash
 cd ~/docker-compose-up-d
-git fetch origin cursor/bitbank-closed-loop-f964
-git checkout cursor/bitbank-closed-loop-f964
+git fetch origin cursor/closed-loop-launcher-563e
+git checkout cursor/closed-loop-launcher-563e
 git ls-files start.sh    # must print: start.sh
 bash ./start.sh
 
@@ -36,6 +36,14 @@ bash ~/docker-compose-up-d/start.sh
 `bash ./start.sh --help` prints the same instructions. A thin wrapper is
 `bash scripts/run_bot.sh` (refuses unless cwd is this repo). Tests:
 `bash ~/docker-compose-up-d/scripts/run_tests.sh` (not `pytest` from `~`).
+
+Launcher startup prints `PROGRAM_INVENTORY vs origin/main` (6 → 11 output
+programs, none removed). Spec: [docs/MASTER_REQUIREMENTS.md](docs/MASTER_REQUIREMENTS.md),
+[docs/PROGRAM_INVENTORY.md](docs/PROGRAM_INVENTORY.md),
+[docs/COMPLETION_MATRIX.md](docs/COMPLETION_MATRIX.md).
+
+`RATE_MODE=fixed` (default) keeps README take-profits +3/+4/+5/+8%.
+`dynamic` / `auto` scale TP/SL/size from ATR and never POST on synthetic data.
 
 ### `bash: ./start.sh: No such file or directory`
 
@@ -49,7 +57,7 @@ Fix:
 
 ```bash
 cd ~/docker-compose-up-d
-git checkout cursor/bitbank-closed-loop-f964
+git checkout cursor/closed-loop-launcher-563e
 bash ./start.sh
 # or: bash ~/docker-compose-up-d/start.sh
 ```
@@ -100,7 +108,7 @@ under systemd (`deploy/bitbank-bot.service`) or pass `--no-supervise`.
 Paste **this one line** in iTerm to clone and open the 取引画面:
 
 ```bash
-bash -lc 'REPO="$HOME/docker-compose-up-d"; set -euo pipefail; if [ ! -d "$REPO/.git" ]; then git clone https://github.com/kazuterukawamitu/docker-compose-up-d.git "$REPO"; fi; cd "$REPO"; git fetch origin cursor/bitbank-closed-loop-f964; git checkout -B cursor/bitbank-closed-loop-f964 origin/cursor/bitbank-closed-loop-f964; exec bash ./start.sh --screen'
+bash -lc 'REPO="$HOME/docker-compose-up-d"; set -euo pipefail; if [ ! -d "$REPO/.git" ]; then git clone https://github.com/kazuterukawamitu/docker-compose-up-d.git "$REPO"; fi; cd "$REPO"; git fetch origin cursor/closed-loop-launcher-563e; git checkout -B cursor/closed-loop-launcher-563e origin/cursor/closed-loop-launcher-563e; exec bash ./start.sh --screen'
 ```
 
 HOLD/待機 is normal. Stop with Ctrl-C.
