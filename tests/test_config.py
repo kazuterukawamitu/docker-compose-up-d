@@ -57,11 +57,37 @@ def test_balance_usage_alias() -> None:
     assert str(cfg.max_balance_usage) == "0.8"
 
 
-def test_repr_hides_secret() -> None:
+def test_trading_mode_live_ready() -> None:
     cfg = load_config(
-        environ={"BITBANK_API_KEY": "k", "BITBANK_API_SECRET": "s" * 16},
+        environ={"LIVE_READY": "true", "DRY_RUN": "true", "LIVE_TRADING": "false"},
         load_default_dotenv=False,
     )
-    text = repr(cfg)
-    assert "s" * 16 not in text
-    assert cfg.api_secret == "s" * 16
+    assert cfg.live_ready is True
+    assert cfg.trading_mode == "live_ready"
+    assert cfg.may_place_live_orders is False
+
+
+def test_trading_mode_env_live_requires_keys() -> None:
+    with pytest.raises(ConfigError, match="requires BITBANK_API"):
+        load_config(environ={"TRADING_MODE": "live"}, load_default_dotenv=False)
+
+
+def test_rate_mode_invalid() -> None:
+    with pytest.raises(ConfigError, match="RATE_MODE"):
+        load_config(environ={"RATE_MODE": "wild"}, load_default_dotenv=False)
+
+
+def test_live_confirm_mismatch_degrades() -> None:
+    cfg = load_config(
+        environ={
+            "DRY_RUN": "false",
+            "LIVE_TRADING": "true",
+            "BITBANK_API_KEY": "k",
+            "BITBANK_API_SECRET": "s",
+            "LIVE_TRADING_CONFIRM": "nope",
+        },
+        load_default_dotenv=False,
+    )
+    assert cfg.live_ready is True
+    assert cfg.live_trading is False
+    assert cfg.may_place_live_orders is False

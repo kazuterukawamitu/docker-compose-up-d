@@ -18,6 +18,7 @@ from bitbank_bot.indicators import (
     ma_trend,
     moving_average,
 )
+from bitbank_bot.logging_setup import slog
 from bitbank_bot.money import ONE, pct_offset
 
 
@@ -326,11 +327,32 @@ class Strategy:
         return Signal.hold("no_sell_setup")
 
     def _buy_signal(self, snap: MarketSnapshot) -> Signal:
-        if (
+        buy1 = (
             snap.prev_ma_trend == Trend.DOWN
             and snap.ma_trend in {Trend.FLAT, Trend.UP}
             and snap.crossed_up
-        ):
+        )
+        buy2 = snap.ma_trend == Trend.UP and snap.crossed_down
+        score = int(buy1) + int(buy2) + int(self._buy3) + int(self._buy4)
+        slog(
+            "BUY_GATE",
+            "buy checks",
+            granville_pullback=self._buy3,
+            trend_ok=snap.ma_trend.value != Trend.DOWN.value,
+            trend=snap.ma_trend.value,
+            prev_trend=snap.prev_ma_trend.value,
+            crossed_up=snap.crossed_up,
+            crossed_down=snap.crossed_down,
+            golden_cross=snap.golden_cross,
+            buy1=buy1,
+            buy2=buy2,
+            buy3=self._buy3,
+            buy4=self._buy4,
+            score=f"{score}/4",
+            close=str(snap.close),
+            ma=str(snap.ma),
+        )
+        if buy1:
             return Signal(
                 "BUY1",
                 "buy",
@@ -340,7 +362,7 @@ class Strategy:
                 crossover_price_bp=snap.crossover_price_bp
                 or crossover_price_bp(snap.cross_price),
             )
-        if snap.ma_trend == Trend.UP and snap.crossed_down:
+        if buy2:
             tp = self.cfg.buy2_golden_tp if snap.golden_cross else self.cfg.buy2_tp
             return Signal(
                 "BUY2",

@@ -52,4 +52,6 @@ def test_run_py_works_without_repo_src(tmp_path) -> None:
 def test_start_sh_falls_back_to_run_py() -> None:
     text = Path(__file__).resolve().parents[1].joinpath("start.sh").read_text(encoding="utf-8")
     assert "run.py" in text
-    assert "stdlib DRY_RUN" in text
+    assert "launch.py" in text
+    launch = Path(__file__).resolve().parents[1].joinpath("launch.py").read_text(encoding="utf-8")
+    assert "stdlib DRY_RUN" in launch

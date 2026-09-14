@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 
 from bitbank_bot.config import ConfigError, load_config
@@ -27,6 +28,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="use synthetic candles (still loops unless --once is set)",
     )
     parser.add_argument("--dry-run", action="store_true", help="force DRY_RUN=true")
+    parser.add_argument(
+        "--live-ready",
+        action="store_true",
+        help="full live path except POST /user/spot/order",
+    )
+    parser.add_argument(
+        "--live",
+        action="store_true",
+        help="set DRY_RUN=false LIVE_TRADING=true (requires API keys)",
+    )
     parser.add_argument("--preflight", action="store_true", help="run preflight and exit")
     parser.add_argument("--check-config", action="store_true", help="load config and exit")
     parser.add_argument(
@@ -61,6 +72,18 @@ def _parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if bool(getattr(args, "live", False)) and bool(getattr(args, "live_ready", False)):
+        setup_logging()
+        slog("ERROR", "choose one of --live or --live-ready")
+        return 2
+    if bool(getattr(args, "live", False)):
+        os.environ["DRY_RUN"] = "false"
+        os.environ["LIVE_TRADING"] = "true"
+        os.environ["LIVE_READY"] = "false"
+    elif bool(getattr(args, "live_ready", False)):
+        os.environ["DRY_RUN"] = "true"
+        os.environ["LIVE_TRADING"] = "false"
+        os.environ["LIVE_READY"] = "true"
     try:
         cfg = load_config(env_file=args.env_file)
     except ConfigError as exc:
@@ -70,6 +93,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.dry_run:
         cfg.dry_run = True
         cfg.live_trading = False
+        cfg.live_ready = False
     use_screen = should_use_screen(args, sys.stdout)
     setup_logging(cfg.log_level, cfg.log_dir, console=not use_screen)
     slog("BOOT", "starting", **cfg.safe_dict())
@@ -81,6 +105,9 @@ def main(argv: list[str] | None = None) -> int:
         loop=not args.once,
         dry_run=cfg.dry_run,
         screen=use_screen,
+        trading_mode=cfg.trading_mode,
+        live_ready=cfg.live_ready,
+        may_place_live_orders=cfg.may_place_live_orders,
     )
     rest = RestClient(
         public_url=cfg.public_url,

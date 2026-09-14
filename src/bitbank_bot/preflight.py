@@ -109,6 +109,8 @@ def preflight(
     if cfg.has_keys:
         try:
             assets = client.get_assets()
+            slog("PRIVATE_API", "PRIVATE_API_AUTH=OK")
+            slog("PRIVATE_API", "BALANCE_FETCH=OK", count=len(assets.get("assets") or []))
             slog("PRIVATE_API", "preflight assets", count=len(assets.get("assets") or []))
             checks.append("private_assets")
         except Exception as exc:

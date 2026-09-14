@@ -190,10 +190,58 @@ def test_poll_partial_stays_open() -> None:
     assert result.status == "PARTIALLY_FILLED"
 
 
-def test_poll_failed() -> None:
+def test_live_ready_would_submit_no_create_order() -> None:
     client = MagicMock()
-    client.get_order.side_effect = RuntimeError("offline")
+    c = cfg(dry_run=True, live_trading=False, live_ready=True)
+    result = OrderExecutor(c, client).place(
+        Signal("BUY1", "buy", Decimal("0.03"), "test"), _plan()
+    )
+    assert result.reason == "would_submit"
+    assert result.executed_amount == Decimal("0")
+    client.create_order.assert_not_called()
+
+
+def test_create_order_timeout_recovers_active() -> None:
+    client = MagicMock()
+    client.get_active_orders.side_effect = [
+        [],
+        [
+            {
+                "order_id": "77",
+                "side": "buy",
+                "status": "UNFILLED",
+                "executed_amount": "0",
+                "average_price": "0",
+                "start_amount": "0.001",
+            }
+        ],
+    ]
+    client.create_order.side_effect = RuntimeError("timeout")
+    client.get_order.return_value = {
+        "order_id": "77",
+        "status": "UNFILLED",
+        "executed_amount": "0",
+        "average_price": "0",
+        "start_amount": "0.001",
+    }
     c = cfg(dry_run=False, live_trading=True, api_key="k", api_secret="s")
-    result = OrderExecutor(c, client).poll("42", Decimal("0.001"))
+    result = OrderExecutor(c, client).place(
+        Signal("BUY1", "buy", Decimal("0.03"), "test"), _plan()
+    )
+    assert result.ok
+    assert result.order_id == "77"
+    assert result.reason == "accepted_unfilled"
+    assert client.create_order.call_count == 1
+
+
+def test_create_order_timeout_without_active_does_not_retry_post() -> None:
+    client = MagicMock()
+    client.get_active_orders.return_value = []
+    client.create_order.side_effect = RuntimeError("timeout")
+    c = cfg(dry_run=False, live_trading=True, api_key="k", api_secret="s")
+    result = OrderExecutor(c, client).place(
+        Signal("BUY1", "buy", Decimal("0.03"), "test"), _plan()
+    )
     assert not result.ok
-    assert result.reason == "poll_failed"
+    assert result.reason == "order_submit_failed"
+    assert client.create_order.call_count == 1

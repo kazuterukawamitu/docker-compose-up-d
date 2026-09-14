@@ -29,11 +29,13 @@ class BitbankAPIError(RuntimeError):
         code: int | None = None,
         http_status: int | None = None,
         body: Any = None,
+        endpoint: str | None = None,
     ) -> None:
         super().__init__(message)
         self.code = code
         self.http_status = http_status
         self.body = body
+        self.endpoint = endpoint
 
 
 def is_auth_error(exc: BitbankAPIError) -> bool:
@@ -146,9 +148,10 @@ class RestClient:
         headers: dict[str, str] | None = None,
         content: bytes | None = None,
         public: bool = False,
+        allow_retry: bool = True,
     ) -> Any:
         last_error: Exception | None = None
-        attempts = max(1, self.max_retries)
+        attempts = max(1, self.max_retries if allow_retry else 1)
         for attempt in range(attempts):
             self.limiter.wait(kind)
             try:
@@ -166,7 +169,10 @@ class RestClient:
                 slog("ERROR", "HTTP 429 rate limited", attempt=attempt)
                 if attempt + 1 >= attempts:
                     raise BitbankAPIError(
-                        "rate limited", http_status=429, body=response.text
+                        "rate limited",
+                        http_status=429,
+                        body=response.text,
+                        endpoint=url.split(".cc")[-1][:80],
                     )
                 time.sleep(_backoff_seconds(attempt))
                 continue
@@ -177,6 +183,7 @@ class RestClient:
                         "server error",
                         http_status=response.status_code,
                         body=response.text,
+                        endpoint=url.split(".cc")[-1][:80],
                     )
                 time.sleep(_backoff_seconds(attempt))
                 continue
@@ -185,6 +192,7 @@ class RestClient:
                     f"http {response.status_code}",
                     http_status=response.status_code,
                     body=response.text,
+                    endpoint=url.split(".cc")[-1][:80],
                 )
             try:
                 payload = response.json()
@@ -198,6 +206,7 @@ class RestClient:
                     code=code,
                     http_status=response.status_code,
                     body=payload,
+                    endpoint=url.split(".cc")[-1][:80],
                 )
             stage = "PUBLIC_API" if public else "PRIVATE_API"
             slog(stage, f"{method} ok", url_path=url.split(".cc")[-1][:80])
@@ -216,7 +225,29 @@ class RestClient:
         return data
 
     def get_candlestick(self, pair: str, candle_type: str, date_key: str) -> list[list[Any]]:
-        data = self.public_get(f"/{pair}/candlestick/{candle_type}/{date_key}")
+        path = f"/{pair}/candlestick/{candle_type}/{date_key}"
+        try:
+            data = self.public_get(path)
+        except BitbankAPIError as exc:
+            body = exc.body
+            snippet = ""
+            if isinstance(body, (dict, list)):
+                snippet = json.dumps(body, ensure_ascii=False)[:300]
+            elif body:
+                snippet = str(body)[:300]
+            slog(
+                "CANDLE_API_ERROR",
+                "candlestick request failed",
+                pair=pair,
+                candle_type=candle_type,
+                date=date_key,
+                endpoint=path,
+                http_status=exc.http_status,
+                bitbank_code=exc.code,
+                retry_count=self.max_retries,
+                body=snippet,
+            )
+            raise
         sticks = data.get("candlestick") or []
         if not sticks:
             return []
@@ -260,7 +291,14 @@ class RestClient:
         headers = self._private_headers(payload)
         return self._request("GET", url, kind="query", headers=headers)
 
-    def private_post(self, path: str, body: dict[str, Any], *, update: bool = True) -> Any:
+    def private_post(
+        self,
+        path: str,
+        body: dict[str, Any],
+        *,
+        update: bool = True,
+        allow_retry: bool = True,
+    ) -> Any:
         if not path.startswith("/"):
             path = "/" + path
         raw = dump_json(body)
@@ -273,6 +311,7 @@ class RestClient:
             kind=kind,
             headers=headers,
             content=raw.encode("utf-8"),
+            allow_retry=allow_retry,
         )
 
     def get_assets(self) -> dict[str, Any]:
@@ -320,7 +359,10 @@ class RestClient:
             body["price"] = price
         if post_only is not None:
             body["post_only"] = post_only
-        return self.private_post("/user/spot/order", body, update=True)
+        # Side-effecting POST: never GET-style retry (duplicate order risk).
+        return self.private_post(
+            "/user/spot/order", body, update=True, allow_retry=False
+        )
 
     def get_active_orders(self, pair: str) -> list[dict[str, Any]]:
         data = self.private_get("/user/spot/active_orders", {"pair": pair})

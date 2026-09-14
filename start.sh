@@ -2,10 +2,10 @@
 # Bitbank BTC/JPY launcher — opens the iTerm 取引画面 (trading screen).
 #
 # Paste this ONE line in iTerm (zsh is fine; this wraps bash):
-#   bash -lc 'REPO="$HOME/docker-compose-up-d"; set -euo pipefail; if [ ! -d "$REPO/.git" ]; then git clone https://github.com/kazuterukawamitu/docker-compose-up-d.git "$REPO"; fi; cd "$REPO"; git fetch origin cursor/bitbank-audit-unify-f5fd; git checkout -B cursor/bitbank-audit-unify-f5fd origin/cursor/bitbank-audit-unify-f5fd; exec bash ./start.sh --screen'
+#   bash -lc 'REPO="$HOME/docker-compose-up-d"; set -euo pipefail; if [ ! -d "$REPO/.git" ]; then git clone https://github.com/kazuterukawamitu/docker-compose-up-d.git "$REPO"; fi; cd "$REPO"; exec bash ./start.sh --screen'
 #
-# That line clones if needed, checks out the bot branch (main is wiki HTML only),
-# then opens the trading dashboard. Do not paste python3 main.py. Do not use !.
+# That line clones if needed, then opens the trading dashboard via launch.py.
+# Default is DRY_RUN (no Bitbank orders). Do not use !.
 
 if [ -z "${BASH_VERSION:-}" ]; then
   exec /usr/bin/env bash "$0" "$@"
@@ -20,25 +20,18 @@ export PYTHONIOENCODING=utf-8
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT"
 
-BOT_BRANCH="cursor/bitbank-audit-unify-f5fd"
-
 ensure_bot_source() {
-  if [[ -f "$ROOT/src/bitbank_bot/__init__.py" && -f "$ROOT/main.py" ]]; then
+  if [[ -f "$ROOT/src/bitbank_bot/__init__.py" && -f "$ROOT/launch.py" ]]; then
     return 0
   fi
-  echo "bot source not found at $ROOT (this clone is probably still on main / wiki dump)" >&2
+  echo "bot source not found at $ROOT (need src/bitbank_bot and launch.py)" >&2
   if [[ ! -d "$ROOT/.git" ]]; then
     echo "Paste this ONE line in iTerm:" >&2
     echo "  bash -lc 'git clone https://github.com/kazuterukawamitu/docker-compose-up-d.git \"\$HOME/docker-compose-up-d\" && bash \"\$HOME/docker-compose-up-d/start.sh\" --screen'" >&2
     exit 2
   fi
-  echo "fetching $BOT_BRANCH so the trading screen can start" >&2
-  git fetch origin "$BOT_BRANCH"
-  git checkout -B "$BOT_BRANCH" "origin/$BOT_BRANCH"
-  if [[ ! -f "$ROOT/src/bitbank_bot/__init__.py" || ! -f "$ROOT/main.py" ]]; then
-    echo "still no bitbank_bot after checkout; branch may not be fetched" >&2
-    exit 2
-  fi
+  echo "this checkout has no bot package; stay on a branch that contains src/bitbank_bot" >&2
+  exit 2
 }
 
 ensure_bot_source
@@ -131,10 +124,7 @@ if [[ "$need_install" -eq 1 ]]; then
   set -e
 fi
 
-if ! "$VPY" -c "import dotenv, httpx" >/dev/null 2>&1; then
-  echo "pip packages missing; starting stdlib DRY_RUN (python3 run.py, no orders)"
-  exec "$PY" "$ROOT/run.py" "$@"
-fi
+# launch.py falls back to run.py for DRY_RUN when httpx is missing.
 
 if [[ ! -f "$ROOT/.env" ]]; then
   if [[ -f "$ROOT/.env.example" ]]; then
@@ -151,7 +141,7 @@ if [[ -t 1 ]]; then
 fi
 for a in "$@"; do
   case "$a" in
-    --once|--check-config|--preflight|--backtest|--no-screen)
+    --once|--check-config|--check|--preflight|--backtest|--no-screen)
       want_screen=0
       ;;
     --screen)
@@ -176,7 +166,8 @@ fi
 echo "opening Bitbank BTC/JPY 取引画面 (Ctrl-C to stop)"
 echo "HOLD/WAIT is normal. JSON detail is logs/bot.log"
 echo "using $VPY"
+echo "launcher: $ROOT/launch.py"
 
 # Default (no extra args): continuous loop + trading screen on a TTY.
-# Do not pass --once here.
-exec "$VPY" "$ROOT/main.py" "${SCREEN_ARGS[@]}" "$@"
+# Do not pass --once here. --live only if .env has keys (see launch.py).
+exec "$VPY" "$ROOT/launch.py" "${SCREEN_ARGS[@]}" "$@"

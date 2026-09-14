@@ -2,33 +2,37 @@
 
 Bitbank-only `btc_jpy` bot. Default is a **continuous DRY_RUN loop** with an iTerm **取引画面** (trading dashboard). HOLD/WAIT on a bar is normal. JSON lines are written to `logs/bot.log`, not the dashboard.
 
-`main` on GitHub is still wiki HTML. The runnable bot is branch `cursor/bitbank-audit-unify-f5fd`.
+The program that starts the bot is `launch.py` (also `bash ./start.sh`).
 
 HOLD for 15 minutes while market data and strategy are healthy is `LONG_WAIT`, not a crash. Public-API fallback candles never place orders. Live UNFILLED limits are persisted and polled. New BUY is blocked when both 4h and 1d SMA slopes are down (`ENABLE_HTF_FILTER`).
 
 ## Start (this is the program)
 
-`main` on GitHub is wiki HTML. You do **not** need pip, venv, or `start.sh` for the bot to run.
-
-Paste **this one line** in iTerm. It downloads `run.py` and starts a DRY_RUN 取引画面 (no orders):
+You do **not** need pip for DRY_RUN. `python3 launch.py` uses the full package when httpx is installed, otherwise stdlib `run.py` (no orders).
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/kazuterukawamitu/docker-compose-up-d/cursor/bitbank-audit-unify-f5fd/run.py -o "$HOME/bitbank_run.py" && python3 "$HOME/bitbank_run.py"
+python3 launch.py
+```
+
+Or:
+
+```bash
+bash ./start.sh --screen
 ```
 
 You should see `Bitbank  BTC/JPY  取引画面`. HOLD/待機 is normal. Stop with Ctrl-C.
 
-If this repo is already checked out on this branch:
+| Command | Orders |
+| --- | --- |
+| `python3 launch.py` | never (DRY_RUN) |
+| `python3 launch.py --live-ready` | never; logs `WOULD_SUBMIT_ORDER` |
+| `python3 launch.py --live` | **yes**, only if `.env` has API keys |
 
-```bash
-python3 run.py
-```
+Live trading also works if `.env` has `DRY_RUN=false` **and** `LIVE_TRADING=true` **and** both API keys. Do not paste keys into chat.
 
-`python3 main.py` also works: it uses the full package when httpx is installed, otherwise the same stdlib `run.py`.
+`--once --synthetic` is a one-cycle smoke test that **exits on purpose**. The launcher default is a continuous loop.
 
-Live trading stays **off** unless `.env` has `DRY_RUN=false` **and** `LIVE_TRADING=true` **and** both API keys.
-
-`--once --synthetic` is a one-cycle smoke test that **exits on purpose**. The launcher above does **not** use `--once`.
+Spec: [docs/MASTER_REQUIREMENTS.md](docs/MASTER_REQUIREMENTS.md).
 
 
 ## Strategy (from original README)
