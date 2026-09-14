@@ -1,0 +1,134 @@
+{
+  "src/bitbank_bot/__init__.py": [],
+  "src/bitbank_bot/__main__.py": [
+    "bitbank_bot.main"
+  ],
+  "src/bitbank_bot/amounts.py": [
+    "bitbank_bot.config",
+    "bitbank_bot.money",
+    "bitbank_bot.rate_engine",
+    "bitbank_bot.risk"
+  ],
+  "src/bitbank_bot/backtest.py": [
+    "bitbank_bot.config",
+    "bitbank_bot.market_data",
+    "bitbank_bot.money",
+    "bitbank_bot.strategy"
+  ],
+  "src/bitbank_bot/config.py": [
+    "bitbank_bot.money"
+  ],
+  "src/bitbank_bot/engine.py": [
+    "bitbank_bot.amounts",
+    "bitbank_bot.config",
+    "bitbank_bot.hold_tracer",
+    "bitbank_bot.logging_setup",
+    "bitbank_bot.market_data",
+    "bitbank_bot.money",
+    "bitbank_bot.multi_timeframe",
+    "bitbank_bot.orders",
+    "bitbank_bot.preflight",
+    "bitbank_bot.rate_engine",
+    "bitbank_bot.reconciliation",
+    "bitbank_bot.rest_client",
+    "bitbank_bot.risk",
+    "bitbank_bot.screen",
+    "bitbank_bot.self_healing",
+    "bitbank_bot.strategy",
+    "bitbank_bot.trade_signal_executor",
+    "bitbank_bot.watchdog",
+    "bitbank_bot.websocket_client"
+  ],
+  "src/bitbank_bot/hold_tracer.py": [
+    "bitbank_bot.logging_setup"
+  ],
+  "src/bitbank_bot/indicators.py": [
+    "bitbank_bot.money"
+  ],
+  "src/bitbank_bot/instance_lock.py": [],
+  "src/bitbank_bot/logging_setup.py": [],
+  "src/bitbank_bot/main.py": [
+    "bitbank_bot.backtest",
+    "bitbank_bot.config",
+    "bitbank_bot.engine",
+    "bitbank_bot.instance_lock",
+    "bitbank_bot.logging_setup",
+    "bitbank_bot.market_data",
+    "bitbank_bot.preflight",
+    "bitbank_bot.rest_client",
+    "bitbank_bot.screen"
+  ],
+  "src/bitbank_bot/market_data.py": [
+    "bitbank_bot.config",
+    "bitbank_bot.logging_setup",
+    "bitbank_bot.money",
+    "bitbank_bot.rest_client"
+  ],
+  "src/bitbank_bot/money.py": [],
+  "src/bitbank_bot/multi_timeframe.py": [
+    "bitbank_bot.config",
+    "bitbank_bot.indicators",
+    "bitbank_bot.logging_setup",
+    "bitbank_bot.market_data",
+    "bitbank_bot.rest_client"
+  ],
+  "src/bitbank_bot/orders.py": [
+    "bitbank_bot.amounts",
+    "bitbank_bot.config",
+    "bitbank_bot.logging_setup",
+    "bitbank_bot.money",
+    "bitbank_bot.strategy"
+  ],
+  "src/bitbank_bot/preflight.py": [
+    "bitbank_bot.config",
+    "bitbank_bot.logging_setup",
+    "bitbank_bot.money",
+    "bitbank_bot.rest_client"
+  ],
+  "src/bitbank_bot/rate_engine.py": [
+    "bitbank_bot.config",
+    "bitbank_bot.indicators",
+    "bitbank_bot.logging_setup",
+    "bitbank_bot.market_data",
+    "bitbank_bot.money",
+    "bitbank_bot.strategy"
+  ],
+  "src/bitbank_bot/reconciliation.py": [
+    "bitbank_bot.logging_setup",
+    "bitbank_bot.money"
+  ],
+  "src/bitbank_bot/rest_client.py": [
+    "bitbank_bot.logging_setup",
+    "bitbank_bot.money"
+  ],
+  "src/bitbank_bot/risk.py": [
+    "bitbank_bot.config",
+    "bitbank_bot.logging_setup",
+    "bitbank_bot.money"
+  ],
+  "src/bitbank_bot/screen.py": [
+    "bitbank_bot.money"
+  ],
+  "src/bitbank_bot/self_healing.py": [
+    "bitbank_bot.logging_setup"
+  ],
+  "src/bitbank_bot/strategy.py": [
+    "bitbank_bot.config",
+    "bitbank_bot.indicators",
+    "bitbank_bot.logging_setup",
+    "bitbank_bot.money"
+  ],
+  "src/bitbank_bot/trade_signal_executor.py": [
+    "bitbank_bot.amounts",
+    "bitbank_bot.config",
+    "bitbank_bot.logging_setup",
+    "bitbank_bot.money",
+    "bitbank_bot.rate_engine",
+    "bitbank_bot.strategy"
+  ],
+  "src/bitbank_bot/watchdog.py": [],
+  "src/bitbank_bot/websocket_client.py": [
+    "bitbank_bot.logging_setup",
+    "bitbank_bot.money"
+  ]
+}

@@ -67,6 +67,33 @@ class OrderExecutor:
             slog("ERROR", "active_orders failed", error=type(exc).__name__)
             raise
 
+    def _recover_uncertain_order(self, side: str) -> dict[str, Any] | None:
+        """After a POST timeout, reuse a single matching open order. Never POST again."""
+        try:
+            active = self.active_orders()
+        except Exception:
+            return None
+        matches = [
+            row
+            for row in active
+            if str(row.get("side") or "").lower() == side.lower()
+            and str(row.get("pair") or self.cfg.pair) == self.cfg.pair
+        ]
+        if len(matches) != 1:
+            slog(
+                "ORDER_STATUS",
+                "ambiguous post-timeout orders; refusing duplicate POST",
+                count=len(matches),
+                side=side,
+            )
+            return None
+        slog(
+            "ORDER_ACCEPTED",
+            "recovered order after uncertain POST",
+            order_id=str(matches[0].get("order_id") or ""),
+        )
+        return matches[0]
+
     def _refresh_order(self, order_id: str) -> dict[str, Any] | None:
         if self.client is None or not hasattr(self.client, "get_order"):
             return None
@@ -122,15 +149,27 @@ class OrderExecutor:
                 None,
             )
         if not self.cfg.may_place_live_orders:
+            if self.cfg.is_live_ready:
+                slog(
+                    "WOULD_SUBMIT_ORDER",
+                    "LIVE_READY: not calling Bitbank create_order",
+                    side=plan.side,
+                    amount=str(plan.amount),
+                    price=str(plan.price),
+                    kind=signal.kind,
+                    pair=self.cfg.pair,
+                )
             slog(
                 "ORDER_INTENT",
-                "DRY_RUN: not calling Bitbank create_order",
+                "DRY_RUN: not calling Bitbank create_order"
+                if not self.cfg.is_live_ready
+                else "LIVE_READY intent only",
                 side=plan.side,
                 amount=str(plan.amount),
                 price=str(plan.price),
-                mode="DRY_RUN" if self.cfg.dry_run else "LIVE_BLOCKED",
+                mode=self.cfg.trading_mode.upper(),
             )
-            if self.cfg.dry_run and self.cfg.simulate_fill:
+            if self.cfg.dry_run and self.cfg.simulate_fill and not self.cfg.is_live_ready:
                 actual = plan.amount * plan.price
                 slog(
                     "SIMULATED_FILL",
@@ -191,15 +230,26 @@ class OrderExecutor:
         if self.cfg.order_type == "limit":
             q = quantize_price(plan.price, self.cfg.price_tick)
             price_str = str(int(q)) if q == q.to_integral_value() else str(q)
-        raw = self.client.create_order(
-            pair=self.cfg.pair,
-            amount=str(plan.amount),
-            side=plan.side,
-            order_type=self.cfg.order_type,
-            price=price_str,
-            post_only=self.cfg.post_only if self.cfg.order_type == "limit" else None,
-            live_confirmed=True,
-        )
+        try:
+            raw = self.client.create_order(
+                pair=self.cfg.pair,
+                amount=str(plan.amount),
+                side=plan.side,
+                order_type=self.cfg.order_type,
+                price=price_str,
+                post_only=self.cfg.post_only if self.cfg.order_type == "limit" else None,
+                live_confirmed=True,
+            )
+        except Exception as exc:
+            slog(
+                "ERROR",
+                "create_order failed; reconciling before any retry",
+                error=type(exc).__name__,
+            )
+            recovered = self._recover_uncertain_order(plan.side)
+            if recovered is None:
+                raise
+            raw = recovered
         order_id = str(raw.get("order_id") or "")
         status = str(raw.get("status") or "")
         slog("ORDER_ACCEPTED", "order accepted", order_id=order_id, status=status)

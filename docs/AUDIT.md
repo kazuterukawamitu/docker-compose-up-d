@@ -7,7 +7,11 @@ runnable bot lives in `src/bitbank_bot/`. This branch is Bitbank `btc_jpy` only.
 
 | Area | Where | Role |
 | --- | --- | --- |
-| Config / dual live flags | `config.py` | `DRY_RUN` default; live needs `DRY_RUN=false` and `LIVE_TRADING=true` and keys |
+| Config / dual live flags | `config.py` | `DRY_RUN` default; LIVE needs flags + `LIVE_TRADING_CONFIRM` phrase |
+| LIVE_READY | `config.py`, `orders.py` | Dress rehearsal; `WOULD_SUBMIT_ORDER` |
+| RateEngine | `rate_engine.py` | FIXED/DYNAMIC/AUTO; README TPs stay FIXED baseline |
+| TradeGate | `trade_signal_executor.py` | Blocks with `TRADE_BLOCKED reason=` |
+| Public + private REST | `rest_client.py` | HMAC `ACCESS-TIME-WINDOW`; POST orders are not retried |
 | Public + private REST | `rest_client.py` | HMAC `ACCESS-TIME-WINDOW`; `create_order` requires `live_confirmed` |
 | README MA rules | `strategy.py`, `docs/STRATEGY.md` | BUY1–4 / SELL1–4; HOLD always has a reason |
 | Size | `amounts.py` | Only place that sets quantity; TARGET vs PLANNED; ACTUAL unset until fill |
@@ -56,7 +60,13 @@ bitFlyer, Coincheck, and GMO are not imported and are not executed.
    `CandleCache`, so a later real fetch cannot trade on mixed fake MAs.
 10. **Partial fills.** `PARTIALLY_FILLED` stays in `state.pending` and is polled
     until the remainder fills.
-11. **Kill file.** `data/KILL` blocks sells as well as buys.
+12. **Candle fetch miss with warm cache.** If today's public candlestick call
+    fails but `CandleCache` still has a fresh closed bar, the loop keeps those
+    real candles and does **not** flip `synthetic_fallback_no_orders`.
+13. **LIVE_READY / confirm phrase.** `create_order` stays behind TradeGate +
+    dual flags + `YES_I_ACCEPT_REAL_MONEY_RISK`.
+14. **POST orders are not retried.** Timeouts inspect `active_orders` instead
+    of sending a second BUY.
 
 ## What this bot does not do
 

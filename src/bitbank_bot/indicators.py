@@ -122,3 +122,36 @@ def interpolate_crossover(
     if t < ZERO or t > ONE:
         return None
     return prev_price + t * dp
+
+
+def true_range(high: Decimal, low: Decimal, prev_close: Decimal) -> Decimal:
+    a = high - low
+    b = abs(high - prev_close)
+    c = abs(low - prev_close)
+    return max(a, b, c)
+
+
+def atr(
+    highs: Sequence[Decimal],
+    lows: Sequence[Decimal],
+    closes: Sequence[Decimal],
+    period: int,
+) -> list[Decimal | None]:
+    """Wilder ATR. Returns None until ``period`` true ranges exist."""
+    if period < 1:
+        raise ValueError("period must be >= 1")
+    n = min(len(highs), len(lows), len(closes))
+    out: list[Decimal | None] = [None] * n
+    if n < 2:
+        return out
+    trs: list[Decimal] = []
+    for i in range(1, n):
+        trs.append(true_range(highs[i], lows[i], closes[i - 1]))
+    if len(trs) < period:
+        return out
+    wilder = sum(trs[:period], ZERO) / D(period)
+    out[period] = wilder
+    for i in range(period, len(trs)):
+        wilder = (wilder * D(period - 1) + trs[i]) / D(period)
+        out[i + 1] = wilder
+    return out

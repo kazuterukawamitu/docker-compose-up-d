@@ -80,6 +80,11 @@ def main(argv: list[str] | None = None) -> int:
         synthetic=bool(args.synthetic),
         loop=not args.once,
         dry_run=cfg.dry_run,
+        trading_mode=cfg.trading_mode,
+        rate_mode=cfg.rate_mode,
+        live_trading=cfg.live_trading,
+        live_trading_confirm=cfg.live_trading_confirm,
+        may_place_live_orders=cfg.may_place_live_orders,
         screen=use_screen,
     )
     rest = RestClient(
