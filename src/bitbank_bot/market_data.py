@@ -84,10 +84,14 @@ def fetch_candles(
 
     seen: set[int] = set()
     candles: list[Candle] = []
+    last_error: Exception | None = None
+    ok_keys = 0
     for key in keys:
         try:
             rows = client.get_candlestick(cfg.pair, cfg.candle_type, key)
+            ok_keys += 1
         except BitbankAPIError as exc:
+            last_error = exc
             slog(
                 "CANDLE_API_ERROR",
                 "candlestick fetch skipped",
@@ -101,6 +105,7 @@ def fetch_candles(
             )
             continue
         except Exception as exc:
+            last_error = exc
             slog(
                 "CANDLE_API_ERROR",
                 "candlestick fetch skipped",
@@ -120,6 +125,8 @@ def fetch_candles(
                 continue
             seen.add(candle.timestamp_ms)
             candles.append(candle)
+    if ok_keys == 0 and last_error is not None:
+        raise last_error
     candles.sort(key=lambda c: c.timestamp_ms)
     slog("MARKET", "candles loaded", count=len(candles), candle_type=cfg.candle_type)
     return drop_incomplete_candle(candles, cfg.candle_type)

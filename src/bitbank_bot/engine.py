@@ -183,6 +183,8 @@ class Engine:
         self._last_candles: list[Candle] = []
         self._last_reconcile = 0.0
         self.health_score = 0
+        self.execution_block_reason = ""
+        self._open_order_count = 0
 
     def request_stop(self, *_args: object) -> None:
         slog("BOOT", "shutdown requested")
@@ -341,7 +343,7 @@ class Engine:
                     tp=str(signal.tp_pct) if signal.tp_pct is not None else None,
                     score=f"{signal.score}/{signal.score_max}" if signal.score_max else None,
                 )
-                self._execute(
+                consumed = self._execute(
                     signal,
                     snap.close,
                     snap.index,
@@ -349,6 +351,8 @@ class Engine:
                     state,
                     rate=rate,
                 )
+                if not consumed:
+                    continue
             state.last_candle_ts = snap.timestamp_ms
             if persist:
                 save_state(self.cfg.state_path, state)
@@ -363,7 +367,7 @@ class Engine:
         ts: int,
         state: BotState,
         rate=None,
-    ) -> None:
+    ) -> bool:
         rest = self._rest()
         if self.ws is not None and not self.ws.is_stale() and self.ws.last_price():
             live_px = self.ws.last_price() or price
@@ -379,7 +383,7 @@ class Engine:
                         ticker=str(live_px),
                         drift=str(drift),
                     )
-                    return
+                    return False
             price = live_px
         try:
             jpy, btc = self._balances(rest, state)
@@ -393,13 +397,13 @@ class Engine:
                 reason = "balance_fetch_failed"
             self.last_block_reason = reason
             slog("ERROR", "no order", reason=reason, error=type(exc).__name__)
-            return
+            return True
         except Exception as exc:
             _LOG.exception("balance fetch failed on order path")
             state.risk.note_api_error()
             self.last_block_reason = "balance_fetch_failed"
             slog("ERROR", "no order", reason="balance_fetch_failed", error=type(exc).__name__)
-            return
+            return True
         state.risk.note_api_ok()
         state.risk.update_equity(jpy, btc, price)
         sizer = PositionSizer(self.cfg, state.risk)
@@ -429,21 +433,18 @@ class Engine:
             self.cfg,
             signal,
             plan,
-            market_data_real=(
-                self.market_data_real
-                or self._explicit_synthetic
-                or not self.used_synthetic_fallback
-            ),
+            market_data_real=self._gate_market_data_real(),
             market_data_fresh=True,
             private_api_ok=private_ok,
             kill_switch=bool(state.risk.operator_killed),
             pending_order=state.pending is not None,
-            open_order_count=0,
+            open_order_count=self._open_order_count,
             rate=rate,
+            extra_block=self.execution_block_reason,
         )
         if not gate.allowed:
             self.last_block_reason = gate.reason
-            return
+            return True
         slog(
             "POSITION_SIZE_CALCULATED",
             "size",
@@ -466,7 +467,7 @@ class Engine:
                 trace_id=gate.trace_id,
             )
             state.risk.note_api_error()
-            return
+            return True
         slog(
             "HEARTBEAT",
             "ORDER MANAGER OK",
@@ -474,7 +475,17 @@ class Engine:
             simulated=result.simulated,
             dry_run=result.dry_run,
         )
+        if result.reason == "uncertain_order":
+            self.execution_block_reason = "uncertain_order"
+            self.last_block_reason = "uncertain_order"
+            slog("TRADE_BLOCKED", "EXECUTION_BLOCKED", reason="uncertain_order")
+            return True
         self._apply_fill(signal, plan, result, index, ts, state, jpy, btc)
+        return True
+
+    def _gate_market_data_real(self) -> bool:
+        """CLI --synthetic and accidental synthetic fallback cannot live-trade."""
+        return not self._explicit_synthetic and not self.used_synthetic_fallback
 
     def _poll_pending(self, state: BotState) -> None:
         pending = state.pending
@@ -914,8 +925,14 @@ class Engine:
             pending=state.pending is not None,
             min_amount=self.cfg.min_amount_btc,
         )
-        if not report.ok and self.cfg.may_place_live_orders:
-            self.last_block_reason = f"reconcile_{report.reason}"
+        self._open_order_count = report.open_orders
+        if not report.ok:
+            self.execution_block_reason = f"reconcile_{report.reason}"
+            self.last_block_reason = self.execution_block_reason
+        elif self.execution_block_reason.startswith("reconcile_") or (
+            self.execution_block_reason == "uncertain_order"
+        ):
+            self.execution_block_reason = ""
 
     def _heartbeat(self, state: BotState, signal: Signal, last: str = "-") -> None:
         ws_ok = bool(self.ws and self.ws.is_connected())

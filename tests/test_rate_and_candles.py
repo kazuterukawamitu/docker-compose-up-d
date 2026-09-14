@@ -78,9 +78,25 @@ def test_fetch_candles_logs_bitbank_error() -> None:
         endpoint="/btc_jpy/candlestick/5min/20200101",
     )
     c = cfg(candle_type="5min", candle_lookback_days=1)
-    out = fetch_candles(rest, c)
-    assert out == []
+    try:
+        fetch_candles(rest, c)
+        raise AssertionError("expected BitbankAPIError")
+    except BitbankAPIError as exc:
+        assert exc.code == 10000
     assert rest.get_candlestick.call_count >= 1
+
+
+def test_fetch_candles_keeps_partial_day() -> None:
+    rest = MagicMock()
+    row = ["100", "101", "99", "100", "1", 1_700_000_000_000]
+    rest.get_candlestick.side_effect = [
+        RuntimeError("first day missing"),
+        [row],
+    ]
+    c = cfg(candle_type="5min", candle_lookback_days=2)
+    out = fetch_candles(rest, c)
+    assert len(out) == 1
+    assert out[0].close == D("100")
 
 
 def test_cache_used_when_latest_fetch_fails(tmp_path) -> None:
@@ -113,3 +129,21 @@ def test_cache_used_when_latest_fetch_fails(tmp_path) -> None:
     assert engine.used_synthetic_fallback is False
     assert engine.market_data_real is True
     rest.create_order = MagicMock(side_effect=AssertionError("live order"))
+
+
+def test_all_candle_keys_fail_increments_breaker(tmp_path) -> None:
+    c = cfg(
+        state_path=str(tmp_path / "state.json"),
+        lock_path=str(tmp_path / "bot.lock"),
+        log_dir=str(tmp_path / "logs"),
+        enable_websocket=False,
+        dry_run=True,
+        candle_type="1hour",
+    )
+    rest = MagicMock()
+    rest.get_candlestick.side_effect = RuntimeError("no net")
+    engine = Engine(c, client=rest)
+    incoming = engine._candles_for_cycle(rest, latest_only=True, force_synthetic=False)
+    assert engine.rest_breaker.failures >= 1
+    assert engine.used_synthetic_fallback is True
+    assert incoming

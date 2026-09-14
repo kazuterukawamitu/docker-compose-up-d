@@ -45,6 +45,7 @@ def evaluate_gate(
     pending_order: bool,
     open_order_count: int,
     rate: RateDecision | None = None,
+    extra_block: str = "",
     trace_id: str | None = None,
 ) -> GateResult:
     tid = trace_id or new_trace_id()
@@ -67,6 +68,8 @@ def evaluate_gate(
         return blocked("signal_not_actionable", signal_kind=signal.kind)
     if kill_switch:
         return blocked("kill_switch")
+    if extra_block:
+        return blocked(extra_block)
     if not market_data_real:
         return blocked("synthetic_market_data")
     if not market_data_fresh:

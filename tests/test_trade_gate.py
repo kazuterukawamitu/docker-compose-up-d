@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from bitbank_bot.amounts import AmountPlan
 from bitbank_bot.hold_tracer import NO_SETUP, HoldTracer, classify_root_cause
@@ -57,6 +57,23 @@ def test_gate_passes_actionable() -> None:
         open_order_count=0,
     )
     assert result.allowed
+
+
+def test_gate_blocks_extra_reconcile_reason() -> None:
+    result = evaluate_gate(
+        cfg(),
+        Signal("BUY1", "buy", Decimal("0.03"), "t"),
+        _plan(),
+        market_data_real=True,
+        market_data_fresh=True,
+        private_api_ok=True,
+        kill_switch=False,
+        pending_order=False,
+        open_order_count=0,
+        extra_block="reconcile_btc_position_mismatch",
+    )
+    assert not result.allowed
+    assert result.reason == "reconcile_btc_position_mismatch"
 
 
 def test_live_ready_would_submit_not_create_order() -> None:
@@ -126,3 +143,50 @@ def test_create_order_timeout_recovers_single_active() -> None:
     assert result.order_id == "7"
     assert result.reason == "accepted_unfilled"
     assert client.create_order.call_count == 1
+
+
+def test_create_order_timeout_recovers_recent_fill() -> None:
+    now = 1_700_000_000
+    client = MagicMock()
+    client.get_active_orders.return_value = []
+    client.create_order.side_effect = RuntimeError("ReadTimeout")
+    client.get_trade_history.return_value = [
+        {
+            "order_id": "88",
+            "pair": "btc_jpy",
+            "side": "buy",
+            "amount": "0.001",
+            "price": "10000000",
+            "executed_at": now * 1000,
+        }
+    ]
+    client.get_order.return_value = {
+        "order_id": "88",
+        "status": "FULLY_FILLED",
+        "executed_amount": "0.001",
+        "average_price": "10000000",
+        "start_amount": "0.001",
+    }
+    c = cfg(dry_run=False, live_trading=True, api_key="k", api_secret="s")
+    with patch("bitbank_bot.orders.time.time", return_value=now):
+        result = OrderExecutor(c, client).place(
+            Signal("BUY1", "buy", Decimal("0.03"), "t"), _plan()
+        )
+    assert result.ok
+    assert result.order_id == "88"
+    assert result.executed_amount == Decimal("0.001")
+    assert client.create_order.call_count == 1
+
+
+def test_create_order_timeout_without_recovery_is_uncertain() -> None:
+    client = MagicMock()
+    client.get_active_orders.return_value = []
+    client.create_order.side_effect = RuntimeError("ReadTimeout")
+    client.get_trade_history.return_value = []
+    c = cfg(dry_run=False, live_trading=True, api_key="k", api_secret="s")
+    result = OrderExecutor(c, client).place(
+        Signal("BUY1", "buy", Decimal("0.03"), "t"), _plan()
+    )
+    assert not result.ok
+    assert result.reason == "uncertain_order"
+    client.create_order.assert_called_once()

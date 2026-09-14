@@ -436,3 +436,119 @@ def test_partial_fill_keeps_pending(tmp_path) -> None:
     assert state.pending.filled_amount == Decimal("0.0004")
     assert state.position is not None
     assert state.position.amount == Decimal("0.0004")
+
+
+def test_explicit_synthetic_does_not_live_trade(tmp_path) -> None:
+    c = cfg(
+        state_path=str(tmp_path / "state.json"),
+        lock_path=str(tmp_path / "bot.lock"),
+        log_dir=str(tmp_path / "logs"),
+        enable_websocket=False,
+        enable_htf_filter=False,
+        dry_run=False,
+        live_trading=True,
+        api_key="k",
+        api_secret="s",
+        ma_period=3,
+        short_ma_period=3,
+        long_ma_period=5,
+    )
+    rest = MagicMock()
+    rest.free_amount.side_effect = lambda asset: (
+        Decimal("100000") if asset == "jpy" else Decimal("0")
+    )
+    rest.get_active_orders.return_value = []
+    rest.create_order.side_effect = AssertionError("live order")
+    engine = Engine(c, client=rest)
+    engine._explicit_synthetic = True
+    engine.used_synthetic_fallback = True
+    from bitbank_bot.engine import BotState
+
+    state = BotState(None, RiskManager(c), 0, time.monotonic())
+    with patch(
+        "bitbank_bot.strategy.Strategy.evaluate",
+        return_value=Signal("BUY1", "buy", Decimal("0.03"), "forced"),
+    ):
+        engine.process_candles(synthetic_candles(40), state, execute=True, persist=False)
+    rest.create_order.assert_not_called()
+    assert engine.last_block_reason == "synthetic_market_data"
+    assert state.position is None
+    assert state.pending is None
+
+
+def test_reconcile_mismatch_blocks_live_buy(tmp_path) -> None:
+    c = cfg(
+        state_path=str(tmp_path / "state.json"),
+        lock_path=str(tmp_path / "bot.lock"),
+        log_dir=str(tmp_path / "logs"),
+        enable_websocket=False,
+        enable_htf_filter=False,
+        dry_run=False,
+        live_trading=True,
+        api_key="k",
+        api_secret="s",
+        ma_period=3,
+        short_ma_period=3,
+        long_ma_period=5,
+    )
+    rest = MagicMock()
+    rest.free_amount.side_effect = lambda asset: (
+        Decimal("100000") if asset == "jpy" else Decimal("1")
+    )
+    rest.get_active_orders.return_value = []
+    rest.create_order.side_effect = AssertionError("live order")
+    engine = Engine(c, client=rest)
+    from bitbank_bot.engine import BotState
+
+    state = BotState(None, RiskManager(c), 0, time.monotonic())
+    engine._maybe_reconcile(rest, state)
+    assert engine.execution_block_reason == "reconcile_btc_position_mismatch"
+    with patch(
+        "bitbank_bot.strategy.Strategy.evaluate",
+        return_value=Signal("BUY1", "buy", Decimal("0.03"), "forced"),
+    ):
+        engine.process_candles(synthetic_candles(40), state, execute=True, persist=False)
+    rest.create_order.assert_not_called()
+    assert engine.last_block_reason == "reconcile_btc_position_mismatch"
+
+
+def test_price_drift_does_not_consume_bar(tmp_path) -> None:
+    c = cfg(
+        state_path=str(tmp_path / "state.json"),
+        lock_path=str(tmp_path / "bot.lock"),
+        log_dir=str(tmp_path / "logs"),
+        enable_websocket=True,
+        enable_htf_filter=False,
+        dry_run=True,
+        live_trading=False,
+        ma_period=3,
+        short_ma_period=3,
+        long_ma_period=5,
+    )
+    rest = MagicMock()
+    rest.free_amount.side_effect = AssertionError("should not size")
+    rest.create_order.side_effect = AssertionError("live order")
+    engine = Engine(c, client=rest)
+
+    class DriftWs:
+        def is_stale(self) -> bool:
+            return False
+
+        def last_price(self):
+            return Decimal("20000000")
+
+        def is_connected(self) -> bool:
+            return True
+
+    engine.ws = DriftWs()  # type: ignore[assignment]
+    from bitbank_bot.engine import BotState
+
+    state = BotState(None, RiskManager(c), 0, time.monotonic())
+    with patch(
+        "bitbank_bot.strategy.Strategy.evaluate",
+        return_value=Signal("BUY1", "buy", Decimal("0.03"), "forced"),
+    ):
+        engine.process_candles(synthetic_candles(40), state, execute=True, persist=False)
+    assert state.last_candle_ts == 0
+    assert engine.last_block_reason == "stale_market_data"
+    rest.create_order.assert_not_called()

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, Protocol
@@ -25,6 +26,8 @@ class OrderClient(Protocol):
     def get_active_orders(self, pair: str) -> list[dict[str, Any]]: ...
 
     def get_order(self, pair: str, order_id: str) -> dict[str, Any]: ...
+
+    def get_trade_history(self, pair: str) -> list[dict[str, Any]]: ...
 
     def create_order(
         self,
@@ -67,19 +70,91 @@ class OrderExecutor:
             slog("ERROR", "active_orders failed", error=type(exc).__name__)
             raise
 
+    def _recover_from_trades(self, side: str) -> dict[str, Any] | None:
+        """If the POST filled immediately, it is gone from active_orders."""
+        if self.client is None or not hasattr(self.client, "get_trade_history"):
+            return None
+        try:
+            trades = list(self.client.get_trade_history(self.cfg.pair) or [])
+        except Exception as exc:
+            slog("ERROR", "trade_history failed during POST recovery", error=type(exc).__name__)
+            return None
+        now_ms = int(time.time() * 1000)
+        window_ms = 120_000
+        matches: list[dict[str, Any]] = []
+        for row in trades:
+            if str(row.get("side") or "").lower() != side.lower():
+                continue
+            if str(row.get("pair") or self.cfg.pair) != self.cfg.pair:
+                continue
+            executed_at = int(row.get("executed_at") or 0)
+            if executed_at and executed_at < 10**12:
+                executed_at *= 1000
+            if not executed_at or now_ms - executed_at > window_ms:
+                continue
+            matches.append(row)
+        order_ids = {str(row.get("order_id") or "") for row in matches if row.get("order_id")}
+        if len(order_ids) != 1:
+            slog(
+                "ORDER_STATUS",
+                "ambiguous post-timeout trades; refusing duplicate POST",
+                count=len(matches),
+                order_ids=len(order_ids),
+                side=side,
+            )
+            return None
+        order_id = next(iter(order_ids))
+        refreshed = self._refresh_order(order_id)
+        if refreshed:
+            slog(
+                "ORDER_ACCEPTED",
+                "recovered filled order after uncertain POST",
+                order_id=order_id,
+            )
+            return refreshed
+        filled = ZERO
+        notional = ZERO
+        for row in matches:
+            amt = D(row.get("amount") or 0)
+            px = D(row.get("price") or 0)
+            filled += amt
+            notional += amt * px
+        avg = (notional / filled) if filled > ZERO else ZERO
+        slog(
+            "ORDER_ACCEPTED",
+            "recovered fill from trade_history after uncertain POST",
+            order_id=order_id,
+        )
+        return {
+            "order_id": order_id,
+            "pair": self.cfg.pair,
+            "side": side,
+            "status": "FULLY_FILLED",
+            "executed_amount": str(filled),
+            "average_price": str(avg),
+            "start_amount": str(filled),
+        }
+
     def _recover_uncertain_order(self, side: str) -> dict[str, Any] | None:
-        """After a POST timeout, reuse a single matching open order. Never POST again."""
+        """After a POST timeout, reuse a matching open or just-filled order. Never POST again."""
         try:
             active = self.active_orders()
         except Exception:
-            return None
+            active = []
         matches = [
             row
             for row in active
             if str(row.get("side") or "").lower() == side.lower()
             and str(row.get("pair") or self.cfg.pair) == self.cfg.pair
         ]
-        if len(matches) != 1:
+        if len(matches) == 1:
+            slog(
+                "ORDER_ACCEPTED",
+                "recovered order after uncertain POST",
+                order_id=str(matches[0].get("order_id") or ""),
+            )
+            return matches[0]
+        if len(matches) > 1:
             slog(
                 "ORDER_STATUS",
                 "ambiguous post-timeout orders; refusing duplicate POST",
@@ -87,12 +162,7 @@ class OrderExecutor:
                 side=side,
             )
             return None
-        slog(
-            "ORDER_ACCEPTED",
-            "recovered order after uncertain POST",
-            order_id=str(matches[0].get("order_id") or ""),
-        )
-        return matches[0]
+        return self._recover_from_trades(side)
 
     def _refresh_order(self, order_id: str) -> dict[str, Any] | None:
         if self.client is None or not hasattr(self.client, "get_order"):
@@ -248,6 +318,36 @@ class OrderExecutor:
             )
             recovered = self._recover_uncertain_order(plan.side)
             if recovered is None:
+                detail = f"{type(exc).__name__} {exc}".lower()
+                transient = any(
+                    token in detail
+                    for token in (
+                        "timeout",
+                        "timed out",
+                        "connecterror",
+                        "network",
+                        "temporarily",
+                    )
+                )
+                if transient:
+                    slog(
+                        "TRADE_BLOCKED",
+                        "EXECUTION_BLOCKED",
+                        reason="uncertain_order",
+                        error=type(exc).__name__,
+                    )
+                    return OrderResult(
+                        False,
+                        "uncertain_order",
+                        False,
+                        False,
+                        None,
+                        None,
+                        ZERO,
+                        ZERO,
+                        None,
+                        None,
+                    )
                 raise
             raw = recovered
         order_id = str(raw.get("order_id") or "")
