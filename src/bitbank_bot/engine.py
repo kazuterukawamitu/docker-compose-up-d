@@ -341,7 +341,7 @@ class Engine:
                     tp=str(signal.tp_pct) if signal.tp_pct is not None else None,
                     score=f"{signal.score}/{signal.score_max}" if signal.score_max else None,
                 )
-                self._execute(
+                should_advance = self._execute(
                     signal,
                     snap.close,
                     snap.index,
@@ -349,6 +349,8 @@ class Engine:
                     state,
                     rate=rate,
                 )
+                if not should_advance:
+                    continue
             state.last_candle_ts = snap.timestamp_ms
             if persist:
                 save_state(self.cfg.state_path, state)
@@ -363,7 +365,7 @@ class Engine:
         ts: int,
         state: BotState,
         rate=None,
-    ) -> None:
+    ) -> bool:
         rest = self._rest()
         if self.ws is not None and not self.ws.is_stale() and self.ws.last_price():
             live_px = self.ws.last_price() or price
@@ -379,7 +381,7 @@ class Engine:
                         ticker=str(live_px),
                         drift=str(drift),
                     )
-                    return
+                    return False
             price = live_px
         try:
             jpy, btc = self._balances(rest, state)
@@ -393,13 +395,13 @@ class Engine:
                 reason = "balance_fetch_failed"
             self.last_block_reason = reason
             slog("ERROR", "no order", reason=reason, error=type(exc).__name__)
-            return
+            return True
         except Exception as exc:
             _LOG.exception("balance fetch failed on order path")
             state.risk.note_api_error()
             self.last_block_reason = "balance_fetch_failed"
             slog("ERROR", "no order", reason="balance_fetch_failed", error=type(exc).__name__)
-            return
+            return True
         state.risk.note_api_ok()
         state.risk.update_equity(jpy, btc, price)
         sizer = PositionSizer(self.cfg, state.risk)
@@ -431,8 +433,8 @@ class Engine:
             plan,
             market_data_real=(
                 self.market_data_real
-                or self._explicit_synthetic
-                or not self.used_synthetic_fallback
+                and not self._explicit_synthetic
+                and not self.used_synthetic_fallback
             ),
             market_data_fresh=True,
             private_api_ok=private_ok,
@@ -443,7 +445,7 @@ class Engine:
         )
         if not gate.allowed:
             self.last_block_reason = gate.reason
-            return
+            return True
         slog(
             "POSITION_SIZE_CALCULATED",
             "size",
@@ -466,7 +468,7 @@ class Engine:
                 trace_id=gate.trace_id,
             )
             state.risk.note_api_error()
-            return
+            return True
         slog(
             "HEARTBEAT",
             "ORDER MANAGER OK",
@@ -475,6 +477,7 @@ class Engine:
             dry_run=result.dry_run,
         )
         self._apply_fill(signal, plan, result, index, ts, state, jpy, btc)
+        return True
 
     def _poll_pending(self, state: BotState) -> None:
         pending = state.pending
@@ -914,8 +917,11 @@ class Engine:
             pending=state.pending is not None,
             min_amount=self.cfg.min_amount_btc,
         )
-        if not report.ok and self.cfg.may_place_live_orders:
+        if not report.ok:
             self.last_block_reason = f"reconcile_{report.reason}"
+            if self.cfg.may_place_live_orders:
+                state.risk.operator_killed = True
+                slog("KILL_SWITCH", "reconcile failure auto-kill", reason=report.reason)
 
     def _heartbeat(self, state: BotState, signal: Signal, last: str = "-") -> None:
         ws_ok = bool(self.ws and self.ws.is_connected())

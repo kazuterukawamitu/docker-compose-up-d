@@ -79,7 +79,14 @@ class OrderExecutor:
             if str(row.get("side") or "").lower() == side.lower()
             and str(row.get("pair") or self.cfg.pair) == self.cfg.pair
         ]
-        if len(matches) != 1:
+        if len(matches) == 1:
+            slog(
+                "ORDER_ACCEPTED",
+                "recovered order after uncertain POST",
+                order_id=str(matches[0].get("order_id") or ""),
+            )
+            return matches[0]
+        if len(matches) > 1:
             slog(
                 "ORDER_STATUS",
                 "ambiguous post-timeout orders; refusing duplicate POST",
@@ -87,12 +94,38 @@ class OrderExecutor:
                 side=side,
             )
             return None
+        if self.client is None or not hasattr(self.client, "get_trade_history"):
+            return None
+        try:
+            trades = self.client.get_trade_history(self.cfg.pair)
+        except Exception:
+            return None
+        recent = [
+            t
+            for t in trades[:10]
+            if str(t.get("side") or "").lower() == side.lower()
+        ]
+        if len(recent) == 1:
+            trade = recent[0]
+            slog(
+                "ORDER_ACCEPTED",
+                "recovered filled order from trade_history after uncertain POST",
+                order_id=str(trade.get("order_id") or ""),
+            )
+            return {
+                "order_id": trade.get("order_id"),
+                "status": "FULLY_FILLED",
+                "executed_amount": trade.get("amount"),
+                "average_price": trade.get("price"),
+                "start_amount": trade.get("amount"),
+            }
         slog(
-            "ORDER_ACCEPTED",
-            "recovered order after uncertain POST",
-            order_id=str(matches[0].get("order_id") or ""),
+            "ORDER_STATUS",
+            "no single matching order or trade after timeout",
+            active_count=len(matches),
+            recent_trade_count=len(recent),
         )
-        return matches[0]
+        return None
 
     def _refresh_order(self, order_id: str) -> dict[str, Any] | None:
         if self.client is None or not hasattr(self.client, "get_order"):

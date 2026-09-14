@@ -84,9 +84,11 @@ def fetch_candles(
 
     seen: set[int] = set()
     candles: list[Candle] = []
+    any_fetch_succeeded = False
     for key in keys:
         try:
             rows = client.get_candlestick(cfg.pair, cfg.candle_type, key)
+            any_fetch_succeeded = True
         except BitbankAPIError as exc:
             slog(
                 "CANDLE_API_ERROR",
@@ -122,6 +124,8 @@ def fetch_candles(
             candles.append(candle)
     candles.sort(key=lambda c: c.timestamp_ms)
     slog("MARKET", "candles loaded", count=len(candles), candle_type=cfg.candle_type)
+    if not any_fetch_succeeded and not candles:
+        raise Exception("all candle fetches failed")
     return drop_incomplete_candle(candles, cfg.candle_type)
 
 
