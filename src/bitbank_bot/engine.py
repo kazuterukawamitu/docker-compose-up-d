@@ -753,7 +753,7 @@ class Engine:
                 self.rest_breaker.ok()
                 return incoming
             slog("MARKET", "empty public candles this fetch")
-            self.rest_breaker.ok()
+            self.rest_breaker.fail()
         except Exception as exc:
             self.rest_breaker.fail()
             slog(
@@ -907,7 +907,9 @@ class Engine:
         if not self.cfg.has_keys:
             return
         now = time.monotonic()
-        if now - self._last_reconcile < max(30.0, self.cfg.poll_sec * 4):
+        if self._last_reconcile > 0.0 and now - self._last_reconcile < max(
+            30.0, self.cfg.poll_sec * 4
+        ):
             return
         self._last_reconcile = now
         try:

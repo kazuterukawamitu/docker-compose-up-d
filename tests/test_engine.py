@@ -501,6 +501,7 @@ def test_reconcile_mismatch_blocks_live_buy(tmp_path) -> None:
     from bitbank_bot.engine import BotState
 
     state = BotState(None, RiskManager(c), 0, time.monotonic())
+    engine._last_reconcile = 0.0
     engine._maybe_reconcile(rest, state)
     assert engine.execution_block_reason == "reconcile_btc_position_mismatch"
     with patch(
@@ -510,6 +511,31 @@ def test_reconcile_mismatch_blocks_live_buy(tmp_path) -> None:
         engine.process_candles(synthetic_candles(40), state, execute=True, persist=False)
     rest.create_order.assert_not_called()
     assert engine.last_block_reason == "reconcile_btc_position_mismatch"
+
+
+def test_reconcile_runs_when_monotonic_clock_is_young(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("bitbank_bot.engine.time.monotonic", lambda: 5.0)
+    c = cfg(
+        state_path=str(tmp_path / "state.json"),
+        lock_path=str(tmp_path / "bot.lock"),
+        log_dir=str(tmp_path / "logs"),
+        enable_websocket=False,
+        dry_run=False,
+        live_trading=True,
+        api_key="k",
+        api_secret="s",
+    )
+    rest = MagicMock()
+    rest.free_amount.side_effect = lambda asset: (
+        Decimal("100000") if asset == "jpy" else Decimal("1")
+    )
+    rest.get_active_orders.return_value = []
+    engine = Engine(c, client=rest)
+    from bitbank_bot.engine import BotState
+
+    state = BotState(None, RiskManager(c), 0, 5.0)
+    engine._maybe_reconcile(rest, state)
+    assert engine.execution_block_reason == "reconcile_btc_position_mismatch"
 
 
 def test_price_drift_does_not_consume_bar(tmp_path) -> None:

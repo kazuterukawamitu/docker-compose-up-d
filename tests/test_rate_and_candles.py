@@ -147,3 +147,33 @@ def test_all_candle_keys_fail_increments_breaker(tmp_path) -> None:
     assert engine.rest_breaker.failures >= 1
     assert engine.used_synthetic_fallback is True
     assert incoming
+
+
+def test_empty_public_candles_fail_breaker_then_cache(tmp_path) -> None:
+    c = cfg(
+        state_path=str(tmp_path / "state.json"),
+        lock_path=str(tmp_path / "bot.lock"),
+        log_dir=str(tmp_path / "logs"),
+        enable_websocket=False,
+        dry_run=True,
+        candle_type="1hour",
+    )
+    now_ms = int(datetime.now(JST).timestamp() * 1000)
+    hour = 3_600_000
+    last = now_ms - (now_ms % hour) - hour
+    cache = CandleCache(20)
+    cache.merge(
+        [
+            Candle(D("100"), D("101"), D("99"), D("100"), D("1"), last - hour),
+            Candle(D("100"), D("101"), D("99"), D("100"), D("1"), last),
+        ]
+    )
+    rest = MagicMock()
+    rest.get_candlestick.return_value = []
+    engine = Engine(c, client=rest)
+    engine.cache = cache
+    incoming = engine._candles_for_cycle(rest, latest_only=True, force_synthetic=False)
+    assert incoming == []
+    assert engine.rest_breaker.failures >= 1
+    assert engine.used_synthetic_fallback is False
+    assert engine.market_data_real is True
