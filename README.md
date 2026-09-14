@@ -2,29 +2,27 @@
 
 Bitbank-only `btc_jpy` bot. Default is a **continuous DRY_RUN loop** with an iTerm **取引画面** (trading dashboard). HOLD/WAIT on a bar is normal. JSON lines are written to `logs/bot.log`, not the dashboard.
 
-`main` on GitHub is still wiki HTML. The runnable bot is branch `cursor/bitbank-audit-unify-f5fd`.
-
-HOLD for 15 minutes while market data and strategy are healthy is `LONG_WAIT`, not a crash. Public-API fallback candles never place orders. Live UNFILLED limits are persisted and polled. New BUY is blocked when both 4h and 1d SMA slopes are down (`ENABLE_HTF_FILTER`).
+Start with `python3 launch.py`. HOLD for 15 minutes while market data and strategy are healthy is `LONG_WAIT`, not a crash. Public-API fallback candles never place orders. Live UNFILLED limits are persisted and polled. New BUY is blocked when both 4h and 1d SMA slopes are down (`ENABLE_HTF_FILTER`).
 
 ## Start (this is the program)
 
-`main` on GitHub is wiki HTML. You do **not** need pip, venv, or `start.sh` for the bot to run.
-
-Paste **this one line** in iTerm. It downloads `run.py` and starts a DRY_RUN 取引画面 (no orders):
+From this checkout, start DRY_RUN with:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/kazuterukawamitu/docker-compose-up-d/cursor/bitbank-audit-unify-f5fd/run.py -o "$HOME/bitbank_run.py" && python3 "$HOME/bitbank_run.py"
+python3 launch.py
 ```
 
-You should see `Bitbank  BTC/JPY  取引画面`. HOLD/待機 is normal. Stop with Ctrl-C.
-
-If this repo is already checked out on this branch:
+or:
 
 ```bash
-python3 run.py
+bash start.sh
 ```
 
-`python3 main.py` also works: it uses the full package when httpx is installed, otherwise the same stdlib `run.py`.
+You should see `Bitbank BTC/JPY 起動プログラム` then `Bitbank  BTC/JPY  取引画面`. HOLD/待機 is normal. Stop with Ctrl-C.
+
+`python3 main.py` is the same launcher. `python3 run.py` is the stdlib-only DRY_RUN screen (no pip).
+
+`python3 launch.py --doctor` prints a safe environment check (no secrets).
 
 Live trading stays **off** unless `.env` has `TRADING_MODE=live` **and**
 `DRY_RUN=false` **and** `LIVE_TRADING=true` **and**
@@ -74,8 +72,9 @@ State-machine mapping: [docs/STRATEGY.md](docs/STRATEGY.md).
 ## Tests
 
 ```bash
-bash ~/docker-compose-up-d/start.sh --once --synthetic --skip-lock
-PYTHONPATH=src .venv/bin/python -m pytest -q
+bash start.sh --once --synthetic --skip-lock
+python3 launch.py --once --synthetic --skip-lock --no-screen
+PYTHONPATH=src python3 -m pytest -q
 ```
 
 Read-only execution check (never places an order):

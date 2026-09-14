@@ -1,44 +1,24 @@
 #!/usr/bin/env python3
-"""Repo-root launcher. Prefers the full package; falls back to stdlib run.py.
+"""Repo-root launcher. Prefer `python3 launch.py`.
 
+    python3 launch.py
     python3 main.py
     python3 run.py
 
-Both stay DRY_RUN. Neither places a Bitbank order.
+All three stay DRY_RUN unless .env is fully armed for LIVE. None of these
+files place a Bitbank order by themselves.
 """
 
 from __future__ import annotations
 
-import importlib.util
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-SRC = ROOT / "src"
-if str(SRC) not in sys.path:
-    sys.path.insert(0, str(SRC))
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
-
-def _stdlib() -> int:
-    path = ROOT / "run.py"
-    spec = importlib.util.spec_from_file_location("bitbank_stdlib_run", path)
-    if spec is None or spec.loader is None:
-        sys.stderr.write("run.py is missing; cannot start\n")
-        return 2
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return int(module.main())
-
-
-def _launch() -> int:
-    try:
-        import httpx  # noqa: F401
-        from bitbank_bot.main import main
-    except ModuleNotFoundError:
-        sys.stderr.write("full package/deps missing; starting stdlib DRY_RUN (run.py)\n")
-        return _stdlib()
-    return int(main())
-
+from launch import main as launch_main
 
 if __name__ == "__main__":
-    raise SystemExit(_launch())
+    raise SystemExit(launch_main())
