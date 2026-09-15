@@ -98,6 +98,40 @@ def test_engine_synthetic_once_dry_run(tmp_path) -> None:
     assert engine.strategy_evaluations >= 1
 
 
+def test_engine_smoke_order_is_paper_fill(tmp_path) -> None:
+    c = cfg(
+        state_path=str(tmp_path / "state.json"),
+        lock_path=str(tmp_path / "bot.lock"),
+        log_dir=str(tmp_path / "logs"),
+        enable_websocket=False,
+        dry_run=True,
+        live_trading=False,
+    )
+    fake = FakeRest()
+    engine = Engine(c, client=fake)  # type: ignore[arg-type]
+    rc = engine.run_smoke_order()
+    assert rc == 0
+    assert fake.create_order_calls == 0
+
+
+def test_engine_smoke_order_refuses_live(tmp_path) -> None:
+    c = cfg(
+        state_path=str(tmp_path / "state.json"),
+        lock_path=str(tmp_path / "bot.lock"),
+        log_dir=str(tmp_path / "logs"),
+        enable_websocket=False,
+        dry_run=False,
+        live_trading=True,
+        api_key="k",
+        api_secret="s",
+    )
+    fake = FakeRest()
+    engine = Engine(c, client=fake)  # type: ignore[arg-type]
+    rc = engine.run_smoke_order()
+    assert rc == 2
+    assert fake.create_order_calls == 0
+
+
 def test_engine_loop_continues_after_hold(tmp_path) -> None:
     c = cfg(
         state_path=str(tmp_path / "state.json"),
@@ -196,6 +230,7 @@ def test_engine_skips_order_when_balance_fetch_fails(tmp_path) -> None:
     rest = MagicMock()
     rest.free_amount.side_effect = RuntimeError("boom")
     engine = Engine(c, client=rest)
+    engine.market_data_real = True
     from bitbank_bot.strategy import Signal
 
     state = load_state(c.state_path, c)
@@ -299,6 +334,7 @@ def test_pending_unfilled_is_persisted_and_polled(tmp_path) -> None:
         "start_amount": "0.001",
     }
     engine = Engine(c, client=rest)
+    engine.market_data_real = True
     from bitbank_bot.engine import BotState
 
     state = BotState(None, RiskManager(c), 0, time.monotonic())
@@ -337,6 +373,97 @@ def test_pending_unfilled_is_persisted_and_polled(tmp_path) -> None:
     assert state.position.actual_execution_jpy == Decimal("10000")
 
 
+def test_engine_clears_canceled_pending_from_reconcile(tmp_path) -> None:
+    from bitbank_bot.reconciliation import ReconcileReport
+
+    c = cfg(
+        state_path=str(tmp_path / "state.json"),
+        lock_path=str(tmp_path / "bot.lock"),
+        log_dir=str(tmp_path / "logs"),
+        enable_websocket=False,
+        dry_run=False,
+        live_trading=True,
+        api_key="k",
+        api_secret="s",
+    )
+    engine = Engine(c, client=MagicMock())
+    from bitbank_bot.engine import BotState
+
+    state = BotState(None, RiskManager(c), 0, time.monotonic())
+    state.pending = PendingOrder(
+        order_id="99",
+        side="buy",
+        kind="BUY1",
+        tp_pct=Decimal("0.03"),
+        index=1,
+        timestamp_ms=1,
+        amount=Decimal("0.001"),
+    )
+    report = ReconcileReport(
+        False,
+        "mismatch",
+        mismatches=["pending_missing"],
+        open_orders=0,
+    )
+    engine._apply_reconcile_report(report, state)
+    assert state.pending is None
+    assert engine.last_block_reason == "pending_missing"
+    saved = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
+    assert saved["pending"] is None
+
+
+def test_engine_polls_pending_filled_unapplied(tmp_path) -> None:
+    from bitbank_bot.reconciliation import ReconcileReport
+
+    c = cfg(
+        state_path=str(tmp_path / "state.json"),
+        lock_path=str(tmp_path / "bot.lock"),
+        log_dir=str(tmp_path / "logs"),
+        enable_websocket=False,
+        dry_run=False,
+        live_trading=True,
+        api_key="k",
+        api_secret="s",
+    )
+    rest = MagicMock()
+    rest.free_amount.side_effect = lambda asset: (
+        Decimal("90000") if asset == "jpy" else Decimal("0.001")
+    )
+    rest.get_order.return_value = {
+        "order_id": "42",
+        "status": "FULLY_FILLED",
+        "executed_amount": "0.001",
+        "average_price": "10000000",
+        "start_amount": "0.001",
+    }
+    engine = Engine(c, client=rest)
+    from bitbank_bot.engine import BotState
+
+    state = BotState(None, RiskManager(c), 0, time.monotonic())
+    state.pending = PendingOrder(
+        order_id="42",
+        side="buy",
+        kind="BUY1",
+        tp_pct=Decimal("0.03"),
+        index=1,
+        timestamp_ms=1,
+        amount=Decimal("0.001"),
+    )
+    report = ReconcileReport(
+        False,
+        "mismatch",
+        bitbank_btc=Decimal("0.001"),
+        local_btc=Decimal("0"),
+        open_orders=0,
+        mismatches=["pending_filled_unapplied"],
+    )
+    engine._apply_reconcile_report(report, state)
+    assert state.pending is None
+    assert state.position is not None
+    assert state.position.amount == Decimal("0.001")
+    rest.get_order.assert_called()
+
+
 def test_pending_dataclass_roundtrip() -> None:
     pending = PendingOrder(
         order_id="7",
@@ -369,6 +496,7 @@ def test_dry_run_sell_uses_position_amount(tmp_path) -> None:
         long_ma_period=5,
     )
     engine = Engine(c, client=FakeRest())  # type: ignore[arg-type]
+    engine.market_data_real = True
     state = BotState(
         Position(
             amount=Decimal("0.001"),
@@ -423,6 +551,7 @@ def test_partial_fill_keeps_pending(tmp_path) -> None:
         "start_amount": "0.01",
     }
     engine = Engine(c, client=rest)
+    engine.market_data_real = True
     from bitbank_bot.engine import BotState
 
     state = BotState(None, RiskManager(c), 0, time.monotonic())
@@ -436,3 +565,131 @@ def test_partial_fill_keeps_pending(tmp_path) -> None:
     assert state.pending.filled_amount == Decimal("0.0004")
     assert state.position is not None
     assert state.position.amount == Decimal("0.0004")
+
+
+def test_live_execute_blocked_when_market_data_not_real(tmp_path) -> None:
+    c = cfg(
+        state_path=str(tmp_path / "state.json"),
+        lock_path=str(tmp_path / "bot.lock"),
+        log_dir=str(tmp_path / "logs"),
+        enable_websocket=False,
+        enable_htf_filter=False,
+        dry_run=False,
+        live_trading=True,
+        api_key="k",
+        api_secret="s",
+    )
+    rest = MagicMock()
+    rest.free_amount.side_effect = lambda asset: (
+        Decimal("100000") if asset == "jpy" else Decimal("0")
+    )
+    rest.get_active_orders.return_value = []
+    rest.create_order.side_effect = AssertionError("live order")
+    engine = Engine(c, client=rest)
+    assert engine.market_data_real is False
+    assert engine.used_synthetic_fallback is False
+    state = load_state(c.state_path, c)
+    engine._execute(Signal("BUY1", "buy", Decimal("0.03"), "t"), Decimal("10000000"), 1, 1, state)
+    rest.create_order.assert_not_called()
+    assert engine.last_block_reason == "synthetic_market_data"
+
+
+def test_explicit_synthetic_loop_does_not_mark_cache_real(tmp_path) -> None:
+    c = cfg(
+        state_path=str(tmp_path / "state.json"),
+        lock_path=str(tmp_path / "bot.lock"),
+        log_dir=str(tmp_path / "logs"),
+        enable_websocket=False,
+        dry_run=True,
+        live_trading=False,
+        poll_sec=0.05,
+    )
+    engine = Engine(c, client=FakeRest())  # type: ignore[arg-type]
+    rc = engine.run_forever(synthetic=True, max_cycles=1)
+    assert rc == 0
+    assert engine.cache.market_data_real is False
+    assert engine.cache.candles == []
+    assert engine.market_data_real is False
+
+
+def test_failed_order_result_does_not_claim_manager_ok(tmp_path, caplog) -> None:
+    c = cfg(
+        state_path=str(tmp_path / "state.json"),
+        lock_path=str(tmp_path / "bot.lock"),
+        log_dir=str(tmp_path / "logs"),
+        enable_websocket=False,
+        enable_htf_filter=False,
+        dry_run=False,
+        live_trading=True,
+        api_key="k",
+        api_secret="s",
+    )
+    rest = MagicMock()
+    rest.free_amount.side_effect = lambda asset: (
+        Decimal("100000") if asset == "jpy" else Decimal("0")
+    )
+    rest.get_active_orders.return_value = [{"order_id": "9", "side": "buy"}]
+    engine = Engine(c, client=rest)
+    engine.market_data_real = True
+    state = load_state(c.state_path, c)
+    with caplog.at_level("INFO", logger="bitbank_bot"):
+        engine._execute(
+            Signal("BUY1", "buy", Decimal("0.03"), "t"), Decimal("10000000"), 1, 1, state
+        )
+        engine._heartbeat(state, Signal.hold("active_orders"))
+    rest.create_order.assert_not_called()
+    assert engine.last_block_reason == "active_orders"
+    assert engine.order_manager_ok is False
+    assert "ORDER MANAGER DEGRADED" in caplog.text
+    assert caplog.text.count("ORDER MANAGER OK") == 0
+
+
+def test_poll_missing_average_price_keeps_pending(tmp_path) -> None:
+    c = cfg(
+        state_path=str(tmp_path / "state.json"),
+        lock_path=str(tmp_path / "bot.lock"),
+        log_dir=str(tmp_path / "logs"),
+        enable_websocket=False,
+        dry_run=False,
+        live_trading=True,
+        api_key="k",
+        api_secret="s",
+    )
+    rest = MagicMock()
+    rest.free_amount.return_value = Decimal("0")
+    rest.get_order.return_value = {
+        "order_id": "42",
+        "status": "FULLY_FILLED",
+        "executed_amount": "0.001",
+        "average_price": "0",
+        "start_amount": "0.001",
+    }
+    engine = Engine(c, client=rest)
+    from bitbank_bot.engine import BotState
+
+    state = BotState(None, RiskManager(c), 0, time.monotonic())
+    state.pending = PendingOrder(
+        order_id="42",
+        side="buy",
+        kind="BUY1",
+        tp_pct=Decimal("0.03"),
+        index=1,
+        timestamp_ms=1,
+        amount=Decimal("0.001"),
+    )
+    engine._poll_pending(state)
+    assert state.pending is not None
+    assert state.pending.order_id == "42"
+    assert state.position is None
+
+
+def test_save_state_is_atomic(tmp_path) -> None:
+    from bitbank_bot.engine import BotState, save_state
+
+    c = cfg(state_path=str(tmp_path / "state.json"))
+    state = BotState(None, RiskManager(c), 0, time.monotonic())
+    save_state(c.state_path, state)
+    raw = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
+    assert raw["pending"] is None
+    assert not (tmp_path / "state.json.tmp").exists()
+

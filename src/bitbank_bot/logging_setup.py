@@ -7,8 +7,12 @@ import logging
 import re
 import sys
 from datetime import datetime, timezone
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any
+
+LOG_MAX_BYTES = 5_000_000
+LOG_BACKUP_COUNT = 5
 
 _LOGGER = logging.getLogger("bitbank_bot")
 _CONFIGURED = False
@@ -55,7 +59,12 @@ def setup_logging(
         stream.setFormatter(formatter)
         stream.addFilter(_RedactFilter())
         root.addHandler(stream)
-    file_handler = logging.FileHandler(Path(log_dir) / "bot.log", encoding="utf-8")
+    file_handler = RotatingFileHandler(
+        Path(log_dir) / "bot.log",
+        maxBytes=LOG_MAX_BYTES,
+        backupCount=LOG_BACKUP_COUNT,
+        encoding="utf-8",
+    )
     file_handler.setFormatter(formatter)
     file_handler.addFilter(_RedactFilter())
     root.addHandler(file_handler)

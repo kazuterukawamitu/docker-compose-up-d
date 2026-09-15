@@ -25,6 +25,9 @@ bitbank-bot = "bitbank_bot.main:cli"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[project.entry-points.pytest11]
+bitbank_cwd = "bitbank_bot.pytest_plugin"
+
 [tool.pytest.ini_options]
 pythonpath = ["src", "tests"]
 testpaths = ["tests"]

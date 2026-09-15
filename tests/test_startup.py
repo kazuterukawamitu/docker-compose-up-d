@@ -16,6 +16,9 @@ def test_compileall_src() -> None:
         py_compile.compile(str(path), doraise=True)
     py_compile.compile(str(root / "main.py"), doraise=True)
     py_compile.compile(str(root / "run.py"), doraise=True)
+    launch_bot = root / "launch_bot.py"
+    if launch_bot.is_file():
+        py_compile.compile(str(launch_bot), doraise=True)
     diag = root / "diagnostics.py"
     if diag.is_file():
         py_compile.compile(str(diag), doraise=True)
@@ -32,6 +35,52 @@ def test_default_cli_is_continuous_loop_not_once() -> None:
     assert args.once is False
     assert args.synthetic is False
     assert args.max_cycles is None
+    assert args.execute is False
+    assert args.smoke_order is False
+
+
+def test_execute_and_smoke_order_flags() -> None:
+    a = build_parser().parse_args(["--execute", "--skip-lock", "--no-screen"])
+    assert a.execute is True
+    b = build_parser().parse_args(["--smoke-order"])
+    assert b.smoke_order is True
+
+
+def test_main_smoke_order_exits_zero_without_post(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("STATE_PATH", str(tmp_path / "state.json"))
+    monkeypatch.setenv("LOCK_PATH", str(tmp_path / "bot.lock"))
+    monkeypatch.setenv("LOG_DIR", str(tmp_path / "logs"))
+    monkeypatch.setenv("DRY_RUN", "true")
+    monkeypatch.setenv("LIVE_TRADING", "false")
+    monkeypatch.setenv("TRADING_MODE", "DRY_RUN")
+    monkeypatch.setenv("ENABLE_WEBSOCKET", "false")
+    rc = main(["--execute", "--smoke-order", "--skip-lock", "--no-screen"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "SMOKE_ORDER_OK" in out
+    assert "SIMULATED_FILL" in out
+    assert "ORDER_INTENT" in out
+    assert "create_order_called" in out
+    assert "/user/spot/order" not in out
+
+
+def test_main_smoke_order_refuses_live(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("STATE_PATH", str(tmp_path / "state.json"))
+    monkeypatch.setenv("LOCK_PATH", str(tmp_path / "bot.lock"))
+    monkeypatch.setenv("LOG_DIR", str(tmp_path / "logs"))
+    monkeypatch.setenv("DRY_RUN", "false")
+    monkeypatch.setenv("LIVE_TRADING", "true")
+    monkeypatch.setenv("TRADING_MODE", "LIVE")
+    monkeypatch.setenv("LIVE_TRADING_CONFIRM", "YES_I_ACCEPT_REAL_MONEY_RISK")
+    monkeypatch.setenv("BITBANK_API_KEY", "k")
+    monkeypatch.setenv("BITBANK_API_SECRET", "s")
+    monkeypatch.setenv("ENABLE_WEBSOCKET", "false")
+    rc = main(["--execute", "--skip-lock", "--no-screen"])
+    assert rc == 2
+    captured = capsys.readouterr()
+    combined = captured.out + captured.err
+    assert "SMOKE_ORDER_OK" not in combined
+    assert "create_order_called" in combined or "LIVE" in combined
 
 
 def test_synthetic_does_not_imply_once() -> None:
@@ -44,16 +93,54 @@ def test_start_sh_is_venv_loop_launcher() -> None:
     text = Path(__file__).resolve().parents[1].joinpath("start.sh").read_text(encoding="utf-8")
     assert ".venv" in text
     assert 'VPY="$VENV/bin/python"' in text
+    assert "BASH_SOURCE" in text
+    assert "CommandLineTools" in text
     assert "exec" in text
     after_exec = text.rsplit("exec", 1)[-1]
     assert "--once" not in after_exec
+    assert "--execute" not in after_exec
+    assert "--smoke-order" not in after_exec
     assert "--screen" in text
     assert "取引画面" in text
     assert ".env.example" in text
     assert "python3.12" in text
     assert "python3" in text
-    assert 'BOT_BRANCH="cursor/bitbank-audit-unify-f5fd"' in text
+    assert 'BOT_BRANCH="cursor/bitbank-closed-loop-f964"' in text
     assert "run.py" in text
+    assert "bitbank_bot.launch" in text
+    assert "run_transaction.sh" in text
+    assert "--print-plan" in text
+    assert "program_source_ok" in text
+    assert "engine.py" in text
+    assert "orders.py" in text
+    assert "--execute" in text
+    assert "--smoke-order" in text
+    assert "/Users/kazuteru" not in text
+    assert "without printing secrets" in text or "values not printed" in text
+    assert "cd to the repo first" in text
+    assert "RATE_MODE" in text
+    assert "RECONCILE_EVERY_CYCLES" in text
+    assert "--self-test" in text
+    assert "docker-compose-up-d" in text
+    assert "PYTHONPATH=src python3 -m pytest -q" not in text
+    assert "bitbank_bot_src.pth" in text
+    assert 'PYTHONPATH="$ROOT/src' in text
+    assert "never ~/.venv" in text
+    assert "set +H" in text
+    assert "histexpand" in text
+    assert "JSON logs" in text
+    assert "bash ~/docker-compose-up-d/start.sh" in text
+    assert "/workspace/start.sh" in text
+    assert ("closed-loop-launcher-" + "563e") not in text
+    assert 'VPY="$PY"' not in text
+
+
+def test_trading_modes_file_compiles_without_stray_paren() -> None:
+    root = Path(__file__).resolve().parents[1]
+    path = root / "tests" / "test_trading_modes.py"
+    py_compile.compile(str(path), doraise=True)
+    source = path.read_text(encoding="utf-8")
+    assert source.count("(") == source.count(")")
 
 
 def test_loop_cli_exits_after_max_cycles(tmp_path, monkeypatch) -> None:

@@ -107,6 +107,31 @@ def crossed_down(
     return prev_close >= prev_ma and close < ma
 
 
+def atr(
+    highs: Sequence[Decimal],
+    lows: Sequence[Decimal],
+    closes: Sequence[Decimal],
+    period: int = 14,
+) -> Decimal | None:
+    """Wilder-style average true range. None when undefined or non-positive."""
+    if period < 1 or len(closes) < period + 1:
+        return None
+    if not (len(highs) == len(lows) == len(closes)):
+        return None
+    trs: list[Decimal] = []
+    for i in range(1, len(closes)):
+        high_low = highs[i] - lows[i]
+        high_close = abs(highs[i] - closes[i - 1])
+        low_close = abs(lows[i] - closes[i - 1])
+        trs.append(max(high_low, high_close, low_close))
+    if len(trs) < period:
+        return None
+    value = sum(trs[-period:], ZERO) / D(period)
+    if value <= ZERO or value.is_nan() or value.is_infinite():
+        return None
+    return value
+
+
 def interpolate_crossover(
     prev_price: Decimal,
     prev_ma: Decimal,
