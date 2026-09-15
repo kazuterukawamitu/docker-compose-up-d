@@ -45,6 +45,8 @@ and code paths, not string presence.
 | 38 | File inventory | PASS | `reports/FILE_INVENTORY.md` |
 | 39 | `BitbankAPIClient` façade | PASS | `api_client.py`; OrderExecutor still the POST caller |
 | 40 | completion_percent | PASS | `scripts/completion_percent.py` (live POST skipped) |
+| 41 | Launcher execs from other cwd | PASS | `run_bot.sh` / `launch.py` chdir |
+| 42 | `--smoke-order` paper fill | PASS | `tests/test_smoke_order.py`; never POST |
 
 LIVE Bitbank POST is **not** claimed PASS. DRY_RUN paper fills and
 LIVE_READY `WOULD_SUBMIT_ORDER` are tested.

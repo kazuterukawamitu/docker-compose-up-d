@@ -39,6 +39,7 @@ ONESHOT_FLAGS = frozenset(
         "--check-config",
         "--preflight",
         "--backtest",
+        "--smoke-order",
         "--help",
         "-h",
         "--self-test",
@@ -468,6 +469,8 @@ def _usage_epilog() -> str:
         "  bash ./start.sh --help\n"
         "  bash ./start.sh --once --synthetic --skip-lock --no-screen\n"
         "  bash ./start.sh --check-config\n"
+        "  bash ./start.sh --smoke-order\n"
+        "From ~ after install_launch_alias.sh, bash ./start.sh execs the clone.\n"
         "RATE_MODE and RECONCILE_EVERY_CYCLES come from .env (printed SET/UNSET, no secrets).\n"
         "LIVE requires TRADING_MODE=LIVE and "
         f"LIVE_TRADING_CONFIRM={LIVE_CONFIRM_PHRASE}. Default is DRY_RUN.\n"
@@ -520,12 +523,8 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if not cwd_is_inside_repo(root):
         sys.stderr.write(
-            f"launcher: current directory is not the Bitbank bot repo (cwd={Path.cwd()}).\n"
-            f"  repo is at: {root}\n"
-            f"  cd {root} && bash ./start.sh\n"
+            f"launcher: cwd={Path.cwd()} is not the repo; switching to {root}\n"
         )
-        sys.stderr.write(NOT_IN_REPO_HINT + "\n")
-        return 2
     os.chdir(root)
     ensure_src_on_path(root)
     try:

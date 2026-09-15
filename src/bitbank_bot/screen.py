@@ -192,7 +192,7 @@ def should_use_screen(args: object, stdout: TextIO | None = None) -> bool:
     no_screen = bool(getattr(args, "no_screen", False))
     screen = bool(getattr(args, "screen", False))
     max_cycles = getattr(args, "max_cycles", None)
-    for flag in ("check_config", "preflight", "backtest"):
+    for flag in ("check_config", "preflight", "backtest", "smoke_order"):
         if bool(getattr(args, flag, False)):
             return False
     if no_screen or once:

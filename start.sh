@@ -42,6 +42,7 @@ This is the program-launching program. It cds to the repo from BASH_SOURCE
   bash ./start.sh --help
   bash ./start.sh --once --synthetic --skip-lock --no-screen
   bash ./start.sh --check-config
+  bash ./start.sh --smoke-order
   bash ./start.sh --no-supervise
   bash ./start.sh --supervise
   bash ./start.sh --self-test
@@ -289,7 +290,7 @@ oneshot=0
 want_stdlib_loop=1
 for a in "$@"; do
   case "$a" in
-    --once|--check-config|--preflight|--backtest|--help|-h|--max-cycles|--self-test)
+    --once|--check-config|--preflight|--backtest|--help|-h|--max-cycles|--self-test|--smoke-order)
       oneshot=1
       want_stdlib_loop=0
       ;;
@@ -300,6 +301,12 @@ for a in "$@"; do
 done
 
 if ! "$VPY" -c "import dotenv, httpx" >/dev/null 2>&1; then
+  for a in "$@"; do
+    if [[ "$a" == "--smoke-order" ]]; then
+      echo "smoke-order needs the package (httpx). run.py never places orders." >&2
+      exit 2
+    fi
+  done
   echo "pip packages missing; starting stdlib DRY_RUN (python3 run.py, no orders)"
   if [[ ! -f "$ROOT/run.py" ]]; then
     echo "cannot start: missing $ROOT/run.py" >&2
@@ -347,7 +354,7 @@ if [[ -t 1 ]]; then
 fi
 for a in "$@"; do
   case "$a" in
-    --once|--check-config|--preflight|--backtest|--no-screen)
+    --once|--check-config|--preflight|--backtest|--no-screen|--smoke-order)
       want_screen=0
       ;;
     --screen)

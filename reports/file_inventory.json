@@ -396,6 +396,17 @@
     "create_order_calls": 0
   },
   {
+    "path": "src/bitbank_bot/smoke_order.py",
+    "role": "smoke_order",
+    "in_use": true,
+    "legacy": false,
+    "api": false,
+    "order": true,
+    "strategy": false,
+    "config": false,
+    "create_order_calls": 0
+  },
+  {
     "path": "src/bitbank_bot/strategy.py",
     "role": "strategy",
     "in_use": true,
@@ -727,6 +738,17 @@
   },
   {
     "path": "tests/test_screen.py",
+    "role": "unclassified",
+    "in_use": true,
+    "legacy": false,
+    "api": false,
+    "order": false,
+    "strategy": false,
+    "config": false,
+    "create_order_calls": 0
+  },
+  {
+    "path": "tests/test_smoke_order.py",
     "role": "unclassified",
     "in_use": true,
     "legacy": false,

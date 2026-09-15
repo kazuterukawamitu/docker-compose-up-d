@@ -272,11 +272,12 @@ def test_launch_rejects_pytest_paste() -> None:
     assert main(["....", "[ 40%]", "passed"]) == 2
 
 
-def test_launch_from_outside_repo_says_cd_first(tmp_path) -> None:
+def test_launch_from_outside_repo_chdirs_and_runs(tmp_path) -> None:
     root = Path(__file__).resolve().parents[1]
     env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
     env["PYTHONPATH"] = str(root / "src")
     env["DRY_RUN"] = "true"
+    env["LIVE_TRADING"] = "false"
     proc = subprocess.run(
         [sys.executable, "-m", "bitbank_bot.launch", "--check-config"],
         cwd=str(tmp_path),
@@ -286,12 +287,12 @@ def test_launch_from_outside_repo_says_cd_first(tmp_path) -> None:
         timeout=20,
     )
     out = proc.stdout + proc.stderr
-    assert proc.returncode == 2, out
-    assert "cd to the repo first" in out
-    assert not any(
-        line.strip().startswith(".") and "%]" in line for line in out.splitlines()
-    )
-    assert "passed in" not in out
+    assert proc.returncode == 0, out
+    assert "switching to" in out
+    assert "project_root:" in out
+    assert str(root) in out
+    assert "may_place_live_orders: False" in out
+    assert "cd to the repo first" not in out
 
 
 def test_launch_help_works_outside_repo(tmp_path) -> None:
@@ -332,7 +333,7 @@ def test_start_sh_copy_outside_repo_says_cd_first(tmp_path) -> None:
     assert "[ 40%]" not in proc.stdout
 
 
-def test_run_bot_sh_refuses_outside_repo(tmp_path) -> None:
+def test_run_bot_sh_help_from_other_cwd(tmp_path) -> None:
     root = Path(__file__).resolve().parents[1]
     proc = subprocess.run(
         ["bash", str(root / "scripts" / "run_bot.sh"), "--help"],
@@ -342,8 +343,9 @@ def test_run_bot_sh_refuses_outside_repo(tmp_path) -> None:
         timeout=15,
     )
     out = proc.stdout + proc.stderr
-    assert proc.returncode == 2, out
-    assert "cd to the repo first" in out
+    assert proc.returncode == 0, out
+    assert "DRY_RUN" in out
+    assert "exec" in out or "start.sh" in out
 
 
 def test_run_bot_sh_help_from_repo() -> None:
@@ -404,7 +406,10 @@ def test_home_start_finds_common_clone_name(tmp_path) -> None:
     root = Path(__file__).resolve().parents[1]
     clone = tmp_path / "docker-compose-up-d"
     clone.mkdir()
-    (clone / "start.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+    (clone / "start.sh").write_text(
+        "#!/bin/sh\necho LAUNCHED_FROM_HOME_START \"$@\"\nexit 0\n",
+        encoding="utf-8",
+    )
     (clone / "run.py").write_text("#\n", encoding="utf-8")
     (clone / "main.py").write_text("#\n", encoding="utf-8")
     pkg = clone / "src" / "bitbank_bot"
@@ -419,10 +424,11 @@ def test_home_start_finds_common_clone_name(tmp_path) -> None:
         env={**os.environ, "HOME": str(tmp_path)},
     )
     out = proc.stdout + proc.stderr
-    assert proc.returncode == 2, out
+    assert proc.returncode == 0, out
     assert "Found a clone at:" in out
     assert str(clone) in out
-    assert "cd to the repo first" in out
+    assert "LAUNCHED_FROM_HOME_START" in out
+    assert "launching Bitbank bot from" in out
 
 
 def test_install_alias_then_home_start_sh(tmp_path) -> None:
@@ -443,7 +449,7 @@ def test_install_alias_then_home_start_sh(tmp_path) -> None:
     assert "bitbank-start" in zshrc
     assert str(root) in zshrc
     run = subprocess.run(
-        ["bash", "./start.sh"],
+        ["bash", "./start.sh", "--help"],
         cwd=str(tmp_path),
         capture_output=True,
         text=True,
@@ -451,9 +457,10 @@ def test_install_alias_then_home_start_sh(tmp_path) -> None:
         env={**os.environ, "HOME": str(tmp_path)},
     )
     hint = run.stdout + run.stderr
-    assert run.returncode == 2, hint
-    assert "cd to the repo first" in hint
-    assert "No such file or directory" not in hint
+    assert run.returncode == 0, hint
+    assert "launching Bitbank bot from" in hint
+    assert "DRY_RUN" in hint
+    assert "Installed Bitbank launcher" in home_start.read_text(encoding="utf-8")
 
 
 def test_resolve_runtime_python_prefers_venv(tmp_path) -> None:

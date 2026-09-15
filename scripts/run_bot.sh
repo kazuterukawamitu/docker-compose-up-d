@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# Tiny helper: refuse to run unless cwd is the Bitbank bot repo.
-# The only supported command is:  cd <repo> && bash ./start.sh
+# Program-triggered launcher: cds to THIS clone (BASH_SOURCE) and execs start.sh.
+# Works from ~ or any cwd:
+#   bash /absolute/path/to/scripts/run_bot.sh
+#   bash ./scripts/run_bot.sh
 #
-# You can also run this file after cd:  bash scripts/run_bot.sh
-# It never dumps pytest. It never places live orders.
+# It never dumps pytest. It never places live orders by itself.
 
 if [ -z "${BASH_VERSION:-}" ]; then
   exec /usr/bin/env bash "$0" "$@"
@@ -24,16 +25,6 @@ if [[ ! -f "$root/start.sh" || ! -f "$root/src/bitbank_bot/launch.py" || ! -f "$
   exit 2
 fi
 
-cwd="$(pwd -P)"
-if [[ "$cwd" != "$root" && "$cwd" != "$root"/* ]]; then
-  echo "cd to the repo first, then run: bash ./start.sh" >&2
-  echo "cwd=$cwd repo=$root" >&2
-  echo "Typical clone: cd ~/docker-compose-up-d && bash ./start.sh" >&2
-  echo "If zsh shows '>' you are stuck in paste/continuation — press Ctrl-C." >&2
-  echo "pytest is not a launch step. Tests: bash scripts/run_tests.sh (from the repo)." >&2
-  exit 2
-fi
-
 for a in "$@"; do
   if [[ "$a" =~ ^\.+$ ]] || [[ "$a" =~ ^\[[[:space:]]*[0-9]+%\]$ ]] || [[ "$a" == "passed" || "$a" == "failed" ]]; then
     echo "That looks like pytest output pasted into the shell, not a launcher command." >&2
@@ -42,4 +33,6 @@ for a in "$@"; do
   fi
 done
 
+cd "$root"
+echo "run_bot.sh: exec $root/start.sh (cwd was not required to already be the repo)"
 exec bash "$root/start.sh" "$@"

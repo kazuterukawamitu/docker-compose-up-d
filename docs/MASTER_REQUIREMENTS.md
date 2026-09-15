@@ -22,6 +22,8 @@ not implemented twice.
    ExecutionGate → OrderExecutor → Bitbank. Strategies never call
    `create_order`.
 7. Enhanced launcher is `start.sh` → `python -m bitbank_bot.launch`.
+   Wrappers (`run_bot.sh`, installed `$HOME/start.sh`) exec that start.sh
+   even when the shell cwd is `~`. `--smoke-order` proves a DRY_RUN paper fill.
 8. Output-program count vs `origin/main` must be disclosed at launch.
 
 9. `BitbankAPIClient` is a façade over existing `RestClient` + optional WS.

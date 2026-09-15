@@ -1,14 +1,13 @@
 #!/usr/bin/env bash
-# Home-safe start.sh finder. Copy to $HOME/start.sh so that
-#   cd ~ && bash ./start.sh
-# prints "cd to the repo" instead of bash's raw
-#   bash: ./start.sh: No such file or directory
+# Home-safe launcher. Finds the Bitbank clone and execs the real start.sh.
 #
-# This file is NOT the bot. It never starts trading. It never runs pytest.
-# You MUST cd into the clone (common name: docker-compose-up-d).
+# This IS a program-triggered program: when a clone is found it starts the bot.
+# It never enables LIVE. It never runs pytest.
 #
 # Install from the repo:
 #   bash scripts/install_launch_alias.sh
+# That writes $HOME/start.sh as a wrapper with the clone path baked in.
+# This file is the portable finder used when BITBANK_REPO is unset.
 
 if [ -z "${BASH_VERSION:-}" ]; then
   exec /usr/bin/env bash "$0" "$@"
@@ -20,7 +19,6 @@ BOT_BRANCH="cursor/closed-loop-launcher-563e"
 
 not_in_repo() {
   echo "cd to the repo first, then run: bash ./start.sh" >&2
-  echo "This copy is only a finder. The real start.sh lives inside the clone." >&2
   echo "Typical Mac path (clone name docker-compose-up-d):" >&2
   echo "  cd ~/docker-compose-up-d" >&2
   echo "  git fetch origin $BOT_BRANCH" >&2
@@ -39,6 +37,13 @@ looks_like_repo() {
   [[ -f "$d/start.sh" && -f "$d/src/bitbank_bot/launch.py" && -f "$d/run.py" && -f "$d/main.py" ]]
 }
 
+launch_repo() {
+  local p="$1"
+  echo "launching Bitbank bot from $p" >&2
+  echo "HOLD/WAIT is normal. Paper fills only unless LIVE dual-auth is set." >&2
+  exec bash "$p/start.sh" "$@"
+}
+
 for a in "$@"; do
   if [[ "$a" =~ ^\.+$ ]] || [[ "$a" =~ ^\[[[:space:]]*[0-9]+%\]$ ]] || [[ "$a" == "passed" || "$a" == "failed" ]]; then
     echo "That looks like pytest output pasted into the shell, not a launcher command." >&2
@@ -47,41 +52,32 @@ for a in "$@"; do
   fi
 done
 
-if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
-  not_in_repo
-  echo "After you cd to the repo, bash ./start.sh --help shows launcher flags." >&2
-  exit 2
-fi
-
-found=0
-names="docker-compose-up-d docker-compose-up-d.git bitbank-bot"
-report_clone() {
-  local p="$1"
-  echo "Found a clone at: $p" >&2
-  echo "  cd $p && bash ./start.sh" >&2
-  found=1
-}
-
 if [[ -n "${BITBANK_REPO:-}" ]] && looks_like_repo "$BITBANK_REPO"; then
-  report_clone "$BITBANK_REPO"
+  launch_repo "$BITBANK_REPO" "$@"
 fi
+
+names="docker-compose-up-d docker-compose-up-d.git bitbank-bot"
 
 if [[ -n "${HOME:-}" ]]; then
+  if looks_like_repo "$HOME/docker-compose-up-d"; then
+    echo "Found a clone at: $HOME/docker-compose-up-d" >&2
+    launch_repo "$HOME/docker-compose-up-d" "$@"
+  fi
   for b in "$HOME" "$HOME/src" "$HOME/code" "$HOME/dev" "$HOME/Projects" "$HOME/github" "$HOME/repos"; do
     if looks_like_repo "$b"; then
-      report_clone "$b"
+      echo "Found a clone at: $b" >&2
+      launch_repo "$b" "$@"
     fi
     for n in $names; do
       p="$b/$n"
       if looks_like_repo "$p"; then
-        report_clone "$p"
+        echo "Found a clone at: $p" >&2
+        launch_repo "$p" "$@"
       fi
     done
   done
 fi
 
-if [[ "$found" -eq 0 ]]; then
-  echo "No clone named docker-compose-up-d was found under \$HOME." >&2
-fi
+echo "No clone named docker-compose-up-d was found under \$HOME." >&2
 not_in_repo
 exit 2

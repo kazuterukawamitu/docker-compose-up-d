@@ -96,6 +96,14 @@ FILE_ROLES: dict[str, dict[str, Any]] = {
         "strategy": False,
         "config": False,
     },
+    "src/bitbank_bot/smoke_order.py": {
+        "role": "smoke_order",
+        "in_use": True,
+        "api": False,
+        "order": True,
+        "strategy": False,
+        "config": False,
+    },
     "src/bitbank_bot/strategy.py": {
         "role": "strategy",
         "in_use": True,

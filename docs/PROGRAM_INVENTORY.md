@@ -25,9 +25,9 @@ Removed: **none**.
 ## Added on this branch (+5)
 
 7. `src/bitbank_bot/launch.py` — enhanced program-launching program
-8. `scripts/home_start.sh` — home-directory finder (does not start the bot)
-9. `scripts/install_launch_alias.sh` — installs that finder
-10. `scripts/run_bot.sh` — cwd guard, then `start.sh`
+8. `scripts/home_start.sh` — finds the clone and **execs** `start.sh`
+9. `scripts/install_launch_alias.sh` — installs `$HOME/start.sh` wrapper that launches
+10. `scripts/run_bot.sh` — cds to this clone (any cwd), then `start.sh`
 11. `scripts/run_tests.sh` — pytest only, not 取引画面
 
 ## Library modules added (not output programs)

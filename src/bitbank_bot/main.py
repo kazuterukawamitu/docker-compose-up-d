@@ -35,6 +35,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="replay README rules on synthetic candles (no orders) and exit",
     )
     parser.add_argument(
+        "--smoke-order",
+        action="store_true",
+        help="DRY_RUN paper BUY through OrderExecutor then exit (never Bitbank POST)",
+    )
+    parser.add_argument(
         "--screen",
         action="store_true",
         help="iTerm trading dashboard (default when stdout is a TTY)",
@@ -100,6 +105,12 @@ def main(argv: list[str] | None = None) -> int:
             slog("BACKTEST", line)
         api.close()
         return 0
+    if args.smoke_order:
+        from bitbank_bot.smoke_order import run_smoke_order
+
+        rc = run_smoke_order(cfg)
+        api.close()
+        return rc
     if args.preflight:
         result = preflight(cfg, rest, require_public=not (args.synthetic or cfg.dry_run))
         api.close()
