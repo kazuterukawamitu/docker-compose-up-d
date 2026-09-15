@@ -2,21 +2,19 @@
 
 Bitbank-only `btc_jpy` bot. Default is a **continuous DRY_RUN loop** with an iTerm **取引画面** (trading dashboard). HOLD/WAIT on a bar is normal. JSON lines are written to `logs/bot.log`, not the dashboard.
 
-`main` on GitHub is still wiki HTML. The runnable bot is branch `cursor/bitbank-audit-unify-f5fd`.
+The runnable bot is in `src/bitbank_bot/` on branch `cursor/bitbank-closed-loop-1114` (and recent `main` after merge). Wiki HTML files in the repo root are leftover chart dumps and are not loaded.
 
 HOLD for 15 minutes while market data and strategy are healthy is `LONG_WAIT`, not a crash. Public-API fallback candles never place orders. Live UNFILLED limits are persisted and polled. New BUY is blocked when both 4h and 1d SMA slopes are down (`ENABLE_HTF_FILTER`).
 
 ## Start (this is the program)
 
-`main` on GitHub is wiki HTML. You do **not** need pip, venv, or `start.sh` for the bot to run.
-
-Paste **this one line** in iTerm. It downloads `run.py` and starts a DRY_RUN 取引画面 (no orders):
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/kazuterukawamitu/docker-compose-up-d/cursor/bitbank-audit-unify-f5fd/run.py -o "$HOME/bitbank_run.py" && python3 "$HOME/bitbank_run.py"
-```
+`python3 run.py` is a stdlib-only DRY_RUN 取引画面 and never calls `create_order`. For the full package (candle cache, LIVE_READY, BUY_GATE), check out this branch and use `start.sh` or `python3 main.py`.
 
 You should see `Bitbank  BTC/JPY  取引画面`. HOLD/待機 is normal. Stop with Ctrl-C.
+
+```bash
+bash ./start.sh --screen
+```
 
 If this repo is already checked out on this branch:
 
@@ -26,7 +24,11 @@ python3 run.py
 
 `python3 main.py` also works: it uses the full package when httpx is installed, otherwise the same stdlib `run.py`.
 
-Live trading stays **off** unless `.env` has `DRY_RUN=false` **and** `LIVE_TRADING=true` **and** both API keys.
+Live trading stays **off** unless `.env` has `DRY_RUN=false` **and** `LIVE_TRADING=true` **and** both API keys **and** `LIVE_TRADING_CONFIRM=YES_I_ACCEPT_REAL_MONEY_RISK`. Missing the confirm phrase stays in `LIVE_READY` (`WOULD_SUBMIT_ORDER` only). Default `RATE_MODE=fixed` keeps the README take-profit percents.
+
+Bitbank’s public “today” candlestick file can 404 at JST midnight (code 10000). Incremental fetch also loads yesterday, and the loop keeps cached real bars instead of switching to synthetic no-orders. HOLD / `no_buy_setup` is a valid Granville miss; `BUY_GATE` logs which checks failed.
+
+Contradiction resolution: [MASTER_REQUIREMENTS.md](MASTER_REQUIREMENTS.md). Evidence: [COMPLETION_MATRIX.md](COMPLETION_MATRIX.md).
 
 `--once --synthetic` is a one-cycle smoke test that **exits on purpose**. The launcher above does **not** use `--once`.
 
@@ -61,6 +63,7 @@ State-machine mapping: [docs/STRATEGY.md](docs/STRATEGY.md).
 - Copy `.env.example` to `.env` is done by `start.sh` when missing. **Never commit `.env`.**
 - If API keys were pasted into chat, **rotate them in the bitbank console**.
 - `DRY_RUN=true` and `LIVE_TRADING=true` are mutually exclusive.
+- Live POST also requires `LIVE_TRADING_CONFIRM=YES_I_ACCEPT_REAL_MONEY_RISK`.
 - Create `data/KILL` to halt new orders.
 
 ## Tests
