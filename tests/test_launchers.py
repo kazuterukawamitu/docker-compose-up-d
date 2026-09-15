@@ -94,3 +94,46 @@ def test_closed_loop_go_prints_launch_ok(tmp_path) -> None:
     assert proc.returncode == 0, out
     assert "LAUNCH_OK" in proc.stdout
     assert "run_once complete" in out
+
+
+def test_closed_loop_no_args_is_go(tmp_path) -> None:
+    proc = _run([sys.executable, str(ROOT / "closed_loop.py")], tmp_path)
+    out = proc.stderr + proc.stdout
+    assert proc.returncode == 0, out
+    assert "LAUNCH_OK" in out
+    assert "run_once complete" in out
+
+
+def test_root_main_py_no_args_is_go(tmp_path) -> None:
+    proc = _run([sys.executable, str(ROOT / "main.py")], tmp_path)
+    out = proc.stderr + proc.stdout
+    assert proc.returncode == 0, out
+    assert "LAUNCH_OK" in out
+    assert "run_once complete" in out
+
+
+def test_src_main_py_no_args_is_go(tmp_path) -> None:
+    proc = _run(
+        [sys.executable, str(ROOT / "src" / "bitbank_bot" / "main.py")],
+        tmp_path,
+    )
+    out = proc.stderr + proc.stdout
+    assert proc.returncode == 0, out
+    assert "LAUNCH_OK" in out
+    assert "run_once complete" in out
+
+
+def test_dash_m_bitbank_bot_no_args_is_go(tmp_path) -> None:
+    proc = _run([sys.executable, "-m", "bitbank_bot"], tmp_path)
+    out = proc.stderr + proc.stdout
+    assert proc.returncode == 0, out
+    assert "LAUNCH_OK" in out
+    assert "run_once complete" in out
+
+
+def test_start_sh_go(tmp_path) -> None:
+    proc = _run(["bash", str(ROOT / "start.sh"), "--go"], tmp_path)
+    out = proc.stderr + proc.stdout
+    assert proc.returncode == 0, out
+    assert "LAUNCH_OK" in out
+    assert "run_once complete" in out

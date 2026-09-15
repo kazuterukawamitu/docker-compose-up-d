@@ -35,7 +35,7 @@ That prints LAUNCH_OK, runs one DRY_RUN cycle, and exits.
 
 Continuous JSON loop (Ctrl-C to stop):
 
-  python3 closed_loop.py --dry-run --skip-lock --no-screen
+  python3 closed_loop.py --loop
 
 iTerm 取引画面:
 
@@ -52,22 +52,39 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.flush()
         return 0
 
+    # Bare `python3 closed_loop.py` is the guaranteed start (one DRY_RUN cycle).
+    if not args:
+        args = ["--go"]
+
     if "--go" in args:
         announce("LAUNCH_OK  python3 closed_loop.py --go")
         from bitbank_bot.main import main as bot_main
 
-        return int(
-            bot_main(
-                [
-                    "--once",
-                    "--synthetic",
-                    "--dry-run",
-                    "--skip-lock",
-                    "--no-screen",
-                    *[a for a in args if a != "--go"],
-                ]
-            )
-        )
+        extra = [
+            a
+            for a in args
+            if a
+            not in {
+                "--go",
+                "--once",
+                "--synthetic",
+                "--dry-run",
+                "--skip-lock",
+                "--no-screen",
+                "--loop",
+                "--verify",
+                "--no-public",
+                "--review",
+            }
+        ]
+        return int(bot_main(["--go", *extra]))
+
+    if "--loop" in args:
+        announce("LAUNCH_OK  python3 closed_loop.py --loop  (Ctrl-C to stop)")
+        from bitbank_bot.main import main as bot_main
+
+        rest = [a for a in args if a != "--loop"]
+        return int(bot_main(["--loop", "--dry-run", "--skip-lock", "--no-screen", *rest]))
 
     verify = "--verify" in args
     no_public = "--no-public" in args

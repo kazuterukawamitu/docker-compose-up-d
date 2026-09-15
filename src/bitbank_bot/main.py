@@ -51,6 +51,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="JSON lines on stdout instead of the trading dashboard",
     )
     parser.add_argument("--skip-lock", action="store_true", help="skip instance lock")
+    parser.add_argument(
+        "--go",
+        action="store_true",
+        help="one synthetic DRY_RUN cycle then exit (the guaranteed start)",
+    )
+    parser.add_argument(
+        "--loop",
+        action="store_true",
+        help="continuous DRY_RUN loop (use this instead of a bare launch)",
+    )
     parser.add_argument("--env-file", default=None, help="optional .env path")
     parser.add_argument(
         "--max-cycles",
@@ -67,7 +77,20 @@ def _parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     prepare_process(_SRC.parent if _SRC.name == "src" else Path.cwd())
+    if argv is None:
+        argv = sys.argv[1:]
+        # Bare `python3 main.py` / `python3 -m bitbank_bot` used to sit in a
+        # forever loop (or wait on public candles) and looked like a no-start.
+        if not argv:
+            argv = ["--go"]
     args = build_parser().parse_args(argv)
+    if args.go:
+        args.once = True
+        args.synthetic = True
+        args.skip_lock = True
+        args.no_screen = True
+        args.dry_run = True
+        args.loop = False
     try:
         cfg = load_config(env_file=args.env_file)
     except ConfigError as exc:

@@ -43,6 +43,5 @@ def announce(message: str) -> None:
         try:
             stream.write(line)
             stream.flush()
-            return
         except Exception:
             continue

@@ -1,29 +1,41 @@
 # Bitbank BTC/JPY spot bot
 
-**This is the command that starts it** (works from any current directory; DRY_RUN; no live orders):
+**Use this command.** It prints `LAUNCH_OK`, runs one DRY_RUN cycle, and exits. No live orders. HOLD / `no_buy_setup` is a successful start.
 
-```bash
-python3 /path/to/docker-compose-up-d/closed_loop.py --go
-```
-
-If you are already in the repository folder:
+From the repository folder (the folder that contains `closed_loop.py`):
 
 ```bash
 python3 closed_loop.py --go
 ```
 
-You should see `LAUNCH_OK`, then JSON, then `run_once complete`. HOLD / `no_buy_setup` is normal. That is a successful start.
-
-Continuous JSON loop (Ctrl-C to stop):
+Same thing (no flags needed anymore):
 
 ```bash
-python3 closed_loop.py --dry-run --skip-lock --no-screen
+python3 closed_loop.py
+python3 main.py
+python3 src/bitbank_bot/main.py
+python3 -m bitbank_bot
+bash ./start.sh --go
 ```
 
-iTerm 取引画面:
+From any other directory, use the full path to this file:
+
+```bash
+python3 /path/to/docker-compose-up-d/closed_loop.py --go
+```
+
+`python3 -m bitbank_bot` only works after `cd` into the repository. If you see `can't open file` or `No module named bitbank_bot`, you are not in the repo folder — use the full path above.
+
+Continuous 取引画面 (Mac iTerm; Ctrl-C to stop):
 
 ```bash
 bash ./start.sh --screen
+```
+
+Continuous JSON loop:
+
+```bash
+python3 closed_loop.py --loop
 ```
 
 
@@ -36,25 +48,15 @@ HOLD for 15 minutes while market data and strategy are healthy is `LONG_WAIT`, n
 From the repository root (the folder that contains `main.py` and `closed_loop.py`):
 
 ```bash
-python3 closed_loop.py --dry-run --skip-lock --no-screen --max-cycles 1
+python3 closed_loop.py --go
 ```
 
-That command starts the full bot, prints `LAUNCH_OK`, runs one DRY_RUN cycle, and exits. HOLD / `no_buy_setup` is normal. Ctrl-C stops a continuous run.
+That command starts the full bot, prints `LAUNCH_OK`, runs one DRY_RUN cycle, and exits. HOLD / `no_buy_setup` is normal.
 
 Continuous 取引画面 (Mac iTerm, TTY):
 
 ```bash
 bash ./start.sh --screen
-```
-
-The same bot also starts with:
-
-```bash
-python3 closed_loop.py
-python3 main.py
-python3 src/bitbank_bot/main.py
-python3 -m bitbank_bot
-python3 run.py
 ```
 
 Checks that exit (no live orders):

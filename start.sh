@@ -64,6 +64,17 @@ pick_python() {
 }
 
 PY="$(pick_python)"
+
+# Fast guaranteed start: one DRY_RUN cycle, no venv, no TTY required.
+for _arg in "$@"; do
+  if [[ "$_arg" == "--go" ]]; then
+    export PYTHONUNBUFFERED=1
+    export PYTHONPATH="$ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
+    echo "LAUNCH_OK  bash start.sh --go"
+    exec "$PY" "$ROOT/closed_loop.py" --go
+  fi
+done
+
 PY_MAJ="$("$PY" -c 'import sys; print(sys.version_info.major)')"
 PY_MIN="$("$PY" -c 'import sys; print(sys.version_info.minor)')"
 if [[ "$PY_MAJ" -lt 3 || ( "$PY_MAJ" -eq 3 && "$PY_MIN" -lt 9 ) ]]; then
