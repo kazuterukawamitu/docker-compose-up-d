@@ -1,70 +1,60 @@
 # Bitbank BTC/JPY spot bot
 
-**Use this command.** It prints `LAUNCH_OK`, runs one DRY_RUN cycle, and exits. No live orders. HOLD / `no_buy_setup` is a successful start.
+Your iTerm prompt is `~` (`/Users/kazuterukawamitsu`). Commands without a
+directory run against **home**, not this clone.
 
-From the repository folder (the folder that contains `closed_loop.py`):
+- `python3 closed_loop.py` → `/Users/kazuterukawamitsu/closed_loop.py` (file does not exist)
+- `python3 /path/to/docker-compose-up-d/closed_loop.py` → that string is a placeholder, not a path
+- `python3 main.py` → `/Users/kazuterukawamitsu/main.py` (Sentry, `BadDsn: Unsupported scheme ''`)
+- `python3 -m bitbank_bot` → no package in home
+- `bash ./start.sh` from `~` → a **home finder** for branch `cursor/closed-loop-launcher-563e`, not this bot
 
-```bash
-python3 closed_loop.py --go
-```
+The clone is `~/docker-compose-up-d`. This bot lives on branch
+`cursor/bitbank-closed-loop-1114`. `main` has `start.sh` but **not** `closed_loop.py`.
 
-Same thing (no flags needed anymore):
+## Launch (paste this from `~`)
 
-```bash
-python3 closed_loop.py
-python3 main.py
-python3 src/bitbank_bot/main.py
-python3 -m bitbank_bot
-bash ./start.sh --go
-```
-
-From any other directory, use the full path to this file:
+One DRY_RUN cycle, then exit. HOLD / `no_buy_setup` is a successful start. No live orders.
 
 ```bash
-python3 /path/to/docker-compose-up-d/closed_loop.py --go
+cd ~/docker-compose-up-d && git fetch origin cursor/bitbank-closed-loop-1114 && git checkout -B cursor/bitbank-closed-loop-1114 origin/cursor/bitbank-closed-loop-1114 && bash ./start.sh --go
 ```
 
-`python3 -m bitbank_bot` only works after `cd` into the repository. If you see `can't open file` or `No module named bitbank_bot`, you are not in the repo folder — use the full path above.
+You should see `LAUNCH_OK` and then `run_once complete`. Apple CommandLineTools
+`python3` is not used; `start.sh` creates `.venv` and installs `httpx`.
 
-Continuous 取引画面 (Mac iTerm; Ctrl-C to stop):
+Later starts (clone already on this branch):
 
 ```bash
-bash ./start.sh --screen
+bash ~/docker-compose-up-d/start.sh --go
 ```
 
-Continuous JSON loop:
+Continuous 取引画面 (Ctrl-C to stop):
 
 ```bash
-python3 closed_loop.py --loop
+bash ~/docker-compose-up-d/start.sh --screen
 ```
 
+## What not to paste at `~`
 
-The runnable bot is in `src/bitbank_bot/` on branch `cursor/bitbank-closed-loop-1114` (and recent `main` after merge). Wiki HTML files in the repo root are leftover chart dumps and are not loaded.
+- `python3 closed_loop.py` / `python3 closed_loop.py --go`
+- `python3 /path/to/docker-compose-up-d/closed_loop.py --go`
+- `python3 main.py` (Sentry)
+- `python3 src/bitbank_bot/main.py`
+- `python3 -m bitbank_bot`
+- `bash ./start.sh` / `bash ./start.sh --go` / `bash ./start.sh --screen`
+- pytest output (`.... [ 40%]`) — pytest is not a launch step
+
+The runnable bot is in `src/bitbank_bot/` on branch `cursor/bitbank-closed-loop-1114`. Wiki HTML files in the repo root are leftover chart dumps and are not loaded.
 
 HOLD for 15 minutes while market data and strategy are healthy is `LONG_WAIT`, not a crash. Public-API fallback candles never place orders. Live UNFILLED limits are persisted and polled. New BUY is blocked when both 4h and 1d SMA slopes are down (`ENABLE_HTF_FILTER`).
 
-## Start (this is the program)
-
-From the repository root (the folder that contains `main.py` and `closed_loop.py`):
+## Checks
 
 ```bash
-python3 closed_loop.py --go
-```
-
-That command starts the full bot, prints `LAUNCH_OK`, runs one DRY_RUN cycle, and exits. HOLD / `no_buy_setup` is normal.
-
-Continuous 取引画面 (Mac iTerm, TTY):
-
-```bash
-bash ./start.sh --screen
-```
-
-Checks that exit (no live orders):
-
-```bash
-python3 closed_loop.py --review
-python3 closed_loop.py --verify --no-public
-python3 closed_loop.py --verify
+bash ~/docker-compose-up-d/start.sh --help
+python3 ~/docker-compose-up-d/closed_loop.py --review
+python3 ~/docker-compose-up-d/closed_loop.py --verify --no-public
 ```
 
 Live trading stays **off** unless `.env` has `DRY_RUN=false` **and** `LIVE_TRADING=true` **and** both API keys **and** `LIVE_TRADING_CONFIRM=YES_I_ACCEPT_REAL_MONEY_RISK`. Missing the confirm phrase stays in `LIVE_READY` (`WOULD_SUBMIT_ORDER` only). Default `RATE_MODE=fixed` keeps the README take-profit percents.
@@ -72,9 +62,6 @@ Live trading stays **off** unless `.env` has `DRY_RUN=false` **and** `LIVE_TRADI
 Bitbank’s public “today” candlestick file can 404 at JST midnight (code 10000). Incremental fetch also loads yesterday, and the loop keeps cached real bars instead of switching to synthetic no-orders. HOLD / `no_buy_setup` is a valid Granville miss; `BUY_GATE` logs which checks failed.
 
 Contradiction resolution: [MASTER_REQUIREMENTS.md](MASTER_REQUIREMENTS.md). Evidence: [COMPLETION_MATRIX.md](COMPLETION_MATRIX.md).
-
-`--once --synthetic` is a one-cycle smoke test that **exits on purpose**. The launcher above does **not** use `--once`.
-
 
 ## Strategy (from original README)
 
@@ -111,15 +98,17 @@ State-machine mapping: [docs/STRATEGY.md](docs/STRATEGY.md).
 
 ## Tests
 
+Run tests from the clone, not from `~`:
+
 ```bash
-bash ~/docker-compose-up-d/start.sh --once --synthetic --skip-lock
-PYTHONPATH=src .venv/bin/python -m pytest -q
+cd ~/docker-compose-up-d
+PYTHONPATH=src python3 -m pytest -q
 ```
 
 Read-only execution check (never places an order):
 
 ```bash
-python3 scripts/bitbank_execution_audit.py
+python3 ~/docker-compose-up-d/scripts/bitbank_execution_audit.py
 ```
 
 Audit notes: [docs/AUDIT.md](docs/AUDIT.md).

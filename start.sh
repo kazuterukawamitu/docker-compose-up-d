@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# Bitbank BTC/JPY launcher — opens the iTerm 取引画面 (trading screen).
+# Bitbank BTC/JPY launcher. This script cds to its own directory.
 #
-# Paste this ONE line in iTerm (zsh is fine; this wraps bash):
-#   bash -lc 'REPO="$HOME/docker-compose-up-d"; set -euo pipefail; if [ ! -d "$REPO/.git" ]; then git clone https://github.com/kazuterukawamitu/docker-compose-up-d.git "$REPO"; fi; cd "$REPO"; git fetch origin cursor/bitbank-closed-loop-1114; git checkout -B cursor/bitbank-closed-loop-1114 origin/cursor/bitbank-closed-loop-1114; exec bash ./start.sh --screen'
+# From ~ on the Mac (zsh is fine), paste this ONE line — replace nothing:
+#   cd ~/docker-compose-up-d && git fetch origin cursor/bitbank-closed-loop-1114 && git checkout -B cursor/bitbank-closed-loop-1114 origin/cursor/bitbank-closed-loop-1114 && bash ./start.sh --go
 #
-# That line clones if needed, checks out the bot branch (main is wiki HTML only),
-# then opens the trading dashboard. Do not paste python3 main.py. Do not use !.
+# Do not run python3 closed_loop.py or python3 main.py from ~.
+# Do not run bash ./start.sh from ~ (that is a home finder, not this file).
+# Do not type /path/to/... literally. Do not paste pytest at ~.
 
 if [ -z "${BASH_VERSION:-}" ]; then
   exec /usr/bin/env bash "$0" "$@"
@@ -22,21 +23,50 @@ cd "$ROOT"
 
 BOT_BRANCH="cursor/bitbank-closed-loop-1114"
 
+for _arg in "$@"; do
+  if [[ "$_arg" == "--help" || "$_arg" == "-h" ]]; then
+    cat <<EOF
+LAUNCH_OK  Bitbank BTC/JPY launcher
+
+Do not run python3 closed_loop.py or python3 main.py from ~ (home).
+That looks for ~/closed_loop.py (missing) or runs ~/main.py (Sentry BadDsn).
+Do not run bash ./start.sh from ~ — that home file is a finder for another branch.
+Do not type /path/to/... literally.
+
+From ~ on this Mac, paste this ONE line (replace nothing):
+
+  cd ~/docker-compose-up-d && git fetch origin ${BOT_BRANCH} && git checkout -B ${BOT_BRANCH} origin/${BOT_BRANCH} && bash ./start.sh --go
+
+Later starts:
+
+  bash ~/docker-compose-up-d/start.sh --go
+
+Continuous 取引画面:
+
+  bash ~/docker-compose-up-d/start.sh --screen
+
+This file's repo is: $ROOT
+EOF
+    exit 0
+  fi
+done
+
 ensure_bot_source() {
-  if [[ -f "$ROOT/src/bitbank_bot/__init__.py" && -f "$ROOT/main.py" ]]; then
+  if [[ -f "$ROOT/src/bitbank_bot/__init__.py" && -f "$ROOT/main.py" && -f "$ROOT/closed_loop.py" ]]; then
     return 0
   fi
-  echo "bot source not found at $ROOT (this clone is probably still on main / wiki dump)" >&2
+  echo "bot source not found at $ROOT (clone is on main, wiki dump, or another launcher branch)" >&2
   if [[ ! -d "$ROOT/.git" ]]; then
-    echo "Paste this ONE line in iTerm:" >&2
-    echo "  bash -lc 'git clone https://github.com/kazuterukawamitu/docker-compose-up-d.git \"\$HOME/docker-compose-up-d\" && bash \"\$HOME/docker-compose-up-d/start.sh\" --screen'" >&2
+    echo "Paste this ONE line at the ~ prompt:" >&2
+    echo "  git clone https://github.com/kazuterukawamitu/docker-compose-up-d.git \"\$HOME/docker-compose-up-d\" && cd \"\$HOME/docker-compose-up-d\" && git fetch origin $BOT_BRANCH && git checkout -B $BOT_BRANCH origin/$BOT_BRANCH && bash ./start.sh --go" >&2
     exit 2
   fi
-  echo "fetching $BOT_BRANCH so the trading screen can start" >&2
+  echo "fetching $BOT_BRANCH so closed_loop.py and the trading screen exist" >&2
   git fetch origin "$BOT_BRANCH"
   git checkout -B "$BOT_BRANCH" "origin/$BOT_BRANCH"
-  if [[ ! -f "$ROOT/src/bitbank_bot/__init__.py" || ! -f "$ROOT/main.py" ]]; then
-    echo "still no bitbank_bot after checkout; branch may not be fetched" >&2
+  if [[ ! -f "$ROOT/src/bitbank_bot/__init__.py" || ! -f "$ROOT/main.py" || ! -f "$ROOT/closed_loop.py" ]]; then
+    echo "still no closed_loop.py after checkout; paste:" >&2
+    echo "  cd ~/docker-compose-up-d && git fetch origin $BOT_BRANCH && git checkout -B $BOT_BRANCH origin/$BOT_BRANCH && bash ./start.sh --go" >&2
     exit 2
   fi
 }

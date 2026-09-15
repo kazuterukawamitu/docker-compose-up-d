@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
 """Start the Bitbank btc_jpy closed-loop bot (DRY_RUN by default).
 
-This file cds to the repository root, so it works from any current directory:
+This file cds to the repository root, so it works from any current directory
+when invoked by full path:
 
-    python3 closed_loop.py --go
+    python3 ~/docker-compose-up-d/closed_loop.py --go
 
-`--go` prints LAUNCH_OK, runs one synthetic DRY_RUN cycle, and exits.
-No Bitbank POST. HOLD/no_buy_setup is normal.
+From ~ on the operator Mac the file is missing until this branch is checked
+out. Paste the checkout line in REVIEW / README, then use start.sh --go so
+Apple CommandLineTools python is not used without httpx.
 """
 
 from __future__ import annotations
 
+import importlib.util
 import sys
 from pathlib import Path
 
@@ -19,38 +22,84 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from bitbank_bot.boot import announce, prepare_process
+BOT_BRANCH = "cursor/bitbank-closed-loop-1114"
+MAC_CLONE = "~/docker-compose-up-d"
+MAC_GO = (
+    f"cd {MAC_CLONE} && git fetch origin {BOT_BRANCH} && "
+    f"git checkout -B {BOT_BRANCH} origin/{BOT_BRANCH} && bash ./start.sh --go"
+)
 
 REVIEW = """LAUNCH_OK  Bitbank BTC/JPY closed-loop bot
 
-Command that always starts (any current directory):
+You are in {cwd}. Python looks for files in the current directory.
+Do NOT run python3 closed_loop.py or python3 main.py from ~ (home).
+~/main.py is a different Sentry program (BadDsn). ~/closed_loop.py does not exist.
+Do NOT type /path/to/... literally. Do NOT run bash ./start.sh from ~ (home finder).
 
-  python3 closed_loop.py --go
+From ~ on this Mac, paste this ONE line (replace nothing):
 
-If this file is not in the current directory, use the full path:
+  {mac_go}
 
-  python3 {root}/closed_loop.py --go
+That checks out this branch, creates .venv, installs httpx, runs one DRY_RUN cycle.
+HOLD / no_buy_setup is a successful start. No live orders.
 
-That prints LAUNCH_OK, runs one DRY_RUN cycle, and exits.
+Later starts (after the checkout above has succeeded):
 
-Continuous JSON loop (Ctrl-C to stop):
+  bash ~/docker-compose-up-d/start.sh --go
 
-  python3 closed_loop.py --loop
+This copy of the bot is:
 
-iTerm 取引画面:
+  bash {root}/start.sh --go
 
-  bash {root}/start.sh --screen
+Continuous 取引画面:
+
+  bash ~/docker-compose-up-d/start.sh --screen
 """
 
 
+def _stdlib(argv: list[str]) -> int:
+    path = ROOT / "run.py"
+    spec = importlib.util.spec_from_file_location("bitbank_stdlib_run", path)
+    if spec is None or spec.loader is None:
+        sys.stderr.write("LAUNCH_FAIL  run.py is missing; cannot start\n")
+        return 2
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    forwarded = ["--once", "--synthetic", "--no-screen"]
+    extra = [a for a in argv if a.startswith("-") and a not in {"--go", "--once", "--synthetic", "--no-screen", "--dry-run", "--skip-lock"}]
+    return int(module.main([*forwarded, *extra]))
+
+
+def _missing_source() -> int:
+    sys.stderr.write(
+        "LAUNCH_FAIL  src/bitbank_bot is missing next to this file.\n"
+        "You are not in the bot clone, or the clone is still on main / another branch.\n"
+        "Paste this ONE line at the ~ prompt:\n"
+        f"  {MAC_GO}\n"
+    )
+    sys.stderr.flush()
+    return 2
+
+
 def main(argv: list[str] | None = None) -> int:
-    prepare_process(ROOT)
     args = list(sys.argv[1:] if argv is None else argv)
 
     if "--review" in args:
-        sys.stdout.write(REVIEW.format(root=ROOT))
+        sys.stdout.write(
+            REVIEW.format(root=ROOT, cwd=Path.cwd(), mac_go=MAC_GO)
+        )
         sys.stdout.flush()
         return 0
+
+    if not (SRC / "bitbank_bot" / "main.py").is_file():
+        return _missing_source()
+
+    try:
+        from bitbank_bot.boot import announce, prepare_process
+    except ModuleNotFoundError:
+        return _missing_source()
+
+    prepare_process(ROOT)
 
     # Bare `python3 closed_loop.py` is the guaranteed start (one DRY_RUN cycle).
     if not args:
@@ -58,8 +107,6 @@ def main(argv: list[str] | None = None) -> int:
 
     if "--go" in args:
         announce("LAUNCH_OK  python3 closed_loop.py --go")
-        from bitbank_bot.main import main as bot_main
-
         extra = [
             a
             for a in args
@@ -77,6 +124,13 @@ def main(argv: list[str] | None = None) -> int:
                 "--review",
             }
         ]
+        try:
+            from bitbank_bot.main import main as bot_main
+        except ModuleNotFoundError as exc:
+            sys.stderr.write(
+                f"full package/deps missing ({exc}); starting stdlib DRY_RUN (run.py)\n"
+            )
+            return _stdlib(args)
         return int(bot_main(["--go", *extra]))
 
     if "--loop" in args:
