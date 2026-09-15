@@ -120,8 +120,16 @@ Stdlib-only fallback (no pip / no venv), still DRY_RUN and no orders:
 python3 run.py
 ```
 
-`python -m bitbank_bot` is the engine only (no crash-restart wrapper). Use that
-under systemd (`deploy/bitbank-bot.service`) or pass `--no-supervise`.
+`python -m bitbank_bot.launch --no-supervise --no-screen` is the systemd
+entry (`deploy/bitbank-bot.service`, `Restart=always`). That is the same
+stack as `start.sh`, without a nested restart loop. `python -m bitbank_bot`
+is Engine-only.
+
+Print the start graph without starting Engine (no orders):
+
+```bash
+bash ~/docker-compose-up-d/start.sh --print-plan
+```
 
 Paste **this one line** in iTerm to clone and open the 取引画面:
 

@@ -55,6 +55,14 @@ This is the program-launching program. It cds to the repo from BASH_SOURCE
 
 Do not paste this chat, JSON logs, agent reports, or script source. Ctrl-C if you see '>'.
 
+Start graph (this launcher starts the existing bot; it is not a second bot):
+  continuous 取引画面:  bash ~/docker-compose-up-d/start.sh
+  paper transaction:    bash ~/docker-compose-up-d/run_transaction.sh
+  print start graph:    bash ~/docker-compose-up-d/start.sh --print-plan
+  systemd:              repo .venv python -m bitbank_bot.launch --no-supervise --no-screen
+  stdlib fallback:      python3 run.py (no pip; DRY_RUN; no orders)
+Program started (parsed, not rewritten): config -> main -> Engine -> OrderExecutor.
+
 Paper transaction (ONE copy-paste line; prints SMOKE_ORDER_OK / SIMULATED_FILL):
   bash ~/docker-compose-up-d/run_transaction.sh
 
@@ -64,6 +72,7 @@ If the clone exists but may be on the wrong branch:
 Continuous 取引画面 (HOLD/WAIT is normal; that is NOT a failed transaction):
   bash ~/docker-compose-up-d/start.sh
 
+If launch.py is missing, clone ~/docker-compose-up-d on cursor/bitbank-closed-loop-f964.
 Never bash /workspace/start.sh on a Mac (that path is the cloud VM).
 Uses the repo .venv only, never ~/.venv. Branch cursor/bitbank-closed-loop-f964.
 
@@ -76,6 +85,7 @@ Uses the repo .venv only, never ~/.venv. Branch cursor/bitbank-closed-loop-f964.
   bash ./start.sh --no-supervise
   bash ./start.sh --supervise
   bash ./start.sh --self-test
+  bash ./start.sh --print-plan
 
 If bash says: ./start.sh: No such file or directory
   You ran ./start.sh from ~ (relative path). Use the absolute path or cd:
@@ -91,7 +101,7 @@ Locates the repo from this script (not a hardcoded Mac path), uses $ROOT/.venv,
 writes bitbank_bot_src.pth, loads .env without printing secrets, prints SET/UNSET
 diagnostics (RATE_MODE, RECONCILE_EVERY_CYCLES, keys SET/UNSET), and restarts
 on crash with backoff (not on config/lock failures). systemd already restarts:
-pass --no-supervise (or run python -m bitbank_bot).
+pass --no-supervise (or run python -m bitbank_bot.launch --no-supervise --no-screen).
 
 LIVE requires TRADING_MODE=LIVE and LIVE_TRADING_CONFIRM=YES_I_ACCEPT_REAL_MONEY_RISK.
 Rotated JSON logs live under logs/bot.log (5MB x 5). Ctrl-C stops. data/KILL halts new orders.
@@ -147,6 +157,16 @@ not_in_repo() {
   echo "If zsh shows a lone '>' prompt, press Ctrl-C, then run the one command above." >&2
 }
 
+clone_launch_hint() {
+  echo "Clone path: ~/docker-compose-up-d  (branch cursor/bitbank-closed-loop-f964)" >&2
+  echo "  git clone https://github.com/kazuterukawamitu/docker-compose-up-d.git ~/docker-compose-up-d" >&2
+  echo "  git -C ~/docker-compose-up-d checkout cursor/bitbank-closed-loop-f964" >&2
+  echo "Then run ONE line (do not paste a traceback or JSON logs):" >&2
+  echo "  bash ~/docker-compose-up-d/start.sh" >&2
+  echo "Paper fill: bash ~/docker-compose-up-d/run_transaction.sh" >&2
+  echo "Never bash /workspace/start.sh on a Mac. Never ~/.venv." >&2
+}
+
 resolve_root() {
   local src="${BASH_SOURCE[0]}"
   while [[ -L "$src" ]]; do
@@ -183,11 +203,24 @@ done
 
 BOT_BRANCH="cursor/bitbank-closed-loop-f964"
 
+program_source_ok() {
+  [[ -f "$ROOT/src/bitbank_bot/__init__.py" \
+    && -f "$ROOT/src/bitbank_bot/launch.py" \
+    && -f "$ROOT/src/bitbank_bot/main.py" \
+    && -f "$ROOT/src/bitbank_bot/engine.py" \
+    && -f "$ROOT/src/bitbank_bot/orders.py" \
+    && -f "$ROOT/src/bitbank_bot/config.py" \
+    && -f "$ROOT/main.py" \
+    && -f "$ROOT/run.py" ]]
+}
+
 ensure_bot_source() {
-  if [[ -f "$ROOT/src/bitbank_bot/__init__.py" && -f "$ROOT/src/bitbank_bot/launch.py" && -f "$ROOT/main.py" ]]; then
+  if program_source_ok; then
     return 0
   fi
-  echo "bot source not found at $ROOT (need src/bitbank_bot/launch.py next to start.sh)" >&2
+  echo "cannot start: missing $ROOT/src/bitbank_bot/launch.py" >&2
+  echo "That is not a bot crash. Do not use ~/.venv." >&2
+  clone_launch_hint
   if [[ ! -d "$ROOT/.git" ]]; then
     not_in_repo
     exit 2
@@ -195,8 +228,9 @@ ensure_bot_source() {
   echo "fetching $BOT_BRANCH so the trading screen can start" >&2
   git fetch origin "$BOT_BRANCH"
   git checkout -B "$BOT_BRANCH" "origin/$BOT_BRANCH"
-  if [[ ! -f "$ROOT/src/bitbank_bot/__init__.py" || ! -f "$ROOT/src/bitbank_bot/launch.py" || ! -f "$ROOT/main.py" ]]; then
-    echo "still no bitbank_bot after checkout; branch may not be fetched" >&2
+  if ! program_source_ok; then
+    echo "still missing $ROOT/src/bitbank_bot/launch.py (or main/engine/orders/config) after checkout" >&2
+    clone_launch_hint
     not_in_repo
     exit 2
   fi
@@ -448,7 +482,7 @@ oneshot=0
 want_stdlib_loop=1
 for a in "$@"; do
   case "$a" in
-    --once|--check-config|--preflight|--backtest|--help|-h|--max-cycles|--self-test|--execute|--smoke-order)
+    --once|--check-config|--preflight|--backtest|--help|-h|--max-cycles|--self-test|--execute|--smoke-order|--print-plan|--launch-plan)
       oneshot=1
       want_stdlib_loop=0
       ;;
@@ -476,9 +510,11 @@ if ! "$VPY" -c "import dotenv, httpx" >/dev/null 2>&1; then
   if [[ ! -f "$ROOT/run.py" ]]; then
     echo "cannot start: missing $ROOT/run.py" >&2
     echo "Do not run CommandLineTools python3 on a file under ~ (test_public.py / main.py)." >&2
+    clone_launch_hint
     not_in_repo
     exit 2
   fi
+  echo "LAUNCH_OK repo=$ROOT python=$VPY mode=DRY_RUN live=false"
   if [[ "$oneshot" -eq 1 || "$want_stdlib_loop" -eq 0 ]]; then
     exec "$VPY" "$ROOT/run.py" "$@"
   fi
@@ -519,7 +555,7 @@ if [[ -t 1 ]]; then
 fi
 for a in "$@"; do
   case "$a" in
-    --once|--check-config|--preflight|--backtest|--no-screen|--execute|--smoke-order)
+    --once|--check-config|--preflight|--backtest|--no-screen|--execute|--smoke-order|--print-plan|--launch-plan)
       want_screen=0
       ;;
     --screen)
@@ -555,10 +591,14 @@ if [[ -n "${INVOCATION_ID:-}" ]]; then
 fi
 
 want_smoke=0
+want_plan=0
 for a in "$@"; do
   case "$a" in
     --execute|--smoke-order)
       want_smoke=1
+      ;;
+    --print-plan|--launch-plan)
+      want_plan=1
       ;;
   esac
 done
@@ -566,6 +606,8 @@ done
 if [[ "$want_smoke" -eq 1 ]]; then
   echo "paper DRY_RUN transaction (no Bitbank POST). Success prints SMOKE_ORDER_OK."
   echo "HOLD on the 取引画面 is the other command: bash ~/docker-compose-up-d/start.sh"
+elif [[ "$want_plan" -eq 1 ]]; then
+  echo "print start graph only (Engine not started; DRY_RUN default; no Bitbank POST)"
 else
   echo "opening Bitbank BTC/JPY 取引画面 (Ctrl-C to stop)"
   echo "HOLD/WAIT is normal. JSON detail is logs/bot.log (rotated; do not dump stdout)"
@@ -577,10 +619,32 @@ echo "lock=$ROOT/data/bot.lock kill=$ROOT/data/KILL (create KILL to halt new ord
 
 # Default (no extra args): continuous loop + trading screen on a TTY.
 # Crash backoff lives in bitbank_bot.launch.
-if [[ ! -f "$ROOT/src/bitbank_bot/launch.py" || ! -f "$ROOT/main.py" ]]; then
-  echo "cannot start: missing $ROOT/src/bitbank_bot/launch.py or $ROOT/main.py" >&2
-  echo "Do not run CommandLineTools python3 on a file under ~ (test_public.py / main.py)." >&2
-  not_in_repo
-  exit 2
-fi
+verify_repo_launch_import() {
+  if ! program_source_ok; then
+    echo "cannot start: missing $ROOT/src/bitbank_bot/launch.py (need main/engine/orders/config too)" >&2
+    echo "Do not run CommandLineTools python3 on a file under ~ (test_public.py / main.py)." >&2
+    clone_launch_hint
+    not_in_repo
+    exit 2
+  fi
+  local out rc
+  set +e
+  out="$("$VPY" -c 'from bitbank_bot.launch import verify_bitbank_import; raise SystemExit(verify_bitbank_import())' 2>&1)"
+  rc=$?
+  set -e
+  if [[ "$rc" -ne 0 ]]; then
+    if [[ "$out" == *ModuleNotFoundError* || "$out" == *"No module named"* ]]; then
+      echo "cannot import bitbank_bot.launch from $VPY (repo $ROOT)" >&2
+      echo "Need $ROOT/src/bitbank_bot/launch.py on branch cursor/bitbank-closed-loop-f964." >&2
+      echo "That is not a bot crash. Do not use ~/.venv." >&2
+      clone_launch_hint
+      not_in_repo
+      exit 2
+    fi
+    printf '%s\n' "$out" >&2
+    exit "$rc"
+  fi
+}
+
+verify_repo_launch_import
 exec "$VPY" -m bitbank_bot.launch "${SUPERVISE_ARGS[@]}" "${SCREEN_ARGS[@]}" "$@"

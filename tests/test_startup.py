@@ -109,6 +109,10 @@ def test_start_sh_is_venv_loop_launcher() -> None:
     assert "run.py" in text
     assert "bitbank_bot.launch" in text
     assert "run_transaction.sh" in text
+    assert "--print-plan" in text
+    assert "program_source_ok" in text
+    assert "engine.py" in text
+    assert "orders.py" in text
     assert "--execute" in text
     assert "--smoke-order" in text
     assert "/Users/kazuteru" not in text

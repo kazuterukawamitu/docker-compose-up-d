@@ -22,8 +22,10 @@ if str(SRC) not in sys.path:
 
 if not (SRC / "bitbank_bot" / "launch.py").is_file() and not (ROOT / "run.py").is_file():
     sys.stderr.write(
-        "main.py is not inside the Bitbank clone.\n"
-        "cd to the repo or run: bash /path/to/start.sh\n"
+        "cannot start: missing src/bitbank_bot/launch.py next to main.py.\n"
+        "Clone ~/docker-compose-up-d and checkout cursor/bitbank-closed-loop-f964.\n"
+        "  bash ~/docker-compose-up-d/start.sh\n"
+        "Never ~/.venv. Never bash /workspace/start.sh on a Mac.\n"
         "Do not point CommandLineTools python3 at test_public.py / a copy of main.py.\n"
     )
     raise SystemExit(2)
@@ -41,10 +43,29 @@ def _stdlib() -> int:
 
 
 def _launch() -> int:
+    launch_py = SRC / "bitbank_bot" / "launch.py"
+    if not launch_py.is_file():
+        sys.stderr.write(
+            "cannot start: missing src/bitbank_bot/launch.py next to main.py.\n"
+            "Clone ~/docker-compose-up-d and checkout cursor/bitbank-closed-loop-f964.\n"
+            "  bash ~/docker-compose-up-d/start.sh\n"
+            "Never ~/.venv. Never bash /workspace/start.sh on a Mac.\n"
+        )
+        return 2
     try:
         import httpx  # noqa: F401
         from bitbank_bot.launch import main as launch_main
-    except ModuleNotFoundError:
+    except ModuleNotFoundError as exc:
+        name = getattr(exc, "name", "") or ""
+        text = str(exc)
+        if name in {"bitbank_bot", "bitbank_bot.launch"} or "bitbank_bot" in text:
+            sys.stderr.write(
+                "cannot import bitbank_bot.launch (need src/bitbank_bot/launch.py).\n"
+                "Clone ~/docker-compose-up-d on branch cursor/bitbank-closed-loop-f964.\n"
+                "  bash ~/docker-compose-up-d/start.sh\n"
+                "Never ~/.venv. Never bash /workspace/start.sh on a Mac.\n"
+            )
+            return 2
         sys.stderr.write("full package/deps missing; starting stdlib DRY_RUN (run.py)\n")
         return _stdlib()
     return int(launch_main())

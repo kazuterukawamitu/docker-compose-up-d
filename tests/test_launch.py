@@ -10,6 +10,10 @@ from pathlib import Path
 from bitbank_bot.config import LIVE_CONFIRM_PHRASE, MODE_LIVE, MODE_LIVE_READY, load_config
 from bitbank_bot.launch import (
     SMART_QUOTES,
+    CHILD_LOOP,
+    CHILD_PLAN,
+    CHILD_SMOKE,
+    classify_child_path,
     classify_exit,
     cwd_is_inside_repo,
     diagnostics_lines,
@@ -19,8 +23,12 @@ from bitbank_bot.launch import (
     looks_like_pytest_paste,
     looks_like_repo,
     main,
+    missing_launch_message,
+    missing_program_files,
     guard_pytest_cwd,
     resolve_runtime_python,
+    validate_bot_argv,
+    verify_bitbank_import,
     wants_smoke,
     should_supervise,
     split_launch_argv,
@@ -64,6 +72,10 @@ def test_diagnostics_hide_secrets_and_show_modes() -> None:
     assert "pair: btc_jpy" in text
     assert "RECONCILE_EVERY_CYCLES: 10" in text
     assert "CANDLE_TYPE: 1hour" in text
+    assert "simulate_fill: True" in text
+    assert "ENABLE_WEBSOCKET:" in text
+    assert "ENABLE_HTF_FILTER:" in text
+    assert "engine_path:" in text
     assert "DRY_RUN/LIVE_READY/LIVE: DRY_RUN" in text
     assert key_status("") == "UNSET"
 
@@ -107,6 +119,9 @@ def test_should_supervise_skips_oneshot_and_systemd() -> None:
     assert should_supervise(split_launch_argv(["--self-test"]), clean) is False
     assert should_supervise(split_launch_argv(["--execute"]), clean) is False
     assert should_supervise(split_launch_argv(["--smoke-order"]), clean) is False
+    assert should_supervise(split_launch_argv(["--print-plan"]), clean) is False
+    assert split_launch_argv(["--print-plan", "--no-screen"]).print_plan is True
+    assert split_launch_argv(["--print-plan", "--no-screen"]).forwarded == ["--no-screen"]
     assert wants_smoke(["--execute"]) is True
     assert wants_smoke(["--once"]) is False
     assert should_supervise(split_launch_argv(["--supervise"]), {"INVOCATION_ID": "x"}) is True
@@ -182,6 +197,8 @@ def test_start_sh_help_smoke() -> None:
     assert "JSON logs" in proc.stdout
     assert "bash ~/docker-compose-up-d/start.sh" in proc.stdout
     assert "bash ~/docker-compose-up-d/run_transaction.sh" in proc.stdout
+    assert "--print-plan" in proc.stdout
+    assert "Start graph" in proc.stdout
     assert "Never bash /workspace/start.sh" in proc.stdout
     assert "never ~/.venv" in proc.stdout
 
@@ -244,6 +261,9 @@ def test_launch_py_has_no_smart_quotes_and_parses() -> None:
     assert any(getattr(node, "name", "") == "apply_cli_dry_run" for node in ast.walk(tree))
     assert any(getattr(node, "name", "") == "resolve_runtime_python" for node in ast.walk(tree))
     assert any(getattr(node, "name", "") == "guard_pytest_cwd" for node in ast.walk(tree))
+    assert any(getattr(node, "name", "") == "classify_child_path" for node in ast.walk(tree))
+    assert any(getattr(node, "name", "") == "validate_bot_argv" for node in ast.walk(tree))
+    assert any(getattr(node, "name", "") == "verify_bitbank_import" for node in ast.walk(tree))
     for rel in (
         "start.sh",
         "main.py",
@@ -880,3 +900,120 @@ def test_home_start_prints_one_mac_command(tmp_path) -> None:
     assert ("closed-loop-launcher-" + "563e") not in out
     assert "JSON logs" in out
     assert "never ~/.venv" in out
+
+
+def test_looks_like_repo_requires_launch_py(tmp_path) -> None:
+    fake = tmp_path / "repo"
+    pkg = fake / "src" / "bitbank_bot"
+    pkg.mkdir(parents=True)
+    (pkg / "__init__.py").write_text("", encoding="utf-8")
+    (fake / "run.py").write_text("", encoding="utf-8")
+    assert looks_like_repo(fake) is False
+    (pkg / "launch.py").write_text("", encoding="utf-8")
+    assert looks_like_repo(fake) is True
+
+
+def test_missing_launch_message_names_clone() -> None:
+    text = missing_launch_message(Path("/tmp/missing-bot"))
+    assert "cannot start: missing /tmp/missing-bot/src/bitbank_bot/launch.py" in text
+    assert "~/docker-compose-up-d" in text
+    assert "never ~/.venv" in text.lower() or "Never ~/.venv" in text
+    assert "cursor/bitbank-closed-loop-f964" in text
+
+
+def test_missing_program_files_empty_in_this_clone() -> None:
+    root = find_project_root()
+    assert missing_program_files(root) == []
+    assert verify_bitbank_import(root) == 0
+
+
+def test_classify_child_path_from_program_parse() -> None:
+    assert classify_child_path([]) == CHILD_LOOP
+    assert classify_child_path(["--execute", "--smoke-order"]) == CHILD_SMOKE
+    assert classify_child_path(["--once", "--synthetic"]) == "Engine.run_once"
+    assert classify_child_path(["--check-config"]) == "load_config"
+    assert classify_child_path([], print_plan=True) == CHILD_PLAN
+
+
+def test_validate_bot_argv_rejects_unknown_flag(capsys) -> None:
+    assert validate_bot_argv(["--check-config"]) == 0
+    assert validate_bot_argv(["--not-a-real-bitbank-flag"]) == 2
+    err = capsys.readouterr().err
+    assert "unknown flag" in err
+    assert "--not-a-real-bitbank-flag" in err
+
+
+def test_launch_rejects_unknown_bot_flag() -> None:
+    assert main(["--not-a-real-bitbank-flag"]) == 2
+
+
+def test_launch_print_plan_does_not_start_engine(tmp_path) -> None:
+    root = Path(__file__).resolve().parents[1]
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+    env["STATE_PATH"] = str(tmp_path / "state.json")
+    env["LOCK_PATH"] = str(tmp_path / "bot.lock")
+    env["LOG_DIR"] = str(tmp_path / "logs")
+    env["DRY_RUN"] = "true"
+    env["LIVE_TRADING"] = "false"
+    env["TRADING_MODE"] = "DRY_RUN"
+    env["ENABLE_WEBSOCKET"] = "false"
+    env["PYTHONPATH"] = str(root / "src")
+    proc = subprocess.run(
+        [sys.executable, "-m", "bitbank_bot.launch", "--print-plan"],
+        cwd=str(root),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=45,
+    )
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 0, out
+    assert "LAUNCH_PLAN" in proc.stdout
+    assert "engine_path: print_launch_plan" in proc.stdout
+    assert "config.load_config -> Engine -> OrderExecutor" in proc.stdout
+    assert "LAUNCH_OK" in proc.stdout
+    assert "mode=DRY_RUN" in proc.stdout
+    assert "live=false" in proc.stdout
+    assert "run_once complete" not in out
+    assert "SMOKE_ORDER_OK" not in out
+    assert "/user/spot/order" not in out
+    assert "may_place_live_orders: False" in proc.stdout
+
+
+def test_start_sh_print_plan_from_other_cwd(tmp_path) -> None:
+    root = Path(__file__).resolve().parents[1]
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+    env["DRY_RUN"] = "true"
+    env["LIVE_TRADING"] = "false"
+    env["TRADING_MODE"] = "DRY_RUN"
+    proc = subprocess.run(
+        ["bash", str(root / "start.sh"), "--print-plan"],
+        cwd=str(tmp_path),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 0, out
+    assert "LAUNCH_PLAN" in out
+    assert "Engine not started" in out or "print_launch_plan" in out
+    assert str(root) in out
+    assert "live=false" in out
+    assert "/user/spot/order" not in out
+    assert "SMOKE_ORDER_OK" not in out
+
+
+def test_systemd_unit_uses_launch_no_supervise() -> None:
+    root = Path(__file__).resolve().parents[1]
+    text = (root / "deploy" / "bitbank-bot.service").read_text(encoding="utf-8")
+    assert "bitbank_bot.launch" in text
+    assert "--no-supervise" in text
+    assert "--no-screen" in text
+    assert "Restart=always" in text
+    start_line = next(
+        line for line in text.splitlines() if line.startswith("ExecStart=")
+    )
+    assert "TRADING_MODE=LIVE" not in start_line
+    assert "--supervise" not in start_line.replace("--no-supervise", "")
+
