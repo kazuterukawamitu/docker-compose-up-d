@@ -30,7 +30,7 @@ LAUNCH_OK  Bitbank BTC/JPY launcher
 
 Do not run python3 closed_loop.py or python3 main.py from ~ (home).
 That looks for ~/closed_loop.py (missing) or runs ~/main.py (Sentry BadDsn).
-Do not run bash ./start.sh from ~ — that home file is a finder for another branch.
+Do not run bash ./start.sh from ~ — that is a home finder for another branch.
 Do not type /path/to/... literally.
 
 From ~ on this Mac, paste this ONE line (replace nothing):
