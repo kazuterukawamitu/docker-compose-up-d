@@ -132,7 +132,16 @@ def test_dash_m_bitbank_bot_no_args_is_go(tmp_path) -> None:
 
 
 def test_start_sh_go(tmp_path) -> None:
-    proc = _run(["bash", str(ROOT / "start.sh"), "--go"], tmp_path)
+    env = _env(tmp_path)
+    env["PATH"] = str(Path(sys.executable).parent) + os.pathsep + env.get("PATH", "")
+    proc = subprocess.run(
+        ["bash", str(ROOT / "start.sh"), "--go"],
+        cwd=str(ROOT),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
     out = proc.stderr + proc.stdout
     assert proc.returncode == 0, out
     assert "LAUNCH_OK" in out

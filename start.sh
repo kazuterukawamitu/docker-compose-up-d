@@ -13,7 +13,7 @@ fi
 
 set -euo pipefail
 
-export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:${PATH:-}"
+export PATH="/opt/homebrew/bin:/usr/local/bin:${PATH:-}:/usr/bin:/bin"
 export PYTHONUNBUFFERED=1
 export PYTHONIOENCODING=utf-8
 
@@ -64,17 +64,6 @@ pick_python() {
 }
 
 PY="$(pick_python)"
-
-# Fast guaranteed start: one DRY_RUN cycle, no venv, no TTY required.
-for _arg in "$@"; do
-  if [[ "$_arg" == "--go" ]]; then
-    export PYTHONUNBUFFERED=1
-    export PYTHONPATH="$ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
-    echo "LAUNCH_OK  bash start.sh --go"
-    exec "$PY" "$ROOT/closed_loop.py" --go
-  fi
-done
-
 PY_MAJ="$("$PY" -c 'import sys; print(sys.version_info.major)')"
 PY_MIN="$("$PY" -c 'import sys; print(sys.version_info.minor)')"
 if [[ "$PY_MAJ" -lt 3 || ( "$PY_MAJ" -eq 3 && "$PY_MIN" -lt 9 ) ]]; then
@@ -144,7 +133,7 @@ fi
 
 if ! "$VPY" -c "import dotenv, httpx" >/dev/null 2>&1; then
   echo "pip packages missing; starting stdlib DRY_RUN (python3 run.py, no orders)"
-  exec "$PY" "$ROOT/run.py" "$@"
+  exec "$PY" "$ROOT/run.py"
 fi
 
 if [[ ! -f "$ROOT/.env" ]]; then
@@ -162,7 +151,7 @@ if [[ -t 1 ]]; then
 fi
 for a in "$@"; do
   case "$a" in
-    --once|--check-config|--preflight|--backtest|--no-screen)
+    --once|--check-config|--preflight|--backtest|--no-screen|--go)
       want_screen=0
       ;;
     --screen)
@@ -198,6 +187,14 @@ fi
 
 echo "HOLD/WAIT is normal. JSON detail is logs/bot.log"
 echo "using $VPY"
+
+for _arg in "$@"; do
+  if [[ "$_arg" == "--go" ]]; then
+    echo "LAUNCH_OK  bash start.sh --go"
+    exec "$VPY" "$ROOT/closed_loop.py" --go
+  fi
+done
+
 if [[ "$want_screen" -eq 1 ]]; then
   echo "LAUNCH_OK opening Bitbank BTC/JPY 取引画面 (Ctrl-C to stop)"
 else
