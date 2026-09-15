@@ -537,3 +537,13 @@ bash ~/docker-compose-up-d/run_transaction.sh
 
 LIVE stays off. No secrets. No live POST.
 
+### Test results (this pass)
+
+`python3 -m compileall` PASS. `PYTHONPATH=src pytest` **217 passed**.
+From `/tmp` with fake `$HOME` (`~/docker-compose-up-d` → repo),
+`bash ~/docker-compose-up-d/run_transaction.sh` EXIT 0.
+Stdout: `LAUNCH_OK ... mode=DRY_RUN live=false`, `ORDER_REQUEST`,
+`ORDER_INTENT`, `SIMULATED_FILL`, `SMOKE_ORDER_OK` with
+`create_order_called=false` and `may_place_live_orders: False`.
+No `/user/spot/order`. Uses `$REPO/.venv/bin/python`. No secrets.
+
