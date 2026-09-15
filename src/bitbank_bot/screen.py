@@ -122,11 +122,13 @@ class TradingScreen:
         return text
 
     def _write(self, text: str) -> None:
+        payload = CLEAR + text + "\n"
         try:
-            self.stream.write(CLEAR + text + "\n")
+            self.stream.write(payload)
             self.stream.flush()
-        except Exception:
-            return
+        except UnicodeEncodeError:
+            self.stream.write(text.encode("ascii", errors="replace").decode("ascii") + "\n")
+            self.stream.flush()
 
 
 def view_from_engine(

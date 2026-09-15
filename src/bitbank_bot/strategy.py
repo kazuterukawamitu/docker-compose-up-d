@@ -18,6 +18,7 @@ from bitbank_bot.indicators import (
     ma_trend,
     moving_average,
 )
+from bitbank_bot.logging_setup import slog
 from bitbank_bot.money import ONE, pct_offset
 
 
@@ -270,7 +271,33 @@ class Strategy:
         buy = self._buy_signal(snap)
         if buy.kind != "HOLD":
             return buy
+        self._log_buy_gates(snap)
         return Signal.hold("no_buy_setup")
+
+    def _log_buy_gates(self, snap: MarketSnapshot) -> None:
+        buy1 = (
+            snap.prev_ma_trend == Trend.DOWN
+            and snap.ma_trend in {Trend.FLAT, Trend.UP}
+            and snap.crossed_up
+        )
+        buy2 = snap.ma_trend == Trend.UP and snap.crossed_down
+        score = int(buy1) + int(buy2) + int(self._buy3) + int(self._buy4)
+        slog(
+            "BUY_GATE",
+            "no_buy_setup",
+            trend=snap.ma_trend.value,
+            prev_trend=snap.prev_ma_trend.value,
+            close=str(snap.close),
+            ma=str(snap.ma),
+            crossed_up=snap.crossed_up,
+            crossed_down=snap.crossed_down,
+            golden_cross=snap.golden_cross,
+            BUY_CHECK_buy1=buy1,
+            BUY_CHECK_buy2=buy2,
+            BUY_CHECK_granville_pullback=self._buy3,
+            BUY_CHECK_buy4_dip=self._buy4,
+            score=f"{score}/4",
+        )
 
     def _tp_signal(self, snap: MarketSnapshot, position: Position) -> Signal:
         target = pct_offset(position.average_price, position.tp_pct)

@@ -29,11 +29,15 @@ class BitbankAPIError(RuntimeError):
         code: int | None = None,
         http_status: int | None = None,
         body: Any = None,
+        endpoint: str | None = None,
+        retry_count: int = 0,
     ) -> None:
         super().__init__(message)
         self.code = code
         self.http_status = http_status
         self.body = body
+        self.endpoint = endpoint
+        self.retry_count = retry_count
 
 
 def is_auth_error(exc: BitbankAPIError) -> bool:
@@ -43,6 +47,21 @@ def is_auth_error(exc: BitbankAPIError) -> bool:
         return True
     msg = str(exc).lower()
     return "api key" in msg or "secret missing" in msg
+
+
+def api_error_log_fields(exc: BaseException) -> dict[str, Any]:
+    """Fields safe to log. Never includes API secrets."""
+    fields: dict[str, Any] = {"error": type(exc).__name__}
+    if isinstance(exc, BitbankAPIError):
+        fields["http_status"] = exc.http_status
+        fields["bitbank_code"] = exc.code
+        fields["endpoint"] = exc.endpoint
+        fields["retry_count"] = exc.retry_count
+        body = exc.body
+        if body is not None:
+            text = body if isinstance(body, str) else json.dumps(body, default=str, ensure_ascii=False)
+            fields["body"] = text[:240]
+    return fields
 
 
 def dump_json(obj: dict[str, Any]) -> str:
@@ -146,9 +165,12 @@ class RestClient:
         headers: dict[str, str] | None = None,
         content: bytes | None = None,
         public: bool = False,
+        retry: bool | None = None,
     ) -> Any:
         last_error: Exception | None = None
-        attempts = max(1, self.max_retries)
+        endpoint = url.split(".cc")[-1][:120]
+        do_retry = kind != "update" if retry is None else retry
+        attempts = max(1, self.max_retries) if do_retry else 1
         for attempt in range(attempts):
             self.limiter.wait(kind)
             try:
@@ -157,39 +179,70 @@ class RestClient:
                 )
             except httpx.HTTPError as exc:
                 last_error = exc
-                slog("ERROR", "http transport error", error=type(exc).__name__)
+                slog(
+                    "ERROR",
+                    "http transport error",
+                    error=type(exc).__name__,
+                    endpoint=endpoint,
+                    retry_count=attempt,
+                    method=method,
+                )
                 if attempt + 1 >= attempts:
                     break
                 time.sleep(_backoff_seconds(attempt))
                 continue
             if response.status_code == 429:
-                slog("ERROR", "HTTP 429 rate limited", attempt=attempt)
+                slog("ERROR", "HTTP 429 rate limited", attempt=attempt, endpoint=endpoint)
                 if attempt + 1 >= attempts:
                     raise BitbankAPIError(
-                        "rate limited", http_status=429, body=response.text
+                        "rate limited",
+                        http_status=429,
+                        body=response.text,
+                        endpoint=endpoint,
+                        retry_count=attempt,
                     )
                 time.sleep(_backoff_seconds(attempt))
                 continue
             if response.status_code >= 500:
-                slog("ERROR", "HTTP 5xx", status=response.status_code, attempt=attempt)
+                slog("ERROR", "HTTP 5xx", status=response.status_code, attempt=attempt, endpoint=endpoint)
                 if attempt + 1 >= attempts:
                     raise BitbankAPIError(
                         "server error",
                         http_status=response.status_code,
                         body=response.text,
+                        endpoint=endpoint,
+                        retry_count=attempt,
                     )
                 time.sleep(_backoff_seconds(attempt))
                 continue
             if response.status_code >= 400:
+                body: Any = response.text
+                code = None
+                try:
+                    parsed = response.json()
+                    body = parsed
+                    data = parsed.get("data") or {}
+                    if isinstance(data, dict):
+                        code = data.get("code")
+                except json.JSONDecodeError:
+                    pass
                 raise BitbankAPIError(
                     f"http {response.status_code}",
+                    code=code,
                     http_status=response.status_code,
-                    body=response.text,
+                    body=body,
+                    endpoint=endpoint,
+                    retry_count=attempt,
                 )
             try:
                 payload = response.json()
             except json.JSONDecodeError as exc:
-                raise BitbankAPIError("invalid json", body=response.text) from exc
+                raise BitbankAPIError(
+                    "invalid json",
+                    body=response.text,
+                    endpoint=endpoint,
+                    retry_count=attempt,
+                ) from exc
             if payload.get("success") != 1:
                 data = payload.get("data") or {}
                 code = data.get("code") if isinstance(data, dict) else None
@@ -198,11 +251,17 @@ class RestClient:
                     code=code,
                     http_status=response.status_code,
                     body=payload,
+                    endpoint=endpoint,
+                    retry_count=attempt,
                 )
             stage = "PUBLIC_API" if public else "PRIVATE_API"
-            slog(stage, f"{method} ok", url_path=url.split(".cc")[-1][:80])
+            slog(stage, f"{method} ok", url_path=endpoint)
             return payload.get("data")
-        raise BitbankAPIError(f"request failed: {last_error}")
+        raise BitbankAPIError(
+            f"request failed: {last_error}",
+            endpoint=endpoint,
+            retry_count=max(0, attempts - 1),
+        )
 
     def public_get(self, path: str) -> Any:
         if not path.startswith("/"):

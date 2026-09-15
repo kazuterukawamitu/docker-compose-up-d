@@ -4,7 +4,13 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 
+_SRC = Path(__file__).resolve().parent.parent
+if _SRC.name == "src" and str(_SRC) not in sys.path:
+    sys.path.insert(0, str(_SRC))
+
+from bitbank_bot.boot import announce, prepare_process
 from bitbank_bot.config import ConfigError, load_config
 from bitbank_bot.engine import Engine, install_signal_handlers
 from bitbank_bot.instance_lock import InstanceLock, InstanceLockError
@@ -45,6 +51,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="JSON lines on stdout instead of the trading dashboard",
     )
     parser.add_argument("--skip-lock", action="store_true", help="skip instance lock")
+    parser.add_argument(
+        "--go",
+        action="store_true",
+        help="one synthetic DRY_RUN cycle then exit (the guaranteed start)",
+    )
+    parser.add_argument(
+        "--loop",
+        action="store_true",
+        help="continuous DRY_RUN loop (use this instead of a bare launch)",
+    )
     parser.add_argument("--env-file", default=None, help="optional .env path")
     parser.add_argument(
         "--max-cycles",
@@ -60,18 +76,36 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    prepare_process(_SRC.parent if _SRC.name == "src" else Path.cwd())
+    if argv is None:
+        argv = sys.argv[1:]
+        # Bare `python3 main.py` / `python3 -m bitbank_bot` used to sit in a
+        # forever loop (or wait on public candles) and looked like a no-start.
+        if not argv:
+            argv = ["--go"]
     args = build_parser().parse_args(argv)
+    if args.go:
+        args.once = True
+        args.synthetic = True
+        args.skip_lock = True
+        args.no_screen = True
+        args.dry_run = True
+        args.loop = False
     try:
         cfg = load_config(env_file=args.env_file)
     except ConfigError as exc:
         setup_logging()
         slog("ERROR", "config failed", reason=str(exc))
+        announce(f"LAUNCH_FAIL config: {exc}")
         return 2
     if args.dry_run:
         cfg.dry_run = True
         cfg.live_trading = False
+        cfg.trading_mode = "dry_run"
     use_screen = should_use_screen(args, sys.stdout)
-    setup_logging(cfg.log_level, cfg.log_dir, console=not use_screen)
+    # Always keep a console handler. TTY 取引画面 used to disable it, so a
+    # failed screen write looked like the process never started.
+    setup_logging(cfg.log_level, cfg.log_dir, console=True)
     slog("BOOT", "starting", **cfg.safe_dict())
     slog(
         "BOOT",
@@ -80,7 +114,14 @@ def main(argv: list[str] | None = None) -> int:
         synthetic=bool(args.synthetic),
         loop=not args.once,
         dry_run=cfg.dry_run,
+        live_trading=cfg.live_trading,
+        trading_mode=cfg.trading_mode,
         screen=use_screen,
+    )
+    announce(
+        "LAUNCH_OK  Bitbank BTC/JPY bot "
+        f"mode={cfg.trading_mode} dry_run={cfg.dry_run} "
+        "HOLD/WAIT is normal. Ctrl-C to stop."
     )
     rest = RestClient(
         public_url=cfg.public_url,
@@ -111,8 +152,15 @@ def main(argv: list[str] | None = None) -> int:
         rest.close()
         return 0 if result.ok else 2
 
-    screen = TradingScreen(sys.stdout) if use_screen else None
-    if use_screen and cfg.poll_sec > 3:
+    screen = None
+    if use_screen:
+        try:
+            screen = TradingScreen(sys.stdout)
+            screen.boot("起動しました DRY_RUN（HOLD/WAIT は正常）")
+        except OSError as exc:
+            slog("BOOT", "screen failed; JSON console", error=type(exc).__name__)
+            screen = None
+    if screen is not None and cfg.poll_sec > 3:
         cfg.poll_sec = 3
     engine = Engine(cfg, client=rest, screen=screen)
     lock: InstanceLock | None = None
@@ -123,6 +171,7 @@ def main(argv: list[str] | None = None) -> int:
         except InstanceLockError as exc:
             slog("ERROR", str(exc))
             slog("BOOT", "another instance is running; stop it or pass --skip-lock")
+            announce(f"LAUNCH_FAIL lock: {exc}. Re-run with --skip-lock")
             if screen is not None:
                 screen.boot("別プロセスが data/bot.lock を保持しています。止めてから再実行してください。")
             rest.close()

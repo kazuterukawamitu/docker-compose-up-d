@@ -15,7 +15,7 @@ from bitbank_bot.config import (
 )
 from bitbank_bot.logging_setup import slog
 from bitbank_bot.money import D
-from bitbank_bot.rest_client import RestClient
+from bitbank_bot.rest_client import RestClient, api_error_log_fields
 
 JST = timezone(timedelta(hours=9))
 
@@ -30,7 +30,7 @@ CANDLE_MS: dict[str, int] = {
     "12hour": 12 * 60 * 60 * 1000,
     "1day": 24 * 60 * 60 * 1000,
     "1week": 7 * 24 * 60 * 60 * 1000,
-    "1month": 30 * 24 * 60 * 60 * 1000,
+    "1month": 30 * 24 * 60 * 1000,
 }
 
 
@@ -74,7 +74,9 @@ def fetch_candles(
     now = datetime.now(JST)
     keys: list[str] = []
     if cfg.candle_type in SHORT_CANDLE_TYPES:
-        days = 1 if latest_only else cfg.candle_lookback_days
+        # latest_only still includes yesterday so JST midnight / empty "today"
+        # files do not look like a total market-data failure.
+        days = 2 if latest_only else cfg.candle_lookback_days
         for i in range(days):
             keys.append(candle_date_key(cfg.candle_type, now - timedelta(days=i)))
     else:
@@ -85,10 +87,24 @@ def fetch_candles(
     seen: set[int] = set()
     candles: list[Candle] = []
     for key in keys:
+        endpoint = f"/{cfg.pair}/candlestick/{cfg.candle_type}/{key}"
         try:
             rows = client.get_candlestick(cfg.pair, cfg.candle_type, key)
-        except Exception as exc:
-            slog("MARKET", "candlestick fetch skipped", date_key=key, error=type(exc).__name__)
+        except Exception as candle_exc:
+            fields = api_error_log_fields(candle_exc)
+            slog(
+                "CANDLE_API_ERROR",
+                "candlestick fetch failed",
+                pair=cfg.pair,
+                candle_type=cfg.candle_type,
+                date=key,
+                endpoint=fields.get("endpoint") or endpoint,
+                http_status=fields.get("http_status"),
+                bitbank_code=fields.get("bitbank_code"),
+                retry_count=fields.get("retry_count", 0),
+                error=fields.get("error"),
+                body=fields.get("body", ""),
+            )
             continue
         for row in rows:
             try:

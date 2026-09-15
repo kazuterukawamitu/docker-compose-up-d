@@ -30,6 +30,23 @@ def test_run_py_once_synthetic_no_deps(tmp_path) -> None:
     assert "取引画面" in proc.stdout
     assert "DRY_RUN" in proc.stdout
     assert "run complete" in proc.stdout
+    assert "LAUNCH_OK" in proc.stdout
+
+
+def test_run_py_go_is_once_synthetic(tmp_path) -> None:
+    root = Path(__file__).resolve().parents[1]
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+    proc = subprocess.run(
+        [sys.executable, str(root / "run.py"), "--go"],
+        cwd=str(tmp_path),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert proc.returncode == 0, proc.stderr + proc.stdout
+    assert "LAUNCH_OK" in proc.stdout
+    assert "run complete" in proc.stdout
 
 
 def test_run_py_works_without_repo_src(tmp_path) -> None:

@@ -223,6 +223,7 @@ def screen(
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Bitbank BTC/JPY DRY_RUN (stdlib, no orders)")
     p.add_argument("--once", action="store_true")
+    p.add_argument("--go", action="store_true", help="same as --once --synthetic --no-screen")
     p.add_argument("--synthetic", action="store_true")
     p.add_argument("--max-cycles", type=int, default=None)
     p.add_argument("--screen", action="store_true")
@@ -234,6 +235,10 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    if args.go:
+        args.once = True
+        args.synthetic = True
+        args.no_screen = True
     use_screen = not args.no_screen and not args.once
     started = time.monotonic()
     cycles = 0
@@ -242,7 +247,7 @@ def main(argv: list[str] | None = None) -> int:
     amount = Decimal("0")
     tp = BUY1_TP
     last_error = ""
-    print("Bitbank BTC/JPY DRY_RUN を起動します（実注文なし / pip不要）", flush=True)
+    print("LAUNCH_OK  Bitbank BTC/JPY DRY_RUN を起動します（実注文なし / pip不要）", flush=True)
     while True:
         try:
             rows = synthetic_closes() if args.synthetic else fetch_hourly_closes()

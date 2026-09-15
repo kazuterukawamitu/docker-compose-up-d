@@ -1,0 +1,1499 @@
+{
+  "modules": {
+    "src/bitbank_bot/__init__.py": {
+      "imports": [
+        "__future__"
+      ],
+      "local_imports": [],
+      "classes": [],
+      "functions": [],
+      "calls": []
+    },
+    "src/bitbank_bot/__main__.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.main"
+      ],
+      "local_imports": [
+        "bitbank_bot.main"
+      ],
+      "classes": [],
+      "functions": [],
+      "calls": [
+        "SystemExit",
+        "main"
+      ]
+    },
+    "src/bitbank_bot/amounts.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.config",
+        "bitbank_bot.money",
+        "bitbank_bot.risk",
+        "dataclasses",
+        "decimal"
+      ],
+      "local_imports": [
+        "bitbank_bot.config",
+        "bitbank_bot.money",
+        "bitbank_bot.risk"
+      ],
+      "classes": [
+        "AmountPlan",
+        "PositionSizer"
+      ],
+      "functions": [
+        "plan_buy",
+        "plan_sell",
+        "__init__",
+        "plan_buy",
+        "plan_sell"
+      ],
+      "calls": [
+        "AmountPlan",
+        "D",
+        "check_buy",
+        "check_sell",
+        "meets_min_amount",
+        "min",
+        "plan_buy",
+        "plan_sell",
+        "truncate"
+      ]
+    },
+    "src/bitbank_bot/backtest.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.config",
+        "bitbank_bot.market_data",
+        "bitbank_bot.money",
+        "bitbank_bot.strategy",
+        "dataclasses",
+        "decimal"
+      ],
+      "local_imports": [
+        "bitbank_bot.config",
+        "bitbank_bot.market_data",
+        "bitbank_bot.money",
+        "bitbank_bot.strategy"
+      ],
+      "classes": [
+        "BacktestReport"
+      ],
+      "functions": [
+        "run_backtest",
+        "report_lines"
+      ],
+      "calls": [
+        "BacktestReport",
+        "D",
+        "Position",
+        "Strategy",
+        "build_snapshots",
+        "evaluate"
+      ]
+    },
+    "src/bitbank_bot/config.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.money",
+        "dataclasses",
+        "decimal",
+        "dotenv",
+        "os",
+        "pathlib",
+        "typing"
+      ],
+      "local_imports": [
+        "bitbank_bot.money"
+      ],
+      "classes": [
+        "ConfigError",
+        "Config"
+      ],
+      "functions": [
+        "normalize_pair",
+        "_env",
+        "_bool",
+        "_int",
+        "_dec",
+        "load_config",
+        "__str__",
+        "__repr__",
+        "has_keys",
+        "may_place_live_orders",
+        "safe_dict",
+        "load_dotenv"
+      ],
+      "calls": [
+        "Config",
+        "ConfigError",
+        "D",
+        "__str__",
+        "_bool",
+        "_dec",
+        "_env",
+        "_int",
+        "bool",
+        "field",
+        "float",
+        "frozenset",
+        "get",
+        "int",
+        "load_dotenv",
+        "lower",
+        "normalize_pair",
+        "replace",
+        "str",
+        "strip",
+        "upper"
+      ]
+    },
+    "src/bitbank_bot/engine.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.amounts",
+        "bitbank_bot.config",
+        "bitbank_bot.hold_tracer",
+        "bitbank_bot.indicators",
+        "bitbank_bot.logging_setup",
+        "bitbank_bot.market_data",
+        "bitbank_bot.money",
+        "bitbank_bot.multi_timeframe",
+        "bitbank_bot.orders",
+        "bitbank_bot.preflight",
+        "bitbank_bot.rate_engine",
+        "bitbank_bot.reconciliation",
+        "bitbank_bot.rest_client",
+        "bitbank_bot.risk",
+        "bitbank_bot.screen",
+        "bitbank_bot.strategy",
+        "bitbank_bot.trade_signal_executor",
+        "bitbank_bot.trade_trace",
+        "bitbank_bot.watchdog",
+        "bitbank_bot.websocket_client",
+        "dataclasses",
+        "datetime",
+        "decimal",
+        "json",
+        "logging",
+        "pathlib",
+        "signal",
+        "time",
+        "typing"
+      ],
+      "local_imports": [
+        "bitbank_bot.amounts",
+        "bitbank_bot.config",
+        "bitbank_bot.hold_tracer",
+        "bitbank_bot.indicators",
+        "bitbank_bot.logging_setup",
+        "bitbank_bot.market_data",
+        "bitbank_bot.money",
+        "bitbank_bot.multi_timeframe",
+        "bitbank_bot.orders",
+        "bitbank_bot.preflight",
+        "bitbank_bot.rate_engine",
+        "bitbank_bot.reconciliation",
+        "bitbank_bot.rest_client",
+        "bitbank_bot.risk",
+        "bitbank_bot.screen",
+        "bitbank_bot.strategy",
+        "bitbank_bot.trade_signal_executor",
+        "bitbank_bot.trade_trace",
+        "bitbank_bot.watchdog",
+        "bitbank_bot.websocket_client"
+      ],
+      "classes": [
+        "PendingOrder",
+        "BotState",
+        "Engine"
+      ],
+      "functions": [
+        "load_state",
+        "save_state",
+        "install_signal_handlers",
+        "__init__",
+        "request_stop",
+        "_rest",
+        "_balances",
+        "_maybe_ws",
+        "process_candles",
+        "_execute",
+        "_poll_pending",
+        "_set_watchdog",
+        "_apply_fill",
+        "run_once",
+        "_candles_for_cycle",
+        "run_forever",
+        "_heartbeat",
+        "_refresh_public_last",
+        "_paint"
+      ],
+      "calls": [
+        "AmountPlan",
+        "BitbankWebsocket",
+        "BotState",
+        "CandleCache",
+        "D",
+        "OrderResult",
+        "Path",
+        "PendingOrder",
+        "Position",
+        "PositionSizer",
+        "RestClient",
+        "RiskManager",
+        "Signal",
+        "Strategy",
+        "TradeSignalExecutor",
+        "_apply_fill",
+        "_balances",
+        "_candles_for_cycle",
+        "_execute",
+        "_heartbeat",
+        "_maybe_ws",
+        "_paint",
+        "_poll_pending",
+        "_refresh_public_last",
+        "_rest",
+        "_set_watchdog",
+        "abs",
+        "api_error_log_fields",
+        "average_true_range",
+        "bool",
+        "boot",
+        "build_snapshots",
+        "classify_watchdog",
+        "decide_rate",
+        "drop_incomplete_candle",
+        "dumps",
+        "enumerate",
+        "evaluate",
+        "evaluate_htf",
+        "exception",
+        "exists",
+        "fetch_candles",
+        "float",
+        "free_amount",
+        "get",
+        "getLogger",
+        "get_ticker",
+        "hold",
+        "int",
+        "is_auth_error",
+        "is_connected",
+        "is_stale",
+        "isoformat",
+        "last_price",
+        "len",
+        "list",
+        "load_state",
+        "loads",
+        "max",
+        "merge",
+        "mkdir",
+        "monotonic",
+        "new_trace_id",
+        "note_api_error",
+        "note_api_ok",
+        "note_auth_failure",
+        "now",
+        "observe",
+        "plan_buy",
+        "plan_sell",
+        "poll",
+        "preflight",
+        "process_candles",
+        "range",
+        "read_text",
+        "reconcile",
+        "record_realized_pnl",
+        "render",
+        "root_cause",
+        "save_state",
+        "signal",
+        "sleep",
+        "slog",
+        "start",
+        "stop",
+        "str",
+        "submit",
+        "synthetic_candles",
+        "type",
+        "update_equity",
+        "upper",
+        "view_from_engine",
+        "write_text"
+      ]
+    },
+    "src/bitbank_bot/execution_gate.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.config",
+        "bitbank_bot.logging_setup",
+        "bitbank_bot.money",
+        "bitbank_bot.strategy",
+        "dataclasses",
+        "decimal"
+      ],
+      "local_imports": [
+        "bitbank_bot.config",
+        "bitbank_bot.logging_setup",
+        "bitbank_bot.money",
+        "bitbank_bot.strategy"
+      ],
+      "classes": [
+        "GateResult"
+      ],
+      "functions": [
+        "evaluate",
+        "amount_valid"
+      ],
+      "calls": [
+        "GateResult",
+        "dataclass",
+        "slog"
+      ]
+    },
+    "src/bitbank_bot/hold_tracer.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.strategy"
+      ],
+      "local_imports": [
+        "bitbank_bot.strategy"
+      ],
+      "classes": [],
+      "functions": [
+        "root_cause"
+      ],
+      "calls": []
+    },
+    "src/bitbank_bot/indicators.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.money",
+        "decimal",
+        "enum",
+        "typing"
+      ],
+      "local_imports": [
+        "bitbank_bot.money"
+      ],
+      "classes": [
+        "Trend"
+      ],
+      "functions": [
+        "sma",
+        "ema",
+        "moving_average",
+        "crossover_price_bp",
+        "ma_trend",
+        "is_golden_cross",
+        "is_dead_cross",
+        "crossed_up",
+        "crossed_down",
+        "interpolate_crossover",
+        "average_true_range"
+      ],
+      "calls": [
+        "D",
+        "ValueError",
+        "abs",
+        "append",
+        "ema",
+        "enumerate",
+        "len",
+        "min",
+        "range",
+        "sma",
+        "sum"
+      ]
+    },
+    "src/bitbank_bot/instance_lock.py": {
+      "imports": [
+        "__future__",
+        "fcntl",
+        "os",
+        "pathlib",
+        "types"
+      ],
+      "local_imports": [],
+      "classes": [
+        "InstanceLockError",
+        "InstanceLock"
+      ],
+      "functions": [
+        "__init__",
+        "acquire",
+        "release",
+        "__enter__",
+        "__exit__"
+      ],
+      "calls": [
+        "InstanceLockError",
+        "Path",
+        "acquire",
+        "close",
+        "encode",
+        "flock",
+        "ftruncate",
+        "getpid",
+        "mkdir",
+        "open",
+        "release",
+        "str",
+        "write"
+      ]
+    },
+    "src/bitbank_bot/logging_setup.py": {
+      "imports": [
+        "__future__",
+        "datetime",
+        "json",
+        "logging",
+        "logging.handlers",
+        "pathlib",
+        "re",
+        "sys",
+        "typing"
+      ],
+      "local_imports": [],
+      "classes": [
+        "_RedactFilter"
+      ],
+      "functions": [
+        "redact",
+        "setup_logging",
+        "slog",
+        "filter"
+      ],
+      "calls": [
+        "Formatter",
+        "Path",
+        "RotatingFileHandler",
+        "StreamHandler",
+        "_RedactFilter",
+        "addFilter",
+        "addHandler",
+        "clear",
+        "compile",
+        "dumps",
+        "getLogger",
+        "getattr",
+        "isinstance",
+        "isoformat",
+        "items",
+        "log",
+        "lower",
+        "mkdir",
+        "now",
+        "redact",
+        "search",
+        "setFormatter",
+        "setLevel",
+        "setup_logging",
+        "startswith",
+        "str",
+        "sub",
+        "tuple",
+        "upper"
+      ]
+    },
+    "src/bitbank_bot/main.py": {
+      "imports": [
+        "__future__",
+        "argparse",
+        "bitbank_bot.backtest",
+        "bitbank_bot.config",
+        "bitbank_bot.engine",
+        "bitbank_bot.instance_lock",
+        "bitbank_bot.logging_setup",
+        "bitbank_bot.market_data",
+        "bitbank_bot.preflight",
+        "bitbank_bot.rest_client",
+        "bitbank_bot.screen",
+        "sys"
+      ],
+      "local_imports": [
+        "bitbank_bot.backtest",
+        "bitbank_bot.config",
+        "bitbank_bot.engine",
+        "bitbank_bot.instance_lock",
+        "bitbank_bot.logging_setup",
+        "bitbank_bot.market_data",
+        "bitbank_bot.preflight",
+        "bitbank_bot.rest_client",
+        "bitbank_bot.screen"
+      ],
+      "classes": [],
+      "functions": [
+        "build_parser",
+        "_parser",
+        "main",
+        "cli"
+      ],
+      "calls": [
+        "ArgumentParser",
+        "Engine",
+        "InstanceLock",
+        "RestClient",
+        "SystemExit",
+        "TradingScreen",
+        "acquire",
+        "add_argument",
+        "bool",
+        "boot",
+        "build_parser",
+        "close",
+        "install_signal_handlers",
+        "load_config",
+        "main",
+        "parse_args",
+        "preflight",
+        "release",
+        "report_lines",
+        "request_stop",
+        "run_backtest",
+        "run_forever",
+        "run_once",
+        "safe_dict",
+        "setup_logging",
+        "should_use_screen",
+        "slog",
+        "str",
+        "synthetic_candles"
+      ]
+    },
+    "src/bitbank_bot/market_data.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.config",
+        "bitbank_bot.logging_setup",
+        "bitbank_bot.money",
+        "bitbank_bot.rest_client",
+        "dataclasses",
+        "datetime",
+        "decimal",
+        "typing"
+      ],
+      "local_imports": [
+        "bitbank_bot.config",
+        "bitbank_bot.logging_setup",
+        "bitbank_bot.money",
+        "bitbank_bot.rest_client"
+      ],
+      "classes": [
+        "Candle",
+        "CandleCache"
+      ],
+      "functions": [
+        "candle_date_key",
+        "parse_ohlcv",
+        "fetch_candles",
+        "drop_incomplete_candle",
+        "synthetic_candles",
+        "__init__",
+        "merge"
+      ],
+      "calls": [
+        "Candle",
+        "D",
+        "Decimal",
+        "ValueError",
+        "add",
+        "api_error_log_fields",
+        "append",
+        "candle_date_key",
+        "dataclass",
+        "drop_incomplete_candle",
+        "get",
+        "get_candlestick",
+        "int",
+        "len",
+        "now",
+        "parse_ohlcv",
+        "range",
+        "replace",
+        "set",
+        "slog",
+        "sort",
+        "sorted",
+        "strftime",
+        "timedelta",
+        "timestamp",
+        "timezone",
+        "values"
+      ]
+    },
+    "src/bitbank_bot/money.py": {
+      "imports": [
+        "__future__",
+        "decimal",
+        "typing"
+      ],
+      "local_imports": [],
+      "classes": [],
+      "functions": [
+        "D",
+        "to_decimal",
+        "ensure_decimal",
+        "truncate",
+        "floor_btc",
+        "quantize_price",
+        "jpy_tick",
+        "meets_min_amount",
+        "pct_offset"
+      ],
+      "calls": [
+        "D",
+        "Decimal",
+        "InvalidOperation",
+        "TypeError",
+        "ValueError",
+        "float",
+        "is_infinite",
+        "is_nan",
+        "isinstance",
+        "lower",
+        "str",
+        "to_integral_value",
+        "truncate",
+        "type"
+      ]
+    },
+    "src/bitbank_bot/multi_timeframe.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.config",
+        "bitbank_bot.indicators",
+        "bitbank_bot.logging_setup",
+        "bitbank_bot.market_data",
+        "bitbank_bot.rest_client",
+        "dataclasses",
+        "datetime",
+        "decimal"
+      ],
+      "local_imports": [
+        "bitbank_bot.config",
+        "bitbank_bot.indicators",
+        "bitbank_bot.logging_setup",
+        "bitbank_bot.market_data",
+        "bitbank_bot.rest_client"
+      ],
+      "classes": [
+        "HtfVerdict"
+      ],
+      "functions": [
+        "_fetch_type",
+        "_trend_of",
+        "evaluate_htf",
+        "synthetic_htf_ok"
+      ],
+      "calls": [
+        "HtfVerdict",
+        "_fetch_type",
+        "_trend_of",
+        "add",
+        "append",
+        "candle_date_key",
+        "dataclass",
+        "get",
+        "get_candlestick",
+        "int",
+        "len",
+        "ma_trend",
+        "moving_average",
+        "now",
+        "parse_ohlcv",
+        "range",
+        "replace",
+        "set",
+        "slog",
+        "sort",
+        "timedelta",
+        "timestamp",
+        "timezone",
+        "type"
+      ]
+    },
+    "src/bitbank_bot/orders.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.amounts",
+        "bitbank_bot.config",
+        "bitbank_bot.logging_setup",
+        "bitbank_bot.money",
+        "bitbank_bot.strategy",
+        "dataclasses",
+        "decimal",
+        "typing"
+      ],
+      "local_imports": [
+        "bitbank_bot.amounts",
+        "bitbank_bot.config",
+        "bitbank_bot.logging_setup",
+        "bitbank_bot.money",
+        "bitbank_bot.strategy"
+      ],
+      "classes": [
+        "OrderClient",
+        "OrderResult",
+        "OrderExecutor"
+      ],
+      "functions": [
+        "_fill_status",
+        "get_active_orders",
+        "get_order",
+        "create_order",
+        "__init__",
+        "active_orders",
+        "_refresh_order",
+        "place",
+        "poll"
+      ],
+      "calls": [
+        "D",
+        "OrderResult",
+        "_fill_status",
+        "_refresh_order",
+        "active_orders",
+        "create_order",
+        "ensure_decimal",
+        "get",
+        "get_active_orders",
+        "get_order",
+        "hasattr",
+        "int",
+        "len",
+        "quantize_price",
+        "slog",
+        "str",
+        "to_integral_value",
+        "type"
+      ]
+    },
+    "src/bitbank_bot/preflight.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.config",
+        "bitbank_bot.logging_setup",
+        "bitbank_bot.money",
+        "bitbank_bot.rest_client",
+        "dataclasses",
+        "pathlib",
+        "shutil",
+        "sys"
+      ],
+      "local_imports": [
+        "bitbank_bot.config",
+        "bitbank_bot.logging_setup",
+        "bitbank_bot.money",
+        "bitbank_bot.rest_client"
+      ],
+      "classes": [
+        "PreflightResult"
+      ],
+      "functions": [
+        "_ensure_dir",
+        "preflight"
+      ],
+      "calls": [
+        "D",
+        "Path",
+        "PreflightResult",
+        "_ensure_dir",
+        "append",
+        "disk_usage",
+        "field",
+        "get",
+        "get_assets",
+        "get_spot_status",
+        "get_ticker",
+        "join",
+        "mkdir",
+        "resolve",
+        "safe_dict",
+        "slog",
+        "str",
+        "type"
+      ]
+    },
+    "src/bitbank_bot/rate_engine.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.config",
+        "bitbank_bot.indicators",
+        "bitbank_bot.logging_setup",
+        "bitbank_bot.money",
+        "bitbank_bot.strategy",
+        "dataclasses",
+        "decimal"
+      ],
+      "local_imports": [
+        "bitbank_bot.config",
+        "bitbank_bot.indicators",
+        "bitbank_bot.logging_setup",
+        "bitbank_bot.money",
+        "bitbank_bot.strategy"
+      ],
+      "classes": [
+        "RateDecision"
+      ],
+      "functions": [
+        "_clamp",
+        "_regime",
+        "decide"
+      ],
+      "calls": [
+        "D",
+        "RateDecision",
+        "_clamp",
+        "_regime",
+        "dataclass",
+        "slog",
+        "str"
+      ]
+    },
+    "src/bitbank_bot/reconciliation.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.logging_setup",
+        "bitbank_bot.money",
+        "bitbank_bot.strategy",
+        "dataclasses",
+        "decimal",
+        "typing"
+      ],
+      "local_imports": [
+        "bitbank_bot.logging_setup",
+        "bitbank_bot.money",
+        "bitbank_bot.strategy"
+      ],
+      "classes": [
+        "BalanceClient",
+        "ReconcileReport"
+      ],
+      "functions": [
+        "reconcile",
+        "free_amount",
+        "get_active_orders"
+      ],
+      "calls": [
+        "ReconcileReport",
+        "dataclass",
+        "free_amount",
+        "get",
+        "get_active_orders",
+        "len",
+        "slog",
+        "str"
+      ]
+    },
+    "src/bitbank_bot/rest_client.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.logging_setup",
+        "bitbank_bot.money",
+        "collections",
+        "decimal",
+        "hashlib",
+        "hmac",
+        "httpx",
+        "json",
+        "random",
+        "threading",
+        "time",
+        "typing",
+        "urllib.parse"
+      ],
+      "local_imports": [
+        "bitbank_bot.logging_setup",
+        "bitbank_bot.money"
+      ],
+      "classes": [
+        "BitbankAPIError",
+        "RateLimiter",
+        "RestClient"
+      ],
+      "functions": [
+        "is_auth_error",
+        "api_error_log_fields",
+        "dump_json",
+        "sign_access_time_window",
+        "get_sign_payload",
+        "_backoff_seconds",
+        "__init__",
+        "__init__",
+        "wait",
+        "__init__",
+        "close",
+        "__enter__",
+        "__exit__",
+        "_request",
+        "public_get",
+        "get_ticker",
+        "get_candlestick",
+        "get_spot_status",
+        "_private_headers",
+        "private_get",
+        "private_post",
+        "get_assets",
+        "free_amount",
+        "get_order",
+        "get_trade_history",
+        "create_order",
+        "get_active_orders"
+      ],
+      "calls": [
+        "BitbankAPIError",
+        "Client",
+        "D",
+        "Lock",
+        "RateLimiter",
+        "__init__",
+        "_backoff_seconds",
+        "_private_headers",
+        "_request",
+        "append",
+        "close",
+        "deque",
+        "dump_json",
+        "dumps",
+        "encode",
+        "frozenset",
+        "get",
+        "get_assets",
+        "get_sign_payload",
+        "hexdigest",
+        "int",
+        "isinstance",
+        "json",
+        "len",
+        "list",
+        "lower",
+        "max",
+        "min",
+        "monotonic",
+        "new",
+        "popleft",
+        "private_get",
+        "private_post",
+        "public_get",
+        "range",
+        "request",
+        "rstrip",
+        "sign_access_time_window",
+        "sleep",
+        "slog",
+        "split",
+        "startswith",
+        "str",
+        "super",
+        "time",
+        "type",
+        "uniform",
+        "urlencode",
+        "wait"
+      ]
+    },
+    "src/bitbank_bot/risk.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.config",
+        "bitbank_bot.logging_setup",
+        "bitbank_bot.money",
+        "dataclasses",
+        "datetime",
+        "decimal",
+        "pathlib"
+      ],
+      "local_imports": [
+        "bitbank_bot.config",
+        "bitbank_bot.logging_setup",
+        "bitbank_bot.money"
+      ],
+      "classes": [
+        "RiskDecision",
+        "RiskManager"
+      ],
+      "functions": [
+        "jst_today",
+        "jst_date_from_ms",
+        "__init__",
+        "set_as_of",
+        "_today",
+        "_roll_day",
+        "_daily_halt_reason",
+        "operator_killed",
+        "halt_reason",
+        "killed",
+        "note_auth_failure",
+        "note_api_error",
+        "note_api_ok",
+        "update_equity",
+        "record_realized_pnl",
+        "check_stale",
+        "check_buy",
+        "check_sell"
+      ],
+      "calls": [
+        "D",
+        "Path",
+        "RiskDecision",
+        "_daily_halt_reason",
+        "_roll_day",
+        "_today",
+        "bool",
+        "date",
+        "exists",
+        "float",
+        "fromtimestamp",
+        "halt_reason",
+        "int",
+        "isoformat",
+        "jst_date_from_ms",
+        "jst_today",
+        "min",
+        "now",
+        "slog",
+        "str",
+        "timedelta",
+        "timezone"
+      ]
+    },
+    "src/bitbank_bot/screen.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.money",
+        "dataclasses",
+        "datetime",
+        "shutil",
+        "sys",
+        "typing"
+      ],
+      "local_imports": [
+        "bitbank_bot.money"
+      ],
+      "classes": [
+        "ScreenView",
+        "TradingScreen"
+      ],
+      "functions": [
+        "_commas",
+        "format_screen",
+        "view_from_engine",
+        "should_use_screen",
+        "__init__",
+        "boot",
+        "render",
+        "_write"
+      ],
+      "calls": [
+        "D",
+        "ScreenView",
+        "_commas",
+        "_write",
+        "bool",
+        "flush",
+        "format",
+        "format_screen",
+        "get_terminal_size",
+        "getattr",
+        "int",
+        "join",
+        "max",
+        "min",
+        "now",
+        "split",
+        "startswith",
+        "str",
+        "strftime",
+        "timedelta",
+        "timezone",
+        "to_integral_value",
+        "write"
+      ]
+    },
+    "src/bitbank_bot/strategy.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.config",
+        "bitbank_bot.indicators",
+        "bitbank_bot.logging_setup",
+        "bitbank_bot.money",
+        "dataclasses",
+        "decimal",
+        "typing"
+      ],
+      "local_imports": [
+        "bitbank_bot.config",
+        "bitbank_bot.indicators",
+        "bitbank_bot.logging_setup",
+        "bitbank_bot.money"
+      ],
+      "classes": [
+        "MarketSnapshot",
+        "Position",
+        "Signal",
+        "Buy3Machine",
+        "Buy4Machine",
+        "Sell1Machine",
+        "Sell2Machine",
+        "Sell4Machine",
+        "Strategy"
+      ],
+      "functions": [
+        "build_snapshots",
+        "hold",
+        "__init__",
+        "reset",
+        "update",
+        "__init__",
+        "update",
+        "__init__",
+        "update",
+        "__init__",
+        "update",
+        "__init__",
+        "update",
+        "__init__",
+        "observe",
+        "evaluate",
+        "_log_buy_gates",
+        "_tp_signal",
+        "_sell_signal",
+        "_buy_signal"
+      ],
+      "calls": [
+        "Buy3Machine",
+        "Buy4Machine",
+        "MarketSnapshot",
+        "Sell1Machine",
+        "Sell2Machine",
+        "Sell4Machine",
+        "Signal",
+        "ValueError",
+        "_buy_signal",
+        "_log_buy_gates",
+        "_sell_signal",
+        "_tp_signal",
+        "append",
+        "crossed_down",
+        "crossed_up",
+        "crossover_price_bp",
+        "hold",
+        "int",
+        "interpolate_crossover",
+        "is_dead_cross",
+        "is_golden_cross",
+        "len",
+        "ma_trend",
+        "max",
+        "moving_average",
+        "observe",
+        "pct_offset",
+        "range",
+        "reset",
+        "slog",
+        "str",
+        "update"
+      ]
+    },
+    "src/bitbank_bot/trade_signal_executor.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.amounts",
+        "bitbank_bot.config",
+        "bitbank_bot.execution_gate",
+        "bitbank_bot.logging_setup",
+        "bitbank_bot.money",
+        "bitbank_bot.orders",
+        "bitbank_bot.strategy",
+        "bitbank_bot.trade_trace",
+        "decimal",
+        "typing"
+      ],
+      "local_imports": [
+        "bitbank_bot.amounts",
+        "bitbank_bot.config",
+        "bitbank_bot.execution_gate",
+        "bitbank_bot.logging_setup",
+        "bitbank_bot.money",
+        "bitbank_bot.orders",
+        "bitbank_bot.strategy",
+        "bitbank_bot.trade_trace"
+      ],
+      "classes": [
+        "TradeSignalExecutor"
+      ],
+      "functions": [
+        "__init__",
+        "submit",
+        "poll",
+        "active_orders"
+      ],
+      "calls": [
+        "OrderExecutor",
+        "OrderResult",
+        "active_orders",
+        "amount_valid",
+        "checkpoint",
+        "gate_evaluate",
+        "place",
+        "poll",
+        "slog",
+        "str"
+      ]
+    },
+    "src/bitbank_bot/trade_trace.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.logging_setup",
+        "typing",
+        "uuid"
+      ],
+      "local_imports": [
+        "bitbank_bot.logging_setup"
+      ],
+      "classes": [],
+      "functions": [
+        "new_trace_id",
+        "checkpoint"
+      ],
+      "calls": [
+        "slog",
+        "uuid4"
+      ]
+    },
+    "src/bitbank_bot/watchdog.py": {
+      "imports": [
+        "__future__",
+        "dataclasses"
+      ],
+      "local_imports": [],
+      "classes": [
+        "WatchdogReport"
+      ],
+      "functions": [
+        "classify"
+      ],
+      "calls": [
+        "WatchdogReport",
+        "dataclass"
+      ]
+    },
+    "src/bitbank_bot/websocket_client.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.logging_setup",
+        "bitbank_bot.money",
+        "json",
+        "logging",
+        "random",
+        "threading",
+        "time",
+        "typing",
+        "websockets",
+        "websockets.sync.client"
+      ],
+      "local_imports": [
+        "bitbank_bot.logging_setup",
+        "bitbank_bot.money"
+      ],
+      "classes": [
+        "BitbankWebsocket"
+      ],
+      "functions": [
+        "__init__",
+        "start",
+        "stop",
+        "is_stale",
+        "is_connected",
+        "last_price",
+        "_run_forever",
+        "_session",
+        "_handle_42"
+      ],
+      "calls": [
+        "D",
+        "Event",
+        "Lock",
+        "RuntimeError",
+        "Thread",
+        "_handle_42",
+        "_session",
+        "clear",
+        "connect",
+        "decode",
+        "float",
+        "get",
+        "is_alive",
+        "is_set",
+        "is_stale",
+        "isinstance",
+        "join",
+        "len",
+        "loads",
+        "max",
+        "min",
+        "monotonic",
+        "on_message",
+        "recv",
+        "round",
+        "send",
+        "set",
+        "slog",
+        "split",
+        "start",
+        "startswith",
+        "str",
+        "type",
+        "uniform",
+        "wait"
+      ]
+    }
+  },
+  "dependency_graph": {
+    "src/bitbank_bot/__init__.py": [],
+    "src/bitbank_bot/__main__.py": [
+      "bitbank_bot.main"
+    ],
+    "src/bitbank_bot/amounts.py": [
+      "bitbank_bot.config",
+      "bitbank_bot.money",
+      "bitbank_bot.risk"
+    ],
+    "src/bitbank_bot/backtest.py": [
+      "bitbank_bot.config",
+      "bitbank_bot.market_data",
+      "bitbank_bot.money",
+      "bitbank_bot.strategy"
+    ],
+    "src/bitbank_bot/config.py": [
+      "bitbank_bot.money"
+    ],
+    "src/bitbank_bot/engine.py": [
+      "bitbank_bot.amounts",
+      "bitbank_bot.config",
+      "bitbank_bot.hold_tracer",
+      "bitbank_bot.indicators",
+      "bitbank_bot.logging_setup",
+      "bitbank_bot.market_data",
+      "bitbank_bot.money",
+      "bitbank_bot.multi_timeframe",
+      "bitbank_bot.orders",
+      "bitbank_bot.preflight",
+      "bitbank_bot.rate_engine",
+      "bitbank_bot.reconciliation",
+      "bitbank_bot.rest_client",
+      "bitbank_bot.risk",
+      "bitbank_bot.screen",
+      "bitbank_bot.strategy",
+      "bitbank_bot.trade_signal_executor",
+      "bitbank_bot.trade_trace",
+      "bitbank_bot.watchdog",
+      "bitbank_bot.websocket_client"
+    ],
+    "src/bitbank_bot/execution_gate.py": [
+      "bitbank_bot.config",
+      "bitbank_bot.logging_setup",
+      "bitbank_bot.money",
+      "bitbank_bot.strategy"
+    ],
+    "src/bitbank_bot/hold_tracer.py": [
+      "bitbank_bot.strategy"
+    ],
+    "src/bitbank_bot/indicators.py": [
+      "bitbank_bot.money"
+    ],
+    "src/bitbank_bot/instance_lock.py": [],
+    "src/bitbank_bot/logging_setup.py": [],
+    "src/bitbank_bot/main.py": [
+      "bitbank_bot.backtest",
+      "bitbank_bot.config",
+      "bitbank_bot.engine",
+      "bitbank_bot.instance_lock",
+      "bitbank_bot.logging_setup",
+      "bitbank_bot.market_data",
+      "bitbank_bot.preflight",
+      "bitbank_bot.rest_client",
+      "bitbank_bot.screen"
+    ],
+    "src/bitbank_bot/market_data.py": [
+      "bitbank_bot.config",
+      "bitbank_bot.logging_setup",
+      "bitbank_bot.money",
+      "bitbank_bot.rest_client"
+    ],
+    "src/bitbank_bot/money.py": [],
+    "src/bitbank_bot/multi_timeframe.py": [
+      "bitbank_bot.config",
+      "bitbank_bot.indicators",
+      "bitbank_bot.logging_setup",
+      "bitbank_bot.market_data",
+      "bitbank_bot.rest_client"
+    ],
+    "src/bitbank_bot/orders.py": [
+      "bitbank_bot.amounts",
+      "bitbank_bot.config",
+      "bitbank_bot.logging_setup",
+      "bitbank_bot.money",
+      "bitbank_bot.strategy"
+    ],
+    "src/bitbank_bot/preflight.py": [
+      "bitbank_bot.config",
+      "bitbank_bot.logging_setup",
+      "bitbank_bot.money",
+      "bitbank_bot.rest_client"
+    ],
+    "src/bitbank_bot/rate_engine.py": [
+      "bitbank_bot.config",
+      "bitbank_bot.indicators",
+      "bitbank_bot.logging_setup",
+      "bitbank_bot.money",
+      "bitbank_bot.strategy"
+    ],
+    "src/bitbank_bot/reconciliation.py": [
+      "bitbank_bot.logging_setup",
+      "bitbank_bot.money",
+      "bitbank_bot.strategy"
+    ],
+    "src/bitbank_bot/rest_client.py": [
+      "bitbank_bot.logging_setup",
+      "bitbank_bot.money"
+    ],
+    "src/bitbank_bot/risk.py": [
+      "bitbank_bot.config",
+      "bitbank_bot.logging_setup",
+      "bitbank_bot.money"
+    ],
+    "src/bitbank_bot/screen.py": [
+      "bitbank_bot.money"
+    ],
+    "src/bitbank_bot/strategy.py": [
+      "bitbank_bot.config",
+      "bitbank_bot.indicators",
+      "bitbank_bot.logging_setup",
+      "bitbank_bot.money"
+    ],
+    "src/bitbank_bot/trade_signal_executor.py": [
+      "bitbank_bot.amounts",
+      "bitbank_bot.config",
+      "bitbank_bot.execution_gate",
+      "bitbank_bot.logging_setup",
+      "bitbank_bot.money",
+      "bitbank_bot.orders",
+      "bitbank_bot.strategy",
+      "bitbank_bot.trade_trace"
+    ],
+    "src/bitbank_bot/trade_trace.py": [
+      "bitbank_bot.logging_setup"
+    ],
+    "src/bitbank_bot/watchdog.py": [],
+    "src/bitbank_bot/websocket_client.py": [
+      "bitbank_bot.logging_setup",
+      "bitbank_bot.money"
+    ]
+  }
+}

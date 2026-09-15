@@ -122,3 +122,31 @@ def interpolate_crossover(
     if t < ZERO or t > ONE:
         return None
     return prev_price + t * dp
+
+
+def average_true_range(highs: Sequence[Decimal], lows: Sequence[Decimal], closes: Sequence[Decimal], period: int) -> Decimal | None:
+    """Wilder ATR from high/low/close. None if not enough bars or non-positive."""
+    n = min(len(highs), len(lows), len(closes))
+    if period < 1 or n < period + 1:
+        return None
+    trs: list[Decimal] = []
+    for i in range(1, n):
+        high = D(highs[i])
+        low = D(lows[i])
+        prev_close = D(closes[i - 1])
+        span = high - low
+        up = abs(high - prev_close)
+        down = abs(low - prev_close)
+        tr = span
+        if up > tr:
+            tr = up
+        if down > tr:
+            tr = down
+        trs.append(tr)
+    window = trs[-period:]
+    if not window:
+        return None
+    atr = sum(window, ZERO) / D(len(window))
+    if atr <= ZERO:
+        return None
+    return atr
