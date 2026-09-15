@@ -70,6 +70,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.dry_run:
         cfg.dry_run = True
         cfg.live_trading = False
+        cfg.trading_mode = "dry_run"
     use_screen = should_use_screen(args, sys.stdout)
     setup_logging(cfg.log_level, cfg.log_dir, console=not use_screen)
     slog("BOOT", "starting", **cfg.safe_dict())
@@ -80,6 +81,8 @@ def main(argv: list[str] | None = None) -> int:
         synthetic=bool(args.synthetic),
         loop=not args.once,
         dry_run=cfg.dry_run,
+        live_trading=cfg.live_trading,
+        trading_mode=cfg.trading_mode,
         screen=use_screen,
     )
     rest = RestClient(

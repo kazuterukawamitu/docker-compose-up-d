@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import httpx
+import pytest
+
 from bitbank_bot.rest_client import (
     BitbankAPIError,
     RestClient,
@@ -48,3 +51,76 @@ def test_create_order_refuses_without_live_confirmed() -> None:
 
 def test_cfg_pair_used() -> None:
     assert cfg().pair == "btc_jpy"
+
+
+def test_private_post_is_not_retried() -> None:
+    class CountingTransport(httpx.BaseTransport):
+        def __init__(self) -> None:
+            self.n = 0
+
+        def handle_request(self, request: httpx.Request) -> httpx.Response:
+            self.n += 1
+            raise httpx.ConnectError("offline")
+
+    transport = CountingTransport()
+    client = RestClient(
+        "https://public.example",
+        "https://private.example/v1",
+        "k",
+        "s",
+        max_retries=5,
+        http=httpx.Client(transport=transport),
+    )
+    try:
+        with pytest.raises(BitbankAPIError):
+            client.create_order(
+                "btc_jpy", "0.001", "buy", "limit", "1000000", live_confirmed=True
+            )
+        assert transport.n == 1
+    finally:
+        client.close()
+
+
+def test_public_get_retries_on_transport_error() -> None:
+    class CountingTransport(httpx.BaseTransport):
+        def __init__(self) -> None:
+            self.n = 0
+
+        def handle_request(self, request: httpx.Request) -> httpx.Response:
+            self.n += 1
+            raise httpx.ConnectError("offline")
+
+    transport = CountingTransport()
+    client = RestClient(
+        "https://public.example",
+        "https://private.example/v1",
+        max_retries=3,
+        http=httpx.Client(transport=transport),
+    )
+    try:
+        with pytest.raises(BitbankAPIError):
+            client.get_ticker("btc_jpy")
+        assert transport.n == 3
+    finally:
+        client.close()
+
+
+def test_http_404_json_exposes_bitbank_code() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            404,
+            json={"success": 0, "data": {"code": 10000}},
+        )
+
+    client = RestClient(
+        "https://public.example",
+        "https://private.example/v1",
+        http=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    try:
+        with pytest.raises(BitbankAPIError) as caught:
+            client.get_candlestick("btc_jpy", "5min", "20260916")
+        assert caught.value.http_status == 404
+        assert caught.value.code == 10000
+    finally:
+        client.close()

@@ -60,6 +60,22 @@ DEFAULT_LOOKBACK_DAYS = 14
 DEFAULT_ACCESS_WINDOW_MS = 5000
 DEFAULT_CIRCUIT_BREAKER_ERRORS = 5
 DEFAULT_MAX_DRAWDOWN_JPY = "0"
+LIVE_CONFIRM_PHRASE = "YES_I_ACCEPT_REAL_MONEY_RISK"
+DEFAULT_RATE_MODE = "fixed"
+DEFAULT_MIN_TP_PCT = "0.01"
+DEFAULT_MAX_TP_PCT = "0.12"
+DEFAULT_MIN_SL_PCT = "0.01"
+DEFAULT_MAX_SL_PCT = "0.08"
+DEFAULT_MIN_RISK_PCT = "0.002"
+DEFAULT_MAX_RISK_PCT = "0.02"
+DEFAULT_RISK_PCT = "0.005"
+DEFAULT_SL_PCT = "0.02"
+DEFAULT_ATR_PERIOD = 14
+DEFAULT_VOL_LOW = "0.005"
+DEFAULT_VOL_HIGH = "0.03"
+DEFAULT_HIGH_VOL_SIZE_MULT = "0.5"
+TRADING_MODES = frozenset({"dry_run", "live_ready", "live"})
+RATE_MODES = frozenset({"fixed", "dynamic", "auto"})
 
 SHORT_CANDLE_TYPES = frozenset({"1min", "5min", "15min", "30min", "1hour"})
 LONG_CANDLE_TYPES = frozenset({"4hour", "8hour", "12hour", "1day", "1week", "1month"})
@@ -123,7 +139,23 @@ class Config:
     api_secret: str = field(default="", repr=False)
     dry_run: bool = True
     live_trading: bool = False
+    live_trading_confirm: bool = True
+    trading_mode: str = "dry_run"
+    rate_mode: str = DEFAULT_RATE_MODE
+    signal_only: bool = False
     simulate_fill: bool = True
+    min_tp_pct: Decimal = D(DEFAULT_MIN_TP_PCT)
+    max_tp_pct: Decimal = D(DEFAULT_MAX_TP_PCT)
+    min_sl_pct: Decimal = D(DEFAULT_MIN_SL_PCT)
+    max_sl_pct: Decimal = D(DEFAULT_MAX_SL_PCT)
+    min_risk_pct: Decimal = D(DEFAULT_MIN_RISK_PCT)
+    max_risk_pct: Decimal = D(DEFAULT_MAX_RISK_PCT)
+    default_risk_pct: Decimal = D(DEFAULT_RISK_PCT)
+    default_sl_pct: Decimal = D(DEFAULT_SL_PCT)
+    atr_period: int = DEFAULT_ATR_PERIOD
+    vol_low: Decimal = D(DEFAULT_VOL_LOW)
+    vol_high: Decimal = D(DEFAULT_VOL_HIGH)
+    high_vol_size_mult: Decimal = D(DEFAULT_HIGH_VOL_SIZE_MULT)
     candle_type: str = DEFAULT_CANDLE_TYPE
     ma_period: int = DEFAULT_MA_PERIOD
     short_ma_period: int = DEFAULT_SHORT_MA_PERIOD
@@ -186,6 +218,10 @@ class Config:
 
     @property
     def may_place_live_orders(self) -> bool:
+        if self.signal_only or self.trading_mode == "live_ready":
+            return False
+        if not self.live_trading_confirm:
+            return False
         return (not self.dry_run) and self.live_trading and self.has_keys
 
     def safe_dict(self) -> dict[str, object]:
@@ -195,6 +231,10 @@ class Config:
             "has_api_secret": bool(self.api_secret),
             "dry_run": self.dry_run,
             "live_trading": self.live_trading,
+            "live_trading_confirm": self.live_trading_confirm,
+            "trading_mode": self.trading_mode,
+            "rate_mode": self.rate_mode,
+            "signal_only": self.signal_only,
             "may_place_live_orders": self.may_place_live_orders,
             "simulate_fill": self.simulate_fill,
             "candle_type": self.candle_type,
@@ -235,10 +275,36 @@ def load_config(
 
     dry_run = _bool(env, "DRY_RUN", True)
     live_trading = _bool(env, "LIVE_TRADING", False)
+    signal_only = _bool(env, "SIGNAL_ONLY", False)
+    live_trading_confirm = (_env(env, "LIVE_TRADING_CONFIRM") or "") == LIVE_CONFIRM_PHRASE
+    trading_mode_raw = (_env(env, "TRADING_MODE") or "").strip().lower()
     if dry_run and live_trading:
         raise ConfigError("LIVE_TRADING and DRY_RUN cannot both be true")
     if not live_trading and not dry_run:
         raise ConfigError("DRY_RUN=false requires LIVE_TRADING=true (dual confirmation).")
+    if trading_mode_raw:
+        if trading_mode_raw not in TRADING_MODES:
+            raise ConfigError("TRADING_MODE must be dry_run, live_ready, or live")
+        if trading_mode_raw == "live":
+            if dry_run or not live_trading:
+                raise ConfigError("TRADING_MODE=live requires DRY_RUN=false and LIVE_TRADING=true")
+            if not live_trading_confirm:
+                trading_mode_raw = "live_ready"
+        elif trading_mode_raw == "dry_run":
+            dry_run = True
+            live_trading = False
+    elif dry_run:
+        trading_mode_raw = "dry_run"
+    elif live_trading and live_trading_confirm:
+        trading_mode_raw = "live"
+    elif live_trading:
+        trading_mode_raw = "live_ready"
+    else:
+        trading_mode_raw = "dry_run"
+
+    rate_mode = (_env(env, "RATE_MODE") or DEFAULT_RATE_MODE).lower()
+    if rate_mode not in RATE_MODES:
+        raise ConfigError("RATE_MODE must be fixed, dynamic, or auto")
 
     candle_type = _env(env, "CANDLE_TYPE", DEFAULT_CANDLE_TYPE) or DEFAULT_CANDLE_TYPE
     if candle_type not in CANDLE_TYPES:
@@ -276,7 +342,23 @@ def load_config(
         api_secret=_env(env, "BITBANK_API_SECRET", "") or "",
         dry_run=dry_run,
         live_trading=live_trading,
+        live_trading_confirm=live_trading_confirm,
+        trading_mode=trading_mode_raw,
+        rate_mode=rate_mode,
+        signal_only=signal_only,
         simulate_fill=_bool(env, "DRY_RUN_SIMULATE_FILL", True),
+        min_tp_pct=_dec(env, "MIN_TP_PCT", DEFAULT_MIN_TP_PCT),
+        max_tp_pct=_dec(env, "MAX_TP_PCT", DEFAULT_MAX_TP_PCT),
+        min_sl_pct=_dec(env, "MIN_SL_PCT", DEFAULT_MIN_SL_PCT),
+        max_sl_pct=_dec(env, "MAX_SL_PCT", DEFAULT_MAX_SL_PCT),
+        min_risk_pct=_dec(env, "MIN_RISK_PCT", DEFAULT_MIN_RISK_PCT),
+        max_risk_pct=_dec(env, "MAX_RISK_PCT", DEFAULT_MAX_RISK_PCT),
+        default_risk_pct=_dec(env, "RISK_PCT", DEFAULT_RISK_PCT),
+        default_sl_pct=_dec(env, "STOP_LOSS_PCT", DEFAULT_SL_PCT),
+        atr_period=_int(env, "ATR_PERIOD", DEFAULT_ATR_PERIOD),
+        vol_low=_dec(env, "VOL_LOW", DEFAULT_VOL_LOW),
+        vol_high=_dec(env, "VOL_HIGH", DEFAULT_VOL_HIGH),
+        high_vol_size_mult=_dec(env, "HIGH_VOL_SIZE_MULT", DEFAULT_HIGH_VOL_SIZE_MULT),
         candle_type=candle_type,
         ma_period=_int(env, "MA_PERIOD", DEFAULT_MA_PERIOD),
         short_ma_period=_int(
@@ -342,4 +424,10 @@ def load_config(
         raise ConfigError("MA periods must be >= 2")
     if cfg.long_ma_period < cfg.short_ma_period:
         raise ConfigError("LONG_MA_PERIOD must be >= SHORT_MA_PERIOD")
+    if cfg.atr_period < 2:
+        raise ConfigError("ATR_PERIOD must be >= 2")
+    if cfg.min_tp_pct > cfg.max_tp_pct or cfg.min_sl_pct > cfg.max_sl_pct:
+        raise ConfigError("min TP/SL percent must be <= max")
+    if cfg.min_risk_pct > cfg.max_risk_pct:
+        raise ConfigError("MIN_RISK_PCT must be <= MAX_RISK_PCT")
     return cfg

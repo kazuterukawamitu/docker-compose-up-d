@@ -191,15 +191,38 @@ class OrderExecutor:
         if self.cfg.order_type == "limit":
             q = quantize_price(plan.price, self.cfg.price_tick)
             price_str = str(int(q)) if q == q.to_integral_value() else str(q)
-        raw = self.client.create_order(
-            pair=self.cfg.pair,
-            amount=str(plan.amount),
-            side=plan.side,
-            order_type=self.cfg.order_type,
-            price=price_str,
-            post_only=self.cfg.post_only if self.cfg.order_type == "limit" else None,
-            live_confirmed=True,
-        )
+        try:
+            raw = self.client.create_order(
+                pair=self.cfg.pair,
+                amount=str(plan.amount),
+                side=plan.side,
+                order_type=self.cfg.order_type,
+                price=price_str,
+                post_only=self.cfg.post_only if self.cfg.order_type == "limit" else None,
+                live_confirmed=True,
+            )
+        except Exception as submit_exc:
+            slog(
+                "ERROR",
+                "create_order raised; checking open orders before any retry",
+                error=type(submit_exc).__name__,
+            )
+            try:
+                active = self.active_orders()
+            except Exception as list_exc:
+                slog("ERROR", "open order check failed after timeout", error=type(list_exc).__name__)
+                raise submit_exc
+            if active:
+                adopted = active[0]
+                slog(
+                    "ORDER_ACCEPTED",
+                    "adopted existing order after submit timeout",
+                    order_id=str(adopted.get("order_id") or ""),
+                    count=len(active),
+                )
+                raw = adopted
+            else:
+                raise
         order_id = str(raw.get("order_id") or "")
         status = str(raw.get("status") or "")
         slog("ORDER_ACCEPTED", "order accepted", order_id=order_id, status=status)

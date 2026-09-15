@@ -12,6 +12,9 @@ def test_default_is_dry_run() -> None:
     assert cfg.dry_run is True
     assert cfg.live_trading is False
     assert cfg.may_place_live_orders is False
+    assert cfg.trading_mode == "dry_run"
+    assert cfg.rate_mode == "fixed"
+    assert cfg.signal_only is False
     assert cfg.daily_pnl_floor == Decimal("0")
     assert cfg.pair == PAIR
     assert cfg.enable_htf_filter is True
@@ -65,3 +68,9 @@ def test_repr_hides_secret() -> None:
     text = repr(cfg)
     assert "s" * 16 not in text
     assert cfg.api_secret == "s" * 16
+
+
+def test_signal_only_env() -> None:
+    cfg = load_config(environ={"SIGNAL_ONLY": "true"}, load_default_dotenv=False)
+    assert cfg.signal_only is True
+    assert cfg.may_place_live_orders is False
