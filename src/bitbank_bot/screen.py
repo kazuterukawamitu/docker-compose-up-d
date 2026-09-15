@@ -56,10 +56,16 @@ class ScreenView:
     error: str
     candle_type: str
     note: str = "HOLD/待機は正常です。Ctrl-C で停止"
+    root_cause: str = ""
 
 
 def format_screen(view: ScreenView) -> str:
-    mode = "DRY_RUN  実注文なし" if not view.live_orders else "LIVE  実注文オン"
+    if view.live_orders:
+        mode = "LIVE  実注文オン"
+    elif view.mode == "LIVE_READY":
+        mode = "LIVE_READY  実注文なし"
+    else:
+        mode = "DRY_RUN  実注文なし"
     pos = "なし"
     if view.in_position:
         pos = (
@@ -81,7 +87,8 @@ def format_screen(view: ScreenView) -> str:
         f"  移動平均     {_commas(view.ma)}    トレンド {view.trend}",
         f"  シグナル     {view.signal_kind}    {view.signal_reason}",
         f"  建玉         {pos}",
-        f"  監視         {view.watchdog}    WS {ws}",
+        f"  監視         {view.watchdog}    WS {ws}"
+        + (f"    ROOT_CAUSE {view.root_cause}" if view.root_cause else ""),
         f"  ブロック     {block}",
         f"  エラー       {err}",
         bar,
@@ -134,6 +141,7 @@ def view_from_engine(
     pair: str,
     dry_run: bool,
     live_orders: bool,
+    mode: str | None = None,
     price: object,
     public_last: object,
     ma: object,
@@ -151,10 +159,11 @@ def view_from_engine(
     block_reason: str = "",
     error: str = "",
     candle_type: str = "1hour",
+    root_cause: str = "",
 ) -> ScreenView:
     return ScreenView(
         pair=pair,
-        mode="DRY_RUN" if dry_run else "LIVE",
+        mode=mode or ("DRY_RUN" if dry_run else "LIVE"),
         live_orders=live_orders,
         price=str(price),
         public_last=str(public_last if public_last not in (None, "") else price),
@@ -173,6 +182,7 @@ def view_from_engine(
         block_reason=block_reason,
         error=error,
         candle_type=candle_type,
+        root_cause=root_cause,
     )
 
 
@@ -182,7 +192,7 @@ def should_use_screen(args: object, stdout: TextIO | None = None) -> bool:
     no_screen = bool(getattr(args, "no_screen", False))
     screen = bool(getattr(args, "screen", False))
     max_cycles = getattr(args, "max_cycles", None)
-    for flag in ("check_config", "preflight", "backtest"):
+    for flag in ("check_config", "preflight", "backtest", "smoke_order"):
         if bool(getattr(args, flag, False)):
             return False
     if no_screen or once:

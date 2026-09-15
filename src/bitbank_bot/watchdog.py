@@ -47,3 +47,21 @@ def classify(
     if uptime_sec >= timeout_sec:
         return WatchdogReport(LONG_WAIT, "market_conditions_not_met", uptime_sec)
     return WatchdogReport(NORMAL_WAIT, "waiting_for_setup", uptime_sec)
+
+
+def root_cause_code(
+    *,
+    status: str,
+    watchdog_reason: str,
+    signal_reason: str = "",
+    signal_kind: str = "",
+) -> str:
+    """Stable ROOT_CAUSE for HOLD stalls. Healthy no-cross is not FAIL."""
+    if status == FAIL:
+        return f"FAIL:{watchdog_reason or 'unknown'}"
+    if status == SIGNAL:
+        return f"SIGNAL:{signal_kind or 'order'}"
+    hold = signal_reason or watchdog_reason or "waiting_for_setup"
+    if status == LONG_WAIT:
+        return f"LONG_WAIT:{hold}"
+    return f"HOLD:{hold}"

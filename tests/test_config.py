@@ -1,10 +1,20 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
 
-from bitbank_bot.config import PAIR, ConfigError, load_config, normalize_pair
+from bitbank_bot.config import (
+    LIVE_CONFIRM_PHRASE,
+    MODE_DRY_RUN,
+    MODE_LIVE,
+    MODE_LIVE_READY,
+    PAIR,
+    ConfigError,
+    load_config,
+    normalize_pair,
+)
 
 
 def test_default_is_dry_run() -> None:
@@ -15,9 +25,42 @@ def test_default_is_dry_run() -> None:
     assert cfg.daily_pnl_floor == Decimal("0")
     assert cfg.pair == PAIR
     assert cfg.enable_htf_filter is True
+    assert cfg.rate_mode == "fixed"
+    assert cfg.reconcile_every_cycles == 10
     assert "secret" not in cfg.safe_dict()
     assert cfg.safe_dict()["has_api_secret"] is False
     assert cfg.safe_dict()["enable_htf_filter"] is True
+    assert cfg.safe_dict()["rate_mode"] == "fixed"
+    assert cfg.safe_dict()["reconcile_every_cycles"] == 10
+
+
+def test_rate_mode_and_reconcile_every_cycles_from_env() -> None:
+    cfg = load_config(
+        environ={"RATE_MODE": "auto", "RECONCILE_EVERY_CYCLES": "3"},
+        load_default_dotenv=False,
+    )
+    assert cfg.rate_mode == "auto"
+    assert cfg.reconcile_every_cycles == 3
+    with pytest.raises(ConfigError, match="RATE_MODE"):
+        load_config(environ={"RATE_MODE": "random"}, load_default_dotenv=False)
+
+
+def test_env_example_documents_rate_mode_and_reconcile() -> None:
+    text = (Path(__file__).resolve().parents[1] / ".env.example").read_text(encoding="utf-8")
+    assert "RATE_MODE=fixed" in text
+    assert "RECONCILE_EVERY_CYCLES=10" in text
+    parsed: dict[str, str] = {}
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, _, value = stripped.partition("=")
+        parsed[key] = value
+    cfg = load_config(environ=parsed, load_default_dotenv=False)
+    assert cfg.rate_mode == "fixed"
+    assert cfg.reconcile_every_cycles == 10
+    assert cfg.resolved_trading_mode() == MODE_DRY_RUN
+    assert cfg.may_place_live_orders is False
 
 
 def test_htf_filter_env() -> None:
@@ -48,6 +91,64 @@ def test_dual_flag_required_for_live() -> None:
             environ={"DRY_RUN": "false", "LIVE_TRADING": "true"},
             load_default_dotenv=False,
         )
+
+
+def test_trading_mode_live_without_confirm_is_live_ready() -> None:
+    cfg = load_config(
+        environ={
+            "TRADING_MODE": "LIVE",
+            "BITBANK_API_KEY": "k",
+            "BITBANK_API_SECRET": "s",
+        },
+        load_default_dotenv=False,
+    )
+    assert cfg.resolved_trading_mode() == MODE_LIVE_READY
+    assert cfg.may_place_live_orders is False
+    assert cfg.is_live_ready is True
+
+
+def test_trading_mode_live_dual_auth() -> None:
+    cfg = load_config(
+        environ={
+            "TRADING_MODE": "LIVE",
+            "LIVE_TRADING_CONFIRM": LIVE_CONFIRM_PHRASE,
+            "BITBANK_API_KEY": "k",
+            "BITBANK_API_SECRET": "s",
+        },
+        load_default_dotenv=False,
+    )
+    assert cfg.resolved_trading_mode() == MODE_LIVE
+    assert cfg.may_place_live_orders is True
+    assert cfg.safe_dict()["trading_mode"] == MODE_LIVE
+    assert "YES_I_ACCEPT" not in repr(cfg)
+
+
+def test_signal_only_maps_to_live_ready() -> None:
+    cfg = load_config(
+        environ={"TRADING_MODE": "SIGNAL_ONLY"},
+        load_default_dotenv=False,
+    )
+    assert cfg.resolved_trading_mode() == MODE_LIVE_READY
+    assert cfg.may_place_live_orders is False
+
+
+def test_default_resolved_mode_is_dry_run() -> None:
+    cfg = load_config(environ={}, load_default_dotenv=False)
+    assert cfg.resolved_trading_mode() == MODE_DRY_RUN
+
+
+def test_legacy_live_flags_without_confirm_are_live_ready() -> None:
+    cfg = load_config(
+        environ={
+            "DRY_RUN": "false",
+            "LIVE_TRADING": "true",
+            "BITBANK_API_KEY": "k",
+            "BITBANK_API_SECRET": "s",
+        },
+        load_default_dotenv=False,
+    )
+    assert cfg.resolved_trading_mode() == MODE_LIVE_READY
+    assert cfg.may_place_live_orders is False
 
 
 def test_balance_usage_alias() -> None:

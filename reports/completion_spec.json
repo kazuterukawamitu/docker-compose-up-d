@@ -1,0 +1,86 @@
+{
+  "checks": [
+    {
+      "id": "01",
+      "name": "python_syntax",
+      "ok": true,
+      "skip": false,
+      "evidence": "py_compile src + main.py + run.py"
+    },
+    {
+      "id": "02",
+      "name": "ast_parse",
+      "ok": true,
+      "skip": false,
+      "evidence": "[]"
+    },
+    {
+      "id": "03",
+      "name": "create_order_only_order_path",
+      "ok": true,
+      "skip": false,
+      "evidence": "[{\"file\": \"src/bitbank_bot/api_client.py\", \"lineno\": 106, \"qual\": \"BitbankAPIClient.create_order\", \"name\": \"self.rest.create_order\"}, {\"file\": \"src/bitbank_bot/orders.py\", \"lineno\": 239, \"qual\": \"OrderExecutor.place\", \"name\": \"self.client.create_order\"}]"
+    },
+    {
+      "id": "04",
+      "name": "no_other_exchange_in_src",
+      "ok": true,
+      "skip": false,
+      "evidence": "[]"
+    },
+    {
+      "id": "05",
+      "name": "api_facade_present",
+      "ok": true,
+      "skip": false,
+      "evidence": "src/bitbank_bot/api_client.py"
+    },
+    {
+      "id": "06",
+      "name": "run_py_never_create_order",
+      "ok": true,
+      "skip": false,
+      "evidence": "run.py"
+    },
+    {
+      "id": "07",
+      "name": "pair_btc_jpy",
+      "ok": true,
+      "skip": false,
+      "evidence": "config.PAIR"
+    },
+    {
+      "id": "08",
+      "name": "launcher_present",
+      "ok": true,
+      "skip": false,
+      "evidence": "start.sh + launch.py"
+    },
+    {
+      "id": "09",
+      "name": "execution_gate_present",
+      "ok": true,
+      "skip": false,
+      "evidence": "execution_gate.py"
+    },
+    {
+      "id": "10",
+      "name": "no_trading_bot_rewrite_tree",
+      "ok": true,
+      "skip": false,
+      "evidence": "did not invent trading_bot/"
+    },
+    {
+      "id": "11",
+      "name": "live_post_not_claimed",
+      "ok": true,
+      "skip": true,
+      "evidence": "LIVE Bitbank POST is NOT TESTED here"
+    }
+  ],
+  "passed": 10,
+  "scored": 10,
+  "skipped": 1,
+  "completion_percent": 100,
+  "live_post": "NOT_TESTED"
+}

@@ -67,6 +67,28 @@ def test_hold_in_position_same_candle() -> None:
     assert sig.reason == "same_entry_candle_no_sell"
 
 
+def test_same_entry_uses_timestamp_not_shifted_index() -> None:
+    c = cfg(ma_period=3, short_ma_period=3, long_ma_period=5)
+    closes = [D(100)] * 10
+    snaps = build_snapshots(closes, list(range(10)), c)
+    pos = Position(
+        amount=D("0.01"),
+        average_price=D("100"),
+        tp_pct=D("0.03"),
+        entry_candle_index=snaps[-1].index + 80,
+        entry_candle_ts=snaps[-1].timestamp_ms,
+        actual_execution_jpy=D("1000"),
+        kind="BUY1",
+    )
+    sig = Strategy(c).evaluate(snaps[-1], pos)
+    assert sig.reason == "same_entry_candle_no_sell"
+    pos.entry_candle_index = snaps[-1].index
+    pos.entry_candle_ts = snaps[-1].timestamp_ms + 999
+    sig = Strategy(c).evaluate(snaps[-1], pos)
+    assert sig.reason != "same_entry_candle_no_sell"
+
+
+
 def test_take_profit_sells() -> None:
     c = cfg(ma_period=3, short_ma_period=3, long_ma_period=5)
     closes = [D("100")] * 8 + [D("104")]
@@ -92,6 +114,19 @@ def test_hold_requires_reason() -> None:
     from bitbank_bot.strategy import Signal
 
     assert Signal.hold("no_buy_setup").reason == "no_buy_setup"
+
+
+def test_hold_logs_buy_gate_breakdown(caplog) -> None:
+    closes = [D(100)] * 12
+    snaps, c = _snaps_from_closes(closes)
+    strat = Strategy(c)
+    with caplog.at_level("INFO", logger="bitbank_bot"):
+        sig = strat.evaluate(snaps[-1], None)
+    assert sig.kind == "HOLD"
+    assert sig.reason == "no_buy_setup"
+    assert "BUY_GATE" in caplog.text
+    assert "no_buy_setup" in caplog.text
+    assert "crossed_up" in caplog.text
 
 
 def test_sell3_on_upcross_in_downtrend() -> None:

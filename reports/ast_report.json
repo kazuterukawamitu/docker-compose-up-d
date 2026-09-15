@@ -1,0 +1,3067 @@
+{
+  "root": "/workspace",
+  "file_count": 71,
+  "modules": {
+    "diagnostics.py": {
+      "imports": [
+        "__future__",
+        "dotenv",
+        "httpx",
+        "json",
+        "os",
+        "pathlib",
+        "shutil",
+        "subprocess",
+        "sys"
+      ],
+      "classes": [],
+      "functions": [
+        "_run",
+        "main"
+      ],
+      "parse_error": ""
+    },
+    "launch_bot.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.launch",
+        "pathlib",
+        "sys",
+        "sysconfig"
+      ],
+      "classes": [],
+      "functions": [
+        "_repo_root",
+        "_ensure_src_on_path",
+        "_write_venv_pth",
+        "main"
+      ],
+      "parse_error": ""
+    },
+    "main.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.launch",
+        "httpx",
+        "importlib.util",
+        "pathlib",
+        "sys"
+      ],
+      "classes": [],
+      "functions": [
+        "_stdlib",
+        "_launch"
+      ],
+      "parse_error": ""
+    },
+    "run.py": {
+      "imports": [
+        "__future__",
+        "argparse",
+        "datetime",
+        "decimal",
+        "json",
+        "ssl",
+        "sys",
+        "time",
+        "typing",
+        "urllib.error",
+        "urllib.request"
+      ],
+      "classes": [],
+      "functions": [
+        "D",
+        "commas",
+        "http_get_json",
+        "fetch_ticker",
+        "fetch_hourly_closes",
+        "synthetic_closes",
+        "sma",
+        "trend_of",
+        "decide",
+        "screen",
+        "parse_args",
+        "main"
+      ],
+      "parse_error": ""
+    },
+    "scripts/analyze_ast.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.code_audit",
+        "pathlib",
+        "sys"
+      ],
+      "classes": [],
+      "functions": [
+        "main"
+      ],
+      "parse_error": ""
+    },
+    "scripts/bitbank_execution_audit.py": {
+      "imports": [
+        "__future__",
+        "argparse",
+        "bitbank_bot.config",
+        "bitbank_bot.logging_setup",
+        "bitbank_bot.rest_client",
+        "pathlib",
+        "sys",
+        "typing"
+      ],
+      "classes": [],
+      "functions": [
+        "_forbid_orders",
+        "_forbid_orders._blocked",
+        "run_audit",
+        "main"
+      ],
+      "parse_error": ""
+    },
+    "scripts/completion_percent.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.code_audit",
+        "json",
+        "pathlib",
+        "sys"
+      ],
+      "classes": [],
+      "functions": [
+        "main"
+      ],
+      "parse_error": ""
+    },
+    "scripts/dump_all_source.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.code_audit",
+        "pathlib",
+        "sys"
+      ],
+      "classes": [],
+      "functions": [
+        "main"
+      ],
+      "parse_error": ""
+    },
+    "src/bitbank_bot/__init__.py": {
+      "imports": [
+        "__future__"
+      ],
+      "classes": [],
+      "functions": [],
+      "parse_error": ""
+    },
+    "src/bitbank_bot/__main__.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.main"
+      ],
+      "classes": [],
+      "functions": [],
+      "parse_error": ""
+    },
+    "src/bitbank_bot/amounts.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.config",
+        "bitbank_bot.money",
+        "bitbank_bot.risk",
+        "dataclasses",
+        "decimal"
+      ],
+      "classes": [
+        "AmountPlan",
+        "PositionSizer"
+      ],
+      "functions": [
+        "plan_buy",
+        "plan_sell",
+        "apply_size_mult",
+        "PositionSizer.__init__",
+        "PositionSizer.plan_buy",
+        "PositionSizer.plan_sell"
+      ],
+      "parse_error": ""
+    },
+    "src/bitbank_bot/api_client.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.config",
+        "bitbank_bot.rest_client",
+        "bitbank_bot.websocket_client",
+        "typing"
+      ],
+      "classes": [
+        "BitbankAPIClient"
+      ],
+      "functions": [
+        "BitbankAPIClient.__init__",
+        "BitbankAPIClient.from_config",
+        "BitbankAPIClient.close",
+        "BitbankAPIClient.__enter__",
+        "BitbankAPIClient.__exit__",
+        "BitbankAPIClient.get_ticker",
+        "BitbankAPIClient.get_candlestick",
+        "BitbankAPIClient.get_spot_status",
+        "BitbankAPIClient.get_assets",
+        "BitbankAPIClient.free_amount",
+        "BitbankAPIClient.get_order",
+        "BitbankAPIClient.get_trade_history",
+        "BitbankAPIClient.get_active_orders",
+        "BitbankAPIClient.create_order"
+      ],
+      "parse_error": ""
+    },
+    "src/bitbank_bot/backtest.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.config",
+        "bitbank_bot.market_data",
+        "bitbank_bot.money",
+        "bitbank_bot.strategy",
+        "dataclasses",
+        "decimal"
+      ],
+      "classes": [
+        "BacktestReport"
+      ],
+      "functions": [
+        "run_backtest",
+        "report_lines"
+      ],
+      "parse_error": ""
+    },
+    "src/bitbank_bot/code_audit.py": {
+      "imports": [
+        "__future__",
+        "ast",
+        "bitbank_bot.logging_setup",
+        "dataclasses",
+        "json",
+        "pathlib",
+        "py_compile",
+        "re",
+        "typing"
+      ],
+      "classes": [
+        "FileAst",
+        "Visitor"
+      ],
+      "functions": [
+        "rel",
+        "is_secret_path",
+        "iter_files",
+        "_attr_name",
+        "_parse_file",
+        "Visitor._parse_file.visit_Import",
+        "Visitor._parse_file.visit_ImportFrom",
+        "Visitor._parse_file.visit_ClassDef",
+        "Visitor._parse_file.visit_FunctionDef",
+        "Visitor._parse_file.visit_AsyncFunctionDef",
+        "Visitor._parse_file.visit_Call",
+        "Visitor._parse_file.visit_ExceptHandler",
+        "Visitor._parse_file.visit_Constant",
+        "analyze_python",
+        "leftover_wiki_html",
+        "file_inventory",
+        "_redact_dump_line",
+        "dump_paths",
+        "write_source_dump",
+        "write_inventory_markdown",
+        "completion_checks",
+        "completion_checks.add",
+        "write_ast_reports",
+        "write_dump"
+      ],
+      "parse_error": ""
+    },
+    "src/bitbank_bot/config.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.money",
+        "dataclasses",
+        "decimal",
+        "dotenv",
+        "os",
+        "pathlib",
+        "typing"
+      ],
+      "classes": [
+        "ConfigError",
+        "Config"
+      ],
+      "functions": [
+        "load_dotenv",
+        "normalize_pair",
+        "_env",
+        "_bool",
+        "_int",
+        "_dec",
+        "Config.__str__",
+        "Config.__repr__",
+        "Config.has_keys",
+        "Config.resolved_trading_mode",
+        "Config.is_live_ready",
+        "Config.is_live",
+        "Config.live_trading_confirmed",
+        "Config.may_place_live_orders",
+        "Config.safe_dict",
+        "load_config"
+      ],
+      "parse_error": ""
+    },
+    "src/bitbank_bot/engine.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.amounts",
+        "bitbank_bot.api_client",
+        "bitbank_bot.config",
+        "bitbank_bot.logging_setup",
+        "bitbank_bot.market_data",
+        "bitbank_bot.money",
+        "bitbank_bot.multi_timeframe",
+        "bitbank_bot.orders",
+        "bitbank_bot.preflight",
+        "bitbank_bot.reconciliation",
+        "bitbank_bot.rest_client",
+        "bitbank_bot.risk",
+        "bitbank_bot.screen",
+        "bitbank_bot.strategy",
+        "bitbank_bot.trade_signal_executor",
+        "bitbank_bot.watchdog",
+        "bitbank_bot.websocket_client",
+        "dataclasses",
+        "datetime",
+        "decimal",
+        "json",
+        "logging",
+        "pathlib",
+        "signal",
+        "time",
+        "typing"
+      ],
+      "classes": [
+        "PendingOrder",
+        "BotState",
+        "Engine"
+      ],
+      "functions": [
+        "load_state",
+        "save_state",
+        "Engine.__init__",
+        "Engine.request_stop",
+        "Engine._rest",
+        "Engine._balances",
+        "Engine._maybe_ws",
+        "Engine.process_candles",
+        "Engine._execute",
+        "Engine._apply_reconcile_report",
+        "Engine._poll_pending",
+        "Engine._set_watchdog",
+        "Engine._apply_fill",
+        "Engine.run_once",
+        "Engine._candles_for_cycle",
+        "Engine.run_forever",
+        "Engine._heartbeat",
+        "Engine._refresh_public_last",
+        "Engine._paint",
+        "install_signal_handlers"
+      ],
+      "parse_error": ""
+    },
+    "src/bitbank_bot/execution_gate.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.config",
+        "bitbank_bot.logging_setup",
+        "bitbank_bot.money",
+        "bitbank_bot.strategy",
+        "dataclasses",
+        "decimal"
+      ],
+      "classes": [
+        "GateContext",
+        "GateDecision",
+        "ExecutionGate"
+      ],
+      "functions": [
+        "ExecutionGate.__init__",
+        "ExecutionGate.evaluate"
+      ],
+      "parse_error": ""
+    },
+    "src/bitbank_bot/indicators.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.money",
+        "decimal",
+        "enum",
+        "typing"
+      ],
+      "classes": [
+        "Trend"
+      ],
+      "functions": [
+        "sma",
+        "ema",
+        "moving_average",
+        "crossover_price_bp",
+        "ma_trend",
+        "is_golden_cross",
+        "is_dead_cross",
+        "crossed_up",
+        "crossed_down",
+        "atr",
+        "interpolate_crossover"
+      ],
+      "parse_error": ""
+    },
+    "src/bitbank_bot/instance_lock.py": {
+      "imports": [
+        "__future__",
+        "fcntl",
+        "os",
+        "pathlib",
+        "types"
+      ],
+      "classes": [
+        "InstanceLockError",
+        "InstanceLock"
+      ],
+      "functions": [
+        "InstanceLock.__init__",
+        "InstanceLock.acquire",
+        "InstanceLock.release",
+        "InstanceLock.__enter__",
+        "InstanceLock.__exit__"
+      ],
+      "parse_error": ""
+    },
+    "src/bitbank_bot/launch.py": {
+      "imports": [
+        "__future__",
+        "argparse",
+        "bitbank_bot.config",
+        "bitbank_bot.main",
+        "dataclasses",
+        "os",
+        "pathlib",
+        "subprocess",
+        "sys",
+        "time"
+      ],
+      "classes": [
+        "LaunchError",
+        "LaunchOpts"
+      ],
+      "functions": [
+        "looks_like_repo",
+        "cwd_is_inside_repo",
+        "looks_like_pytest_paste",
+        "resolve_runtime_python",
+        "guard_pytest_cwd",
+        "find_project_root",
+        "ensure_src_on_path",
+        "split_launch_argv",
+        "is_oneshot",
+        "under_systemd",
+        "should_supervise",
+        "key_status",
+        "lock_status",
+        "kill_status",
+        "evaluate_live_guard",
+        "apply_cli_dry_run",
+        "env_file_from_argv",
+        "program_inventory_lines",
+        "diagnostics_lines",
+        "print_diagnostics",
+        "classify_exit",
+        "child_command",
+        "run_self_test",
+        "run_child",
+        "supervise_loop",
+        "build_parser",
+        "_usage_epilog",
+        "main"
+      ],
+      "parse_error": ""
+    },
+    "src/bitbank_bot/logging_setup.py": {
+      "imports": [
+        "__future__",
+        "datetime",
+        "json",
+        "logging",
+        "logging.handlers",
+        "pathlib",
+        "re",
+        "sys",
+        "typing"
+      ],
+      "classes": [
+        "_RedactFilter"
+      ],
+      "functions": [
+        "redact",
+        "_RedactFilter.filter",
+        "setup_logging",
+        "slog"
+      ],
+      "parse_error": ""
+    },
+    "src/bitbank_bot/main.py": {
+      "imports": [
+        "__future__",
+        "argparse",
+        "bitbank_bot.api_client",
+        "bitbank_bot.backtest",
+        "bitbank_bot.config",
+        "bitbank_bot.engine",
+        "bitbank_bot.instance_lock",
+        "bitbank_bot.logging_setup",
+        "bitbank_bot.market_data",
+        "bitbank_bot.preflight",
+        "bitbank_bot.screen",
+        "bitbank_bot.smoke_order",
+        "sys"
+      ],
+      "classes": [],
+      "functions": [
+        "build_parser",
+        "_parser",
+        "main",
+        "cli"
+      ],
+      "parse_error": ""
+    },
+    "src/bitbank_bot/market_data.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.config",
+        "bitbank_bot.logging_setup",
+        "bitbank_bot.money",
+        "bitbank_bot.rest_client",
+        "dataclasses",
+        "datetime",
+        "decimal",
+        "typing"
+      ],
+      "classes": [
+        "Candle",
+        "CandleFetchResult",
+        "CandleCache"
+      ],
+      "functions": [
+        "as_jst",
+        "shift_years",
+        "candle_date_key",
+        "candle_date_keys",
+        "parse_ohlcv",
+        "_log_candle_api_error",
+        "fetch_candles_detailed",
+        "fetch_candles",
+        "drop_incomplete_candle",
+        "candles_are_fresh",
+        "ticker_close_mismatch",
+        "CandleCache.__init__",
+        "CandleCache.merge",
+        "synthetic_candles"
+      ],
+      "parse_error": ""
+    },
+    "src/bitbank_bot/money.py": {
+      "imports": [
+        "__future__",
+        "decimal",
+        "typing"
+      ],
+      "classes": [],
+      "functions": [
+        "D",
+        "to_decimal",
+        "ensure_decimal",
+        "truncate",
+        "floor_btc",
+        "quantize_price",
+        "jpy_tick",
+        "meets_min_amount",
+        "pct_offset"
+      ],
+      "parse_error": ""
+    },
+    "src/bitbank_bot/multi_timeframe.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.config",
+        "bitbank_bot.indicators",
+        "bitbank_bot.logging_setup",
+        "bitbank_bot.market_data",
+        "bitbank_bot.rest_client",
+        "dataclasses",
+        "datetime",
+        "decimal"
+      ],
+      "classes": [
+        "HtfVerdict"
+      ],
+      "functions": [
+        "_fetch_type",
+        "_trend_of",
+        "evaluate_htf",
+        "synthetic_htf_ok"
+      ],
+      "parse_error": ""
+    },
+    "src/bitbank_bot/orders.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.amounts",
+        "bitbank_bot.config",
+        "bitbank_bot.logging_setup",
+        "bitbank_bot.money",
+        "bitbank_bot.rest_client",
+        "bitbank_bot.strategy",
+        "dataclasses",
+        "decimal",
+        "typing",
+        "uuid"
+      ],
+      "classes": [
+        "OrderClient",
+        "OrderResult",
+        "OrderExecutor"
+      ],
+      "functions": [
+        "_fill_status",
+        "_execution_jpy",
+        "OrderClient.get_active_orders",
+        "OrderClient.get_order",
+        "OrderClient.create_order",
+        "OrderExecutor.__init__",
+        "OrderExecutor.active_orders",
+        "OrderExecutor._refresh_order",
+        "OrderExecutor.place",
+        "OrderExecutor._recover_unconfirmed_submit",
+        "OrderExecutor.poll"
+      ],
+      "parse_error": ""
+    },
+    "src/bitbank_bot/preflight.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.config",
+        "bitbank_bot.logging_setup",
+        "bitbank_bot.money",
+        "bitbank_bot.rest_client",
+        "dataclasses",
+        "pathlib",
+        "shutil",
+        "sys"
+      ],
+      "classes": [
+        "PreflightResult"
+      ],
+      "functions": [
+        "_ensure_dir",
+        "preflight"
+      ],
+      "parse_error": ""
+    },
+    "src/bitbank_bot/pytest_plugin.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.launch",
+        "pytest"
+      ],
+      "classes": [],
+      "functions": [
+        "pytest_configure"
+      ],
+      "parse_error": ""
+    },
+    "src/bitbank_bot/rate_engine.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.config",
+        "bitbank_bot.indicators",
+        "bitbank_bot.logging_setup",
+        "bitbank_bot.market_data",
+        "bitbank_bot.money",
+        "bitbank_bot.strategy",
+        "dataclasses",
+        "decimal"
+      ],
+      "classes": [
+        "RateDecision",
+        "RateEngine"
+      ],
+      "functions": [
+        "_clamp",
+        "_strategy_tp",
+        "_atr_pct",
+        "_regime",
+        "_dynamic_params",
+        "RateEngine.__init__",
+        "RateEngine.decide"
+      ],
+      "parse_error": ""
+    },
+    "src/bitbank_bot/reconciliation.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.config",
+        "bitbank_bot.logging_setup",
+        "bitbank_bot.money",
+        "bitbank_bot.rest_client",
+        "dataclasses",
+        "decimal",
+        "typing"
+      ],
+      "classes": [
+        "ReconcileClient",
+        "ReconcileReport"
+      ],
+      "functions": [
+        "ReconcileClient.free_amount",
+        "ReconcileClient.get_active_orders",
+        "ReconcileClient.get_order",
+        "_order_status",
+        "locked_sell_btc",
+        "reconcile"
+      ],
+      "parse_error": ""
+    },
+    "src/bitbank_bot/rest_client.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.logging_setup",
+        "bitbank_bot.money",
+        "collections",
+        "decimal",
+        "hashlib",
+        "hmac",
+        "httpx",
+        "json",
+        "random",
+        "threading",
+        "time",
+        "typing",
+        "urllib.parse"
+      ],
+      "classes": [
+        "BitbankAPIError",
+        "RateLimiter",
+        "RestClient"
+      ],
+      "functions": [
+        "BitbankAPIError.__init__",
+        "is_auth_error",
+        "_as_dict",
+        "coerce_active_orders",
+        "dump_json",
+        "sign_access_time_window",
+        "get_sign_payload",
+        "RateLimiter.__init__",
+        "RateLimiter.wait",
+        "_backoff_seconds",
+        "RestClient.__init__",
+        "RestClient.close",
+        "RestClient.__enter__",
+        "RestClient.__exit__",
+        "RestClient._request",
+        "RestClient.public_get",
+        "RestClient.get_ticker",
+        "RestClient.get_candlestick",
+        "RestClient.get_spot_status",
+        "RestClient._private_headers",
+        "RestClient.private_get",
+        "RestClient.private_post",
+        "RestClient.get_assets",
+        "RestClient.free_amount",
+        "RestClient.get_order",
+        "RestClient.get_trade_history",
+        "RestClient.create_order",
+        "RestClient.get_active_orders"
+      ],
+      "parse_error": ""
+    },
+    "src/bitbank_bot/risk.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.config",
+        "bitbank_bot.logging_setup",
+        "bitbank_bot.money",
+        "dataclasses",
+        "datetime",
+        "decimal",
+        "pathlib"
+      ],
+      "classes": [
+        "RiskDecision",
+        "RiskManager"
+      ],
+      "functions": [
+        "jst_today",
+        "jst_date_from_ms",
+        "RiskManager.__init__",
+        "RiskManager.set_as_of",
+        "RiskManager._today",
+        "RiskManager._roll_day",
+        "RiskManager._daily_halt_reason",
+        "RiskManager.operator_killed",
+        "RiskManager.halt_reason",
+        "RiskManager.killed",
+        "RiskManager.note_auth_failure",
+        "RiskManager.note_api_error",
+        "RiskManager.note_api_ok",
+        "RiskManager.update_equity",
+        "RiskManager.record_realized_pnl",
+        "RiskManager.check_stale",
+        "RiskManager.check_buy",
+        "RiskManager.check_sell"
+      ],
+      "parse_error": ""
+    },
+    "src/bitbank_bot/screen.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.money",
+        "dataclasses",
+        "datetime",
+        "shutil",
+        "sys",
+        "typing"
+      ],
+      "classes": [
+        "ScreenView",
+        "TradingScreen"
+      ],
+      "functions": [
+        "_commas",
+        "format_screen",
+        "TradingScreen.__init__",
+        "TradingScreen.boot",
+        "TradingScreen.render",
+        "TradingScreen._write",
+        "view_from_engine",
+        "should_use_screen"
+      ],
+      "parse_error": ""
+    },
+    "src/bitbank_bot/smoke_order.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.amounts",
+        "bitbank_bot.config",
+        "bitbank_bot.logging_setup",
+        "bitbank_bot.market_data",
+        "bitbank_bot.risk",
+        "bitbank_bot.strategy",
+        "bitbank_bot.trade_signal_executor"
+      ],
+      "classes": [],
+      "functions": [
+        "run_smoke_order"
+      ],
+      "parse_error": ""
+    },
+    "src/bitbank_bot/strategy.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.config",
+        "bitbank_bot.indicators",
+        "bitbank_bot.logging_setup",
+        "bitbank_bot.money",
+        "dataclasses",
+        "decimal",
+        "typing"
+      ],
+      "classes": [
+        "MarketSnapshot",
+        "Position",
+        "Signal",
+        "Buy3Machine",
+        "Buy4Machine",
+        "Sell1Machine",
+        "Sell2Machine",
+        "Sell4Machine",
+        "Strategy"
+      ],
+      "functions": [
+        "Signal.hold",
+        "_is_same_entry_candle",
+        "Buy3Machine.__init__",
+        "Buy3Machine.reset",
+        "Buy3Machine.update",
+        "Buy4Machine.__init__",
+        "Buy4Machine.update",
+        "Sell1Machine.__init__",
+        "Sell1Machine.update",
+        "Sell2Machine.__init__",
+        "Sell2Machine.update",
+        "Sell4Machine.__init__",
+        "Sell4Machine.update",
+        "Strategy.__init__",
+        "Strategy.observe",
+        "Strategy.evaluate",
+        "Strategy._tp_signal",
+        "Strategy._sell_signal",
+        "Strategy._buy_signal",
+        "Strategy._log_buy_gate",
+        "Strategy._log_sell_gate",
+        "build_snapshots"
+      ],
+      "parse_error": ""
+    },
+    "src/bitbank_bot/trade_signal_executor.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.amounts",
+        "bitbank_bot.config",
+        "bitbank_bot.execution_gate",
+        "bitbank_bot.logging_setup",
+        "bitbank_bot.market_data",
+        "bitbank_bot.orders",
+        "bitbank_bot.rate_engine",
+        "bitbank_bot.risk",
+        "bitbank_bot.strategy",
+        "dataclasses",
+        "typing",
+        "uuid"
+      ],
+      "classes": [
+        "SubmitOutcome",
+        "TradeSignalExecutor"
+      ],
+      "functions": [
+        "TradeSignalExecutor.__init__",
+        "TradeSignalExecutor._open_order_conflict",
+        "TradeSignalExecutor.submit"
+      ],
+      "parse_error": ""
+    },
+    "src/bitbank_bot/watchdog.py": {
+      "imports": [
+        "__future__",
+        "dataclasses"
+      ],
+      "classes": [
+        "WatchdogReport"
+      ],
+      "functions": [
+        "classify",
+        "root_cause_code"
+      ],
+      "parse_error": ""
+    },
+    "src/bitbank_bot/websocket_client.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.logging_setup",
+        "bitbank_bot.money",
+        "json",
+        "logging",
+        "random",
+        "threading",
+        "time",
+        "typing",
+        "websockets",
+        "websockets.sync.client"
+      ],
+      "classes": [
+        "BitbankWebsocket"
+      ],
+      "functions": [
+        "BitbankWebsocket.__init__",
+        "BitbankWebsocket.start",
+        "BitbankWebsocket.stop",
+        "BitbankWebsocket.is_stale",
+        "BitbankWebsocket.is_connected",
+        "BitbankWebsocket.last_price",
+        "BitbankWebsocket._run_forever",
+        "BitbankWebsocket._session",
+        "BitbankWebsocket._handle_42"
+      ],
+      "parse_error": ""
+    },
+    "tests/__init__.py": {
+      "imports": [
+        "__future__"
+      ],
+      "classes": [],
+      "functions": [],
+      "parse_error": ""
+    },
+    "tests/conftest.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.launch",
+        "pytest"
+      ],
+      "classes": [],
+      "functions": [
+        "pytest_configure"
+      ],
+      "parse_error": ""
+    },
+    "tests/helpers.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.config",
+        "bitbank_bot.money",
+        "bitbank_bot.risk",
+        "decimal"
+      ],
+      "classes": [],
+      "functions": [
+        "cfg",
+        "risk",
+        "dec"
+      ],
+      "parse_error": ""
+    },
+    "tests/test_amounts.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.amounts",
+        "decimal",
+        "tests.helpers"
+      ],
+      "classes": [],
+      "functions": [
+        "test_buy_from_free_jpy_floors_to_lot",
+        "test_buy_insufficient_jpy",
+        "test_buy_below_min_rejected",
+        "test_buy_invalid_price",
+        "test_sell_flattens_free_btc",
+        "test_sell_flattens_min_lot_dust",
+        "test_sizer_class_matches_functions",
+        "test_string_balances_from_api",
+        "test_apply_size_mult_shrinks_buy_only"
+      ],
+      "parse_error": ""
+    },
+    "tests/test_api_client.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.api_client",
+        "bitbank_bot.engine",
+        "bitbank_bot.rest_client",
+        "tests.helpers",
+        "unittest.mock"
+      ],
+      "classes": [],
+      "functions": [
+        "test_facade_create_order_requires_live_confirmed",
+        "test_from_config_uses_cfg_urls",
+        "test_engine_unwraps_api_client"
+      ],
+      "parse_error": ""
+    },
+    "tests/test_audit.py": {
+      "imports": [
+        "__future__",
+        "importlib.util",
+        "pathlib",
+        "tests.helpers",
+        "unittest.mock"
+      ],
+      "classes": [],
+      "functions": [
+        "_load_audit",
+        "test_audit_source_does_not_call_create_order",
+        "test_audit_public_only_when_no_keys",
+        "test_audit_with_keys_reads_private_gets_only"
+      ],
+      "parse_error": ""
+    },
+    "tests/test_backtest.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.backtest",
+        "bitbank_bot.market_data",
+        "decimal",
+        "tests.helpers"
+      ],
+      "classes": [],
+      "functions": [
+        "test_backtest_synthetic_runs",
+        "test_backtest_buy_then_tp"
+      ],
+      "parse_error": ""
+    },
+    "tests/test_candle_fetch.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.market_data",
+        "bitbank_bot.rest_client",
+        "datetime",
+        "decimal",
+        "pytest",
+        "tests.helpers",
+        "typing"
+      ],
+      "classes": [
+        "_CandleClient"
+      ],
+      "functions": [
+        "_CandleClient.__init__",
+        "_CandleClient.get_candlestick",
+        "test_latest_only_includes_yesterday_for_5min",
+        "test_fetch_logs_error_and_raises_when_all_keys_fail",
+        "test_fetch_keeps_real_rows_when_one_date_fails",
+        "test_cache_does_not_merge_synthetic",
+        "test_utc_now_uses_jst_date_key",
+        "test_lookback_zero_still_includes_today_and_yesterday",
+        "test_naive_datetime_is_treated_as_jst",
+        "test_ticker_close_mismatch_and_freshness",
+        "test_shift_years_leap_day_does_not_raise",
+        "test_long_candle_keys_on_leap_day",
+        "test_incomplete_drop_uses_injected_now"
+      ],
+      "parse_error": ""
+    },
+    "tests/test_code_audit.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.code_audit",
+        "pathlib"
+      ],
+      "classes": [],
+      "functions": [
+        "test_src_create_order_calls_are_only_order_path",
+        "test_completion_percent_excludes_live_post",
+        "test_source_dump_excludes_env_and_is_not_executable",
+        "test_write_ast_reports"
+      ],
+      "parse_error": ""
+    },
+    "tests/test_config.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.config",
+        "decimal",
+        "pathlib",
+        "pytest"
+      ],
+      "classes": [],
+      "functions": [
+        "test_default_is_dry_run",
+        "test_rate_mode_and_reconcile_every_cycles_from_env",
+        "test_env_example_documents_rate_mode_and_reconcile",
+        "test_htf_filter_env",
+        "test_pair_normalize_and_reject",
+        "test_dual_flag_required_for_live",
+        "test_trading_mode_live_without_confirm_is_live_ready",
+        "test_trading_mode_live_dual_auth",
+        "test_signal_only_maps_to_live_ready",
+        "test_default_resolved_mode_is_dry_run",
+        "test_legacy_live_flags_without_confirm_are_live_ready",
+        "test_balance_usage_alias",
+        "test_repr_hides_secret"
+      ],
+      "parse_error": ""
+    },
+    "tests/test_engine.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.engine",
+        "bitbank_bot.market_data",
+        "bitbank_bot.multi_timeframe",
+        "bitbank_bot.preflight",
+        "bitbank_bot.reconciliation",
+        "bitbank_bot.risk",
+        "bitbank_bot.strategy",
+        "decimal",
+        "json",
+        "tests.helpers",
+        "time",
+        "typing",
+        "unittest.mock"
+      ],
+      "classes": [
+        "FakeRest"
+      ],
+      "functions": [
+        "FakeRest.__init__",
+        "FakeRest.get_ticker",
+        "FakeRest.get_spot_status",
+        "FakeRest.get_assets",
+        "FakeRest.get_candlestick",
+        "FakeRest.create_order",
+        "FakeRest.close",
+        "test_parse_ohlcv_strings",
+        "test_parse_ohlcv_json_numbers",
+        "test_synthetic_enough_for_ma",
+        "test_preflight_dry_run_ok",
+        "test_preflight_honors_exchange_min",
+        "test_engine_synthetic_once_dry_run",
+        "test_engine_loop_continues_after_hold",
+        "test_dry_run_loop_without_api_keys_when_public_fails",
+        "test_preflight_dry_run_no_keys_public_fail_does_not_abort",
+        "test_engine_catchup_evaluates_missed_closed_bars",
+        "test_engine_skips_order_when_balance_fetch_fails",
+        "test_load_state_without_file_has_no_pending",
+        "test_engine_long_wait_after_timeout",
+        "test_htf_blocks_buy_without_placing",
+        "test_pending_unfilled_is_persisted_and_polled",
+        "test_engine_clears_canceled_pending_from_reconcile",
+        "test_engine_polls_pending_filled_unapplied",
+        "test_pending_dataclass_roundtrip",
+        "test_dry_run_sell_uses_position_amount",
+        "test_partial_fill_keeps_pending",
+        "test_live_execute_blocked_when_market_data_not_real",
+        "test_explicit_synthetic_loop_does_not_mark_cache_real",
+        "test_failed_order_result_does_not_claim_manager_ok",
+        "test_poll_missing_average_price_keeps_pending",
+        "test_save_state_is_atomic"
+      ],
+      "parse_error": ""
+    },
+    "tests/test_execution_gate.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.execution_gate",
+        "bitbank_bot.strategy",
+        "decimal",
+        "tests.helpers"
+      ],
+      "classes": [],
+      "functions": [
+        "_ctx",
+        "test_gate_allows_dry_run_real_data",
+        "test_gate_blocks_synthetic_market_data",
+        "test_gate_blocks_stale_and_ticker_mismatch",
+        "test_gate_blocks_kill_and_duplicate",
+        "test_live_ready_still_requires_real_data"
+      ],
+      "parse_error": ""
+    },
+    "tests/test_launch.py": {
+      "imports": [
+        "__future__",
+        "ast",
+        "bitbank_bot.config",
+        "bitbank_bot.launch",
+        "bitbank_bot.logging_setup",
+        "logging",
+        "logging.handlers",
+        "os",
+        "pathlib",
+        "subprocess",
+        "sys"
+      ],
+      "classes": [],
+      "functions": [
+        "test_find_project_root_does_not_use_hardcoded_home",
+        "test_diagnostics_hide_secrets_and_show_modes",
+        "test_live_guard_demotes_without_phrase",
+        "test_live_guard_allows_dual_auth_but_tests_do_not_post",
+        "test_should_supervise_skips_oneshot_and_systemd",
+        "test_supervise_does_not_restart_fatal_config",
+        "test_supervise_does_not_restart_fatal_config.run_fn",
+        "test_supervise_restarts_once_on_crash",
+        "test_supervise_restarts_once_on_crash.run_fn",
+        "test_launch_help",
+        "test_launch_check_config",
+        "test_start_sh_help_smoke",
+        "test_launch_once_synthetic_no_order_post",
+        "test_rotating_log_handler",
+        "test_launch_py_has_no_smart_quotes_and_parses",
+        "test_looks_like_pytest_paste_and_repo_cwd",
+        "test_launch_rejects_pytest_paste",
+        "test_launch_from_outside_repo_chdirs_and_runs",
+        "test_launch_help_works_outside_repo",
+        "test_start_sh_copy_outside_repo_says_cd_first",
+        "test_run_bot_sh_help_from_other_cwd",
+        "test_run_bot_sh_help_from_repo",
+        "test_start_sh_help_does_not_advertise_pytest_as_launch",
+        "test_home_start_from_tmp_says_cd_first",
+        "test_home_start_finds_common_clone_name",
+        "test_install_alias_then_home_start_sh",
+        "test_resolve_runtime_python_prefers_venv",
+        "test_resolve_runtime_python_prefers_venv.exists_fn",
+        "test_resolve_runtime_python_fallback_ignores_cwd",
+        "test_start_sh_absolute_path_help_from_other_cwd",
+        "test_start_sh_absolute_path_check_config_from_other_cwd",
+        "test_guard_pytest_cwd_from_home",
+        "test_pytest_plugin_from_foreign_cwd_prints_error",
+        "test_run_tests_sh_cds_to_repo",
+        "test_run_tests_sh_copy_outside_repo_says_cd_first",
+        "test_start_sh_self_test_collect_only",
+        "test_start_sh_self_test_from_other_cwd"
+      ],
+      "parse_error": ""
+    },
+    "tests/test_logging.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.logging_setup"
+      ],
+      "classes": [],
+      "functions": [
+        "test_has_api_secret_not_redacted_in_key_name",
+        "test_hmac_hex_redacted",
+        "test_slog_safe_dict_keys"
+      ],
+      "parse_error": ""
+    },
+    "tests/test_market_data.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.market_data",
+        "decimal"
+      ],
+      "classes": [],
+      "functions": [
+        "test_cache_merge_by_timestamp",
+        "test_drop_incomplete",
+        "test_parse_uses_decimal"
+      ],
+      "parse_error": ""
+    },
+    "tests/test_money.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.money",
+        "decimal",
+        "pytest"
+      ],
+      "classes": [],
+      "functions": [
+        "test_d_parses_exchange_strings",
+        "test_non_finite_float_rejected",
+        "test_bool_rejected",
+        "test_empty_strict",
+        "test_ensure_decimal_names_the_field",
+        "test_invalid_string",
+        "test_floor_btc_min_lot",
+        "test_truncate_and_min"
+      ],
+      "parse_error": ""
+    },
+    "tests/test_multi_timeframe.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.market_data",
+        "bitbank_bot.multi_timeframe",
+        "decimal",
+        "tests.helpers",
+        "typing"
+      ],
+      "classes": [
+        "HtfRest"
+      ],
+      "functions": [
+        "_bars",
+        "_rows",
+        "HtfRest.__init__",
+        "HtfRest.get_candlestick",
+        "test_both_down_blocks_buy",
+        "test_mixed_trends_allow_buy",
+        "test_missing_htf_blocks_buy"
+      ],
+      "parse_error": ""
+    },
+    "tests/test_orders.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.amounts",
+        "bitbank_bot.orders",
+        "bitbank_bot.rest_client",
+        "bitbank_bot.strategy",
+        "decimal",
+        "tests.helpers",
+        "typing",
+        "unittest.mock"
+      ],
+      "classes": [],
+      "functions": [
+        "_plan",
+        "test_dry_run_never_calls_create_order",
+        "test_dry_run_intent_only_when_simulate_off",
+        "test_bad_plan_does_not_order",
+        "test_live_path_requires_dual_flag_and_confirms",
+        "test_live_unfilled_refreshes_order",
+        "test_active_orders_block_live",
+        "test_place_rejects_non_finite_amount",
+        "test_poll_fill",
+        "test_poll_unfilled",
+        "test_poll_partial_stays_open",
+        "test_live_ready_logs_would_submit_without_create_order",
+        "test_submit_timeout_does_not_repost",
+        "test_empty_dict_active_orders_does_not_block_live",
+        "test_orders_envelope_empty_does_not_block_live",
+        "test_id_map_active_orders_block_live",
+        "test_unreadable_active_orders_refuse_live",
+        "test_poll_failed",
+        "test_poll_executed_without_average_price_stays_unfilled",
+        "test_place_fill_without_average_price_is_pending"
+      ],
+      "parse_error": ""
+    },
+    "tests/test_public_smoke.py": {
+      "imports": [
+        "__future__",
+        "httpx"
+      ],
+      "classes": [],
+      "functions": [
+        "test_public_ticker_btc_jpy"
+      ],
+      "parse_error": ""
+    },
+    "tests/test_rate_engine.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.market_data",
+        "bitbank_bot.rate_engine",
+        "bitbank_bot.strategy",
+        "datetime",
+        "decimal",
+        "tests.helpers"
+      ],
+      "classes": [],
+      "functions": [
+        "test_fixed_preserves_strategy_tps",
+        "test_dynamic_halts_on_stale_or_empty_atr",
+        "test_auto_falls_back_to_fixed",
+        "_wide_range_candles",
+        "test_dynamic_scales_tp_and_shrinks_size_on_high_atr",
+        "test_auto_uses_fixed_in_range_regime"
+      ],
+      "parse_error": ""
+    },
+    "tests/test_reconciliation.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.reconciliation",
+        "decimal",
+        "tests.helpers",
+        "unittest.mock"
+      ],
+      "classes": [],
+      "functions": [
+        "test_reconcile_ok_when_balances_match",
+        "test_reconcile_mismatch_btc_and_pending",
+        "test_reconcile_skips_without_keys",
+        "test_reconcile_flags_bitbank_btc_when_local_is_flat",
+        "test_reconcile_flags_pending_filled_unapplied",
+        "test_reconcile_bitbank_canceled_unfilled_is_pending_missing",
+        "test_reconcile_id_map_orders_do_not_crash",
+        "test_reconcile_counts_locked_sell_btc_toward_position"
+      ],
+      "parse_error": ""
+    },
+    "tests/test_rest_retry.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.rest_client",
+        "httpx",
+        "pytest",
+        "threading",
+        "time",
+        "unittest.mock"
+      ],
+      "classes": [],
+      "functions": [
+        "test_create_order_does_not_retry_post",
+        "test_create_order_does_not_retry_post.handler",
+        "test_coerce_active_orders_empty_and_unknown",
+        "test_get_ticker_rejects_non_object_data",
+        "test_get_ticker_rejects_non_object_data.handler",
+        "test_get_active_orders_normalizes_empty_dict",
+        "test_get_active_orders_normalizes_empty_dict.handler",
+        "test_rate_limiter_query_sleep_does_not_block_update"
+      ],
+      "parse_error": ""
+    },
+    "tests/test_rest_sign.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.rest_client",
+        "tests.helpers"
+      ],
+      "classes": [],
+      "functions": [
+        "test_sign_is_hmac_sha256_hex",
+        "test_official_time_window_sample",
+        "test_get_sign_payload_includes_v1",
+        "test_create_order_refuses_without_live_confirmed",
+        "test_cfg_pair_used"
+      ],
+      "parse_error": ""
+    },
+    "tests/test_risk.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.risk",
+        "decimal",
+        "pathlib",
+        "tests.helpers"
+      ],
+      "classes": [],
+      "functions": [
+        "test_daily_pnl_floor_blocks_buy_not_sell",
+        "test_kill_file_blocks",
+        "test_max_position",
+        "test_daily_halt_resets_next_jst_day"
+      ],
+      "parse_error": ""
+    },
+    "tests/test_run_py.py": {
+      "imports": [
+        "__future__",
+        "os",
+        "pathlib",
+        "subprocess",
+        "sys"
+      ],
+      "classes": [],
+      "functions": [
+        "test_run_py_compiles",
+        "test_run_py_once_synthetic_no_deps",
+        "test_run_py_works_without_repo_src",
+        "test_start_sh_falls_back_to_run_py"
+      ],
+      "parse_error": ""
+    },
+    "tests/test_screen.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.main",
+        "bitbank_bot.screen",
+        "io"
+      ],
+      "classes": [],
+      "functions": [
+        "test_format_screen_is_trading_dashboard",
+        "test_should_use_screen_tty_default",
+        "test_trading_screen_boot_and_render",
+        "test_screen_cli_prints_dashboard"
+      ],
+      "parse_error": ""
+    },
+    "tests/test_smoke_order.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.config",
+        "bitbank_bot.main",
+        "bitbank_bot.smoke_order",
+        "os",
+        "pathlib",
+        "subprocess",
+        "sys",
+        "tests.helpers"
+      ],
+      "classes": [],
+      "functions": [
+        "test_smoke_order_simulated_fill",
+        "test_smoke_order_refuses_live",
+        "test_smoke_order_cli_never_posts",
+        "test_launch_smoke_order_from_other_cwd",
+        "test_launch_bot_py_smoke_order_without_pythonpath",
+        "test_run_transaction_sh_from_other_cwd",
+        "test_start_sh_smoke_order_from_other_cwd"
+      ],
+      "parse_error": ""
+    },
+    "tests/test_startup.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.config",
+        "bitbank_bot.main",
+        "os",
+        "pathlib",
+        "py_compile",
+        "subprocess",
+        "sys"
+      ],
+      "classes": [],
+      "functions": [
+        "test_compileall_src",
+        "test_check_config_exit_zero",
+        "test_default_cli_is_continuous_loop_not_once",
+        "test_synthetic_does_not_imply_once",
+        "test_start_sh_is_venv_loop_launcher",
+        "test_trading_modes_file_compiles_without_stray_paren",
+        "test_loop_cli_exits_after_max_cycles",
+        "test_load_config_default_pair",
+        "test_main_py_runs_without_pythonpath",
+        "test_audit_script_runs_without_pythonpath"
+      ],
+      "parse_error": ""
+    },
+    "tests/test_strategy.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.indicators",
+        "bitbank_bot.money",
+        "bitbank_bot.strategy",
+        "decimal",
+        "tests.helpers"
+      ],
+      "classes": [],
+      "functions": [
+        "test_sma_period",
+        "test_ma_trend_threshold",
+        "test_interpolate_crossover",
+        "_snaps_from_closes",
+        "test_buy1_after_downtrend_cross_up",
+        "test_hold_in_position_same_candle",
+        "test_same_entry_uses_timestamp_not_shifted_index",
+        "test_take_profit_sells",
+        "test_hold_requires_reason",
+        "test_hold_logs_buy_gate_breakdown",
+        "test_sell3_on_upcross_in_downtrend"
+      ],
+      "parse_error": ""
+    },
+    "tests/test_trade_signal_executor.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.amounts",
+        "bitbank_bot.market_data",
+        "bitbank_bot.strategy",
+        "bitbank_bot.trade_signal_executor",
+        "decimal",
+        "tests.helpers"
+      ],
+      "classes": [
+        "_ConflictClient"
+      ],
+      "functions": [
+        "_ConflictClient.__init__",
+        "_ConflictClient.get_active_orders",
+        "test_submit_blocks_when_bitbank_has_open_orders",
+        "test_submit_reaches_order_executor_on_matching_buy"
+      ],
+      "parse_error": ""
+    },
+    "tests/test_trading_modes.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.config"
+      ],
+      "classes": [],
+      "functions": [
+        "test_defaults_are_not_live",
+        "test_live_without_confirm_is_live_ready",
+        "test_live_dual_authorized"
+      ],
+      "parse_error": ""
+    },
+    "tests/test_watchdog.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.watchdog"
+      ],
+      "classes": [],
+      "functions": [
+        "test_hold_under_timeout_is_normal_wait",
+        "test_hold_over_timeout_is_long_wait_not_fail",
+        "test_fail_reason_wins",
+        "test_missing_market_is_fail",
+        "test_strategy_never_ran_after_timeout_is_fail",
+        "test_buy_or_sell_is_signal",
+        "test_root_cause_codes"
+      ],
+      "parse_error": ""
+    },
+    "tests/test_websocket.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.websocket_client",
+        "builtins",
+        "unittest.mock"
+      ],
+      "classes": [],
+      "functions": [
+        "test_ws_not_stale_before_first_event",
+        "test_start_without_websockets_does_not_raise",
+        "test_start_without_websockets_does_not_raise.fake_import"
+      ],
+      "parse_error": ""
+    }
+  },
+  "imported_by": {
+    "__future__": [
+      "diagnostics.py",
+      "launch_bot.py",
+      "main.py",
+      "run.py",
+      "scripts/analyze_ast.py",
+      "scripts/bitbank_execution_audit.py",
+      "scripts/completion_percent.py",
+      "scripts/dump_all_source.py",
+      "src/bitbank_bot/__init__.py",
+      "src/bitbank_bot/__main__.py",
+      "src/bitbank_bot/amounts.py",
+      "src/bitbank_bot/api_client.py",
+      "src/bitbank_bot/backtest.py",
+      "src/bitbank_bot/code_audit.py",
+      "src/bitbank_bot/config.py",
+      "src/bitbank_bot/engine.py",
+      "src/bitbank_bot/execution_gate.py",
+      "src/bitbank_bot/indicators.py",
+      "src/bitbank_bot/instance_lock.py",
+      "src/bitbank_bot/launch.py",
+      "src/bitbank_bot/logging_setup.py",
+      "src/bitbank_bot/main.py",
+      "src/bitbank_bot/market_data.py",
+      "src/bitbank_bot/money.py",
+      "src/bitbank_bot/multi_timeframe.py",
+      "src/bitbank_bot/orders.py",
+      "src/bitbank_bot/preflight.py",
+      "src/bitbank_bot/pytest_plugin.py",
+      "src/bitbank_bot/rate_engine.py",
+      "src/bitbank_bot/reconciliation.py",
+      "src/bitbank_bot/rest_client.py",
+      "src/bitbank_bot/risk.py",
+      "src/bitbank_bot/screen.py",
+      "src/bitbank_bot/smoke_order.py",
+      "src/bitbank_bot/strategy.py",
+      "src/bitbank_bot/trade_signal_executor.py",
+      "src/bitbank_bot/watchdog.py",
+      "src/bitbank_bot/websocket_client.py",
+      "tests/__init__.py",
+      "tests/conftest.py",
+      "tests/helpers.py",
+      "tests/test_amounts.py",
+      "tests/test_api_client.py",
+      "tests/test_audit.py",
+      "tests/test_backtest.py",
+      "tests/test_candle_fetch.py",
+      "tests/test_code_audit.py",
+      "tests/test_config.py",
+      "tests/test_engine.py",
+      "tests/test_execution_gate.py",
+      "tests/test_launch.py",
+      "tests/test_logging.py",
+      "tests/test_market_data.py",
+      "tests/test_money.py",
+      "tests/test_multi_timeframe.py",
+      "tests/test_orders.py",
+      "tests/test_public_smoke.py",
+      "tests/test_rate_engine.py",
+      "tests/test_reconciliation.py",
+      "tests/test_rest_retry.py",
+      "tests/test_rest_sign.py",
+      "tests/test_risk.py",
+      "tests/test_run_py.py",
+      "tests/test_screen.py",
+      "tests/test_smoke_order.py",
+      "tests/test_startup.py",
+      "tests/test_strategy.py",
+      "tests/test_trade_signal_executor.py",
+      "tests/test_trading_modes.py",
+      "tests/test_watchdog.py",
+      "tests/test_websocket.py"
+    ],
+    "dotenv": [
+      "diagnostics.py",
+      "src/bitbank_bot/config.py"
+    ],
+    "httpx": [
+      "diagnostics.py",
+      "main.py",
+      "src/bitbank_bot/rest_client.py",
+      "tests/test_public_smoke.py",
+      "tests/test_rest_retry.py"
+    ],
+    "json": [
+      "diagnostics.py",
+      "run.py",
+      "scripts/completion_percent.py",
+      "src/bitbank_bot/code_audit.py",
+      "src/bitbank_bot/engine.py",
+      "src/bitbank_bot/logging_setup.py",
+      "src/bitbank_bot/rest_client.py",
+      "src/bitbank_bot/websocket_client.py",
+      "tests/test_engine.py"
+    ],
+    "os": [
+      "diagnostics.py",
+      "src/bitbank_bot/config.py",
+      "src/bitbank_bot/instance_lock.py",
+      "src/bitbank_bot/launch.py",
+      "tests/test_launch.py",
+      "tests/test_run_py.py",
+      "tests/test_smoke_order.py",
+      "tests/test_startup.py"
+    ],
+    "pathlib": [
+      "diagnostics.py",
+      "launch_bot.py",
+      "main.py",
+      "scripts/analyze_ast.py",
+      "scripts/bitbank_execution_audit.py",
+      "scripts/completion_percent.py",
+      "scripts/dump_all_source.py",
+      "src/bitbank_bot/code_audit.py",
+      "src/bitbank_bot/config.py",
+      "src/bitbank_bot/engine.py",
+      "src/bitbank_bot/instance_lock.py",
+      "src/bitbank_bot/launch.py",
+      "src/bitbank_bot/logging_setup.py",
+      "src/bitbank_bot/preflight.py",
+      "src/bitbank_bot/risk.py",
+      "tests/test_audit.py",
+      "tests/test_code_audit.py",
+      "tests/test_config.py",
+      "tests/test_launch.py",
+      "tests/test_risk.py",
+      "tests/test_run_py.py",
+      "tests/test_smoke_order.py",
+      "tests/test_startup.py"
+    ],
+    "shutil": [
+      "diagnostics.py",
+      "src/bitbank_bot/preflight.py",
+      "src/bitbank_bot/screen.py"
+    ],
+    "subprocess": [
+      "diagnostics.py",
+      "src/bitbank_bot/launch.py",
+      "tests/test_launch.py",
+      "tests/test_run_py.py",
+      "tests/test_smoke_order.py",
+      "tests/test_startup.py"
+    ],
+    "sys": [
+      "diagnostics.py",
+      "launch_bot.py",
+      "main.py",
+      "run.py",
+      "scripts/analyze_ast.py",
+      "scripts/bitbank_execution_audit.py",
+      "scripts/completion_percent.py",
+      "scripts/dump_all_source.py",
+      "src/bitbank_bot/launch.py",
+      "src/bitbank_bot/logging_setup.py",
+      "src/bitbank_bot/main.py",
+      "src/bitbank_bot/preflight.py",
+      "src/bitbank_bot/screen.py",
+      "tests/test_launch.py",
+      "tests/test_run_py.py",
+      "tests/test_smoke_order.py",
+      "tests/test_startup.py"
+    ],
+    "bitbank_bot.launch": [
+      "launch_bot.py",
+      "main.py",
+      "src/bitbank_bot/pytest_plugin.py",
+      "tests/conftest.py",
+      "tests/test_launch.py"
+    ],
+    "sysconfig": [
+      "launch_bot.py"
+    ],
+    "importlib.util": [
+      "main.py",
+      "tests/test_audit.py"
+    ],
+    "argparse": [
+      "run.py",
+      "scripts/bitbank_execution_audit.py",
+      "src/bitbank_bot/launch.py",
+      "src/bitbank_bot/main.py"
+    ],
+    "datetime": [
+      "run.py",
+      "src/bitbank_bot/engine.py",
+      "src/bitbank_bot/logging_setup.py",
+      "src/bitbank_bot/market_data.py",
+      "src/bitbank_bot/multi_timeframe.py",
+      "src/bitbank_bot/risk.py",
+      "src/bitbank_bot/screen.py",
+      "tests/test_candle_fetch.py",
+      "tests/test_rate_engine.py"
+    ],
+    "decimal": [
+      "run.py",
+      "src/bitbank_bot/amounts.py",
+      "src/bitbank_bot/backtest.py",
+      "src/bitbank_bot/config.py",
+      "src/bitbank_bot/engine.py",
+      "src/bitbank_bot/execution_gate.py",
+      "src/bitbank_bot/indicators.py",
+      "src/bitbank_bot/market_data.py",
+      "src/bitbank_bot/money.py",
+      "src/bitbank_bot/multi_timeframe.py",
+      "src/bitbank_bot/orders.py",
+      "src/bitbank_bot/rate_engine.py",
+      "src/bitbank_bot/reconciliation.py",
+      "src/bitbank_bot/rest_client.py",
+      "src/bitbank_bot/risk.py",
+      "src/bitbank_bot/strategy.py",
+      "tests/helpers.py",
+      "tests/test_amounts.py",
+      "tests/test_backtest.py",
+      "tests/test_candle_fetch.py",
+      "tests/test_config.py",
+      "tests/test_engine.py",
+      "tests/test_execution_gate.py",
+      "tests/test_market_data.py",
+      "tests/test_money.py",
+      "tests/test_multi_timeframe.py",
+      "tests/test_orders.py",
+      "tests/test_rate_engine.py",
+      "tests/test_reconciliation.py",
+      "tests/test_risk.py",
+      "tests/test_strategy.py",
+      "tests/test_trade_signal_executor.py"
+    ],
+    "ssl": [
+      "run.py"
+    ],
+    "time": [
+      "run.py",
+      "src/bitbank_bot/engine.py",
+      "src/bitbank_bot/launch.py",
+      "src/bitbank_bot/rest_client.py",
+      "src/bitbank_bot/websocket_client.py",
+      "tests/test_engine.py",
+      "tests/test_rest_retry.py"
+    ],
+    "typing": [
+      "run.py",
+      "scripts/bitbank_execution_audit.py",
+      "src/bitbank_bot/api_client.py",
+      "src/bitbank_bot/code_audit.py",
+      "src/bitbank_bot/config.py",
+      "src/bitbank_bot/engine.py",
+      "src/bitbank_bot/indicators.py",
+      "src/bitbank_bot/logging_setup.py",
+      "src/bitbank_bot/market_data.py",
+      "src/bitbank_bot/money.py",
+      "src/bitbank_bot/orders.py",
+      "src/bitbank_bot/reconciliation.py",
+      "src/bitbank_bot/rest_client.py",
+      "src/bitbank_bot/screen.py",
+      "src/bitbank_bot/strategy.py",
+      "src/bitbank_bot/trade_signal_executor.py",
+      "src/bitbank_bot/websocket_client.py",
+      "tests/test_candle_fetch.py",
+      "tests/test_engine.py",
+      "tests/test_multi_timeframe.py",
+      "tests/test_orders.py"
+    ],
+    "urllib.error": [
+      "run.py"
+    ],
+    "urllib.request": [
+      "run.py"
+    ],
+    "bitbank_bot.code_audit": [
+      "scripts/analyze_ast.py",
+      "scripts/completion_percent.py",
+      "scripts/dump_all_source.py",
+      "tests/test_code_audit.py"
+    ],
+    "bitbank_bot.config": [
+      "scripts/bitbank_execution_audit.py",
+      "src/bitbank_bot/amounts.py",
+      "src/bitbank_bot/api_client.py",
+      "src/bitbank_bot/backtest.py",
+      "src/bitbank_bot/engine.py",
+      "src/bitbank_bot/execution_gate.py",
+      "src/bitbank_bot/launch.py",
+      "src/bitbank_bot/main.py",
+      "src/bitbank_bot/market_data.py",
+      "src/bitbank_bot/multi_timeframe.py",
+      "src/bitbank_bot/orders.py",
+      "src/bitbank_bot/preflight.py",
+      "src/bitbank_bot/rate_engine.py",
+      "src/bitbank_bot/reconciliation.py",
+      "src/bitbank_bot/risk.py",
+      "src/bitbank_bot/smoke_order.py",
+      "src/bitbank_bot/strategy.py",
+      "src/bitbank_bot/trade_signal_executor.py",
+      "tests/helpers.py",
+      "tests/test_config.py",
+      "tests/test_launch.py",
+      "tests/test_smoke_order.py",
+      "tests/test_startup.py",
+      "tests/test_trading_modes.py"
+    ],
+    "bitbank_bot.logging_setup": [
+      "scripts/bitbank_execution_audit.py",
+      "src/bitbank_bot/code_audit.py",
+      "src/bitbank_bot/engine.py",
+      "src/bitbank_bot/execution_gate.py",
+      "src/bitbank_bot/main.py",
+      "src/bitbank_bot/market_data.py",
+      "src/bitbank_bot/multi_timeframe.py",
+      "src/bitbank_bot/orders.py",
+      "src/bitbank_bot/preflight.py",
+      "src/bitbank_bot/rate_engine.py",
+      "src/bitbank_bot/reconciliation.py",
+      "src/bitbank_bot/rest_client.py",
+      "src/bitbank_bot/risk.py",
+      "src/bitbank_bot/smoke_order.py",
+      "src/bitbank_bot/strategy.py",
+      "src/bitbank_bot/trade_signal_executor.py",
+      "src/bitbank_bot/websocket_client.py",
+      "tests/test_launch.py",
+      "tests/test_logging.py"
+    ],
+    "bitbank_bot.rest_client": [
+      "scripts/bitbank_execution_audit.py",
+      "src/bitbank_bot/api_client.py",
+      "src/bitbank_bot/engine.py",
+      "src/bitbank_bot/market_data.py",
+      "src/bitbank_bot/multi_timeframe.py",
+      "src/bitbank_bot/orders.py",
+      "src/bitbank_bot/preflight.py",
+      "src/bitbank_bot/reconciliation.py",
+      "tests/test_api_client.py",
+      "tests/test_candle_fetch.py",
+      "tests/test_orders.py",
+      "tests/test_rest_retry.py",
+      "tests/test_rest_sign.py"
+    ],
+    "bitbank_bot.main": [
+      "src/bitbank_bot/__main__.py",
+      "src/bitbank_bot/launch.py",
+      "tests/test_screen.py",
+      "tests/test_smoke_order.py",
+      "tests/test_startup.py"
+    ],
+    "bitbank_bot.money": [
+      "src/bitbank_bot/amounts.py",
+      "src/bitbank_bot/backtest.py",
+      "src/bitbank_bot/config.py",
+      "src/bitbank_bot/engine.py",
+      "src/bitbank_bot/execution_gate.py",
+      "src/bitbank_bot/indicators.py",
+      "src/bitbank_bot/market_data.py",
+      "src/bitbank_bot/orders.py",
+      "src/bitbank_bot/preflight.py",
+      "src/bitbank_bot/rate_engine.py",
+      "src/bitbank_bot/reconciliation.py",
+      "src/bitbank_bot/rest_client.py",
+      "src/bitbank_bot/risk.py",
+      "src/bitbank_bot/screen.py",
+      "src/bitbank_bot/strategy.py",
+      "src/bitbank_bot/websocket_client.py",
+      "tests/helpers.py",
+      "tests/test_money.py",
+      "tests/test_strategy.py"
+    ],
+    "bitbank_bot.risk": [
+      "src/bitbank_bot/amounts.py",
+      "src/bitbank_bot/engine.py",
+      "src/bitbank_bot/smoke_order.py",
+      "src/bitbank_bot/trade_signal_executor.py",
+      "tests/helpers.py",
+      "tests/test_engine.py",
+      "tests/test_risk.py"
+    ],
+    "dataclasses": [
+      "src/bitbank_bot/amounts.py",
+      "src/bitbank_bot/backtest.py",
+      "src/bitbank_bot/code_audit.py",
+      "src/bitbank_bot/config.py",
+      "src/bitbank_bot/engine.py",
+      "src/bitbank_bot/execution_gate.py",
+      "src/bitbank_bot/launch.py",
+      "src/bitbank_bot/market_data.py",
+      "src/bitbank_bot/multi_timeframe.py",
+      "src/bitbank_bot/orders.py",
+      "src/bitbank_bot/preflight.py",
+      "src/bitbank_bot/rate_engine.py",
+      "src/bitbank_bot/reconciliation.py",
+      "src/bitbank_bot/risk.py",
+      "src/bitbank_bot/screen.py",
+      "src/bitbank_bot/strategy.py",
+      "src/bitbank_bot/trade_signal_executor.py",
+      "src/bitbank_bot/watchdog.py"
+    ],
+    "bitbank_bot.websocket_client": [
+      "src/bitbank_bot/api_client.py",
+      "src/bitbank_bot/engine.py",
+      "tests/test_websocket.py"
+    ],
+    "bitbank_bot.market_data": [
+      "src/bitbank_bot/backtest.py",
+      "src/bitbank_bot/engine.py",
+      "src/bitbank_bot/main.py",
+      "src/bitbank_bot/multi_timeframe.py",
+      "src/bitbank_bot/rate_engine.py",
+      "src/bitbank_bot/smoke_order.py",
+      "src/bitbank_bot/trade_signal_executor.py",
+      "tests/test_backtest.py",
+      "tests/test_candle_fetch.py",
+      "tests/test_engine.py",
+      "tests/test_market_data.py",
+      "tests/test_multi_timeframe.py",
+      "tests/test_rate_engine.py",
+      "tests/test_trade_signal_executor.py"
+    ],
+    "bitbank_bot.strategy": [
+      "src/bitbank_bot/backtest.py",
+      "src/bitbank_bot/engine.py",
+      "src/bitbank_bot/execution_gate.py",
+      "src/bitbank_bot/orders.py",
+      "src/bitbank_bot/rate_engine.py",
+      "src/bitbank_bot/smoke_order.py",
+      "src/bitbank_bot/trade_signal_executor.py",
+      "tests/test_engine.py",
+      "tests/test_execution_gate.py",
+      "tests/test_orders.py",
+      "tests/test_rate_engine.py",
+      "tests/test_strategy.py",
+      "tests/test_trade_signal_executor.py"
+    ],
+    "ast": [
+      "src/bitbank_bot/code_audit.py",
+      "tests/test_launch.py"
+    ],
+    "py_compile": [
+      "src/bitbank_bot/code_audit.py",
+      "tests/test_startup.py"
+    ],
+    "re": [
+      "src/bitbank_bot/code_audit.py",
+      "src/bitbank_bot/logging_setup.py"
+    ],
+    "bitbank_bot.amounts": [
+      "src/bitbank_bot/engine.py",
+      "src/bitbank_bot/orders.py",
+      "src/bitbank_bot/smoke_order.py",
+      "src/bitbank_bot/trade_signal_executor.py",
+      "tests/test_amounts.py",
+      "tests/test_orders.py",
+      "tests/test_trade_signal_executor.py"
+    ],
+    "bitbank_bot.api_client": [
+      "src/bitbank_bot/engine.py",
+      "src/bitbank_bot/main.py",
+      "tests/test_api_client.py"
+    ],
+    "bitbank_bot.multi_timeframe": [
+      "src/bitbank_bot/engine.py",
+      "tests/test_engine.py",
+      "tests/test_multi_timeframe.py"
+    ],
+    "bitbank_bot.orders": [
+      "src/bitbank_bot/engine.py",
+      "src/bitbank_bot/trade_signal_executor.py",
+      "tests/test_orders.py"
+    ],
+    "bitbank_bot.preflight": [
+      "src/bitbank_bot/engine.py",
+      "src/bitbank_bot/main.py",
+      "tests/test_engine.py"
+    ],
+    "bitbank_bot.reconciliation": [
+      "src/bitbank_bot/engine.py",
+      "tests/test_engine.py",
+      "tests/test_reconciliation.py"
+    ],
+    "bitbank_bot.screen": [
+      "src/bitbank_bot/engine.py",
+      "src/bitbank_bot/main.py",
+      "tests/test_screen.py"
+    ],
+    "bitbank_bot.trade_signal_executor": [
+      "src/bitbank_bot/engine.py",
+      "src/bitbank_bot/smoke_order.py",
+      "tests/test_trade_signal_executor.py"
+    ],
+    "bitbank_bot.watchdog": [
+      "src/bitbank_bot/engine.py",
+      "tests/test_watchdog.py"
+    ],
+    "logging": [
+      "src/bitbank_bot/engine.py",
+      "src/bitbank_bot/logging_setup.py",
+      "src/bitbank_bot/websocket_client.py",
+      "tests/test_launch.py"
+    ],
+    "signal": [
+      "src/bitbank_bot/engine.py"
+    ],
+    "enum": [
+      "src/bitbank_bot/indicators.py"
+    ],
+    "fcntl": [
+      "src/bitbank_bot/instance_lock.py"
+    ],
+    "types": [
+      "src/bitbank_bot/instance_lock.py"
+    ],
+    "logging.handlers": [
+      "src/bitbank_bot/logging_setup.py",
+      "tests/test_launch.py"
+    ],
+    "bitbank_bot.backtest": [
+      "src/bitbank_bot/main.py",
+      "tests/test_backtest.py"
+    ],
+    "bitbank_bot.engine": [
+      "src/bitbank_bot/main.py",
+      "tests/test_api_client.py",
+      "tests/test_engine.py"
+    ],
+    "bitbank_bot.instance_lock": [
+      "src/bitbank_bot/main.py"
+    ],
+    "bitbank_bot.smoke_order": [
+      "src/bitbank_bot/main.py",
+      "tests/test_smoke_order.py"
+    ],
+    "bitbank_bot.indicators": [
+      "src/bitbank_bot/multi_timeframe.py",
+      "src/bitbank_bot/rate_engine.py",
+      "src/bitbank_bot/strategy.py",
+      "tests/test_strategy.py"
+    ],
+    "uuid": [
+      "src/bitbank_bot/orders.py",
+      "src/bitbank_bot/trade_signal_executor.py"
+    ],
+    "pytest": [
+      "src/bitbank_bot/pytest_plugin.py",
+      "tests/conftest.py",
+      "tests/test_candle_fetch.py",
+      "tests/test_config.py",
+      "tests/test_money.py",
+      "tests/test_rest_retry.py"
+    ],
+    "collections": [
+      "src/bitbank_bot/rest_client.py"
+    ],
+    "hashlib": [
+      "src/bitbank_bot/rest_client.py"
+    ],
+    "hmac": [
+      "src/bitbank_bot/rest_client.py"
+    ],
+    "random": [
+      "src/bitbank_bot/rest_client.py",
+      "src/bitbank_bot/websocket_client.py"
+    ],
+    "threading": [
+      "src/bitbank_bot/rest_client.py",
+      "src/bitbank_bot/websocket_client.py",
+      "tests/test_rest_retry.py"
+    ],
+    "urllib.parse": [
+      "src/bitbank_bot/rest_client.py"
+    ],
+    "bitbank_bot.execution_gate": [
+      "src/bitbank_bot/trade_signal_executor.py",
+      "tests/test_execution_gate.py"
+    ],
+    "bitbank_bot.rate_engine": [
+      "src/bitbank_bot/trade_signal_executor.py",
+      "tests/test_rate_engine.py"
+    ],
+    "websockets": [
+      "src/bitbank_bot/websocket_client.py"
+    ],
+    "websockets.sync.client": [
+      "src/bitbank_bot/websocket_client.py"
+    ],
+    "tests.helpers": [
+      "tests/test_amounts.py",
+      "tests/test_api_client.py",
+      "tests/test_audit.py",
+      "tests/test_backtest.py",
+      "tests/test_candle_fetch.py",
+      "tests/test_engine.py",
+      "tests/test_execution_gate.py",
+      "tests/test_multi_timeframe.py",
+      "tests/test_orders.py",
+      "tests/test_rate_engine.py",
+      "tests/test_reconciliation.py",
+      "tests/test_rest_sign.py",
+      "tests/test_risk.py",
+      "tests/test_smoke_order.py",
+      "tests/test_strategy.py",
+      "tests/test_trade_signal_executor.py"
+    ],
+    "unittest.mock": [
+      "tests/test_api_client.py",
+      "tests/test_audit.py",
+      "tests/test_engine.py",
+      "tests/test_orders.py",
+      "tests/test_reconciliation.py",
+      "tests/test_rest_retry.py",
+      "tests/test_websocket.py"
+    ],
+    "io": [
+      "tests/test_screen.py"
+    ],
+    "builtins": [
+      "tests/test_websocket.py"
+    ]
+  },
+  "create_order_defs": [
+    {
+      "file": "src/bitbank_bot/api_client.py",
+      "lineno": 94,
+      "qual": "BitbankAPIClient.create_order"
+    },
+    {
+      "file": "src/bitbank_bot/orders.py",
+      "lineno": 38,
+      "qual": "OrderClient.create_order"
+    },
+    {
+      "file": "src/bitbank_bot/rest_client.py",
+      "lineno": 389,
+      "qual": "RestClient.create_order"
+    },
+    {
+      "file": "tests/test_engine.py",
+      "lineno": 42,
+      "qual": "FakeRest.create_order"
+    }
+  ],
+  "create_order_calls": [
+    {
+      "file": "src/bitbank_bot/api_client.py",
+      "lineno": 106,
+      "qual": "BitbankAPIClient.create_order",
+      "name": "self.rest.create_order"
+    },
+    {
+      "file": "src/bitbank_bot/orders.py",
+      "lineno": 239,
+      "qual": "OrderExecutor.place",
+      "name": "self.client.create_order"
+    },
+    {
+      "file": "tests/test_api_client.py",
+      "lineno": 17,
+      "qual": "test_facade_create_order_requires_live_confirmed",
+      "name": "api.create_order"
+    },
+    {
+      "file": "tests/test_rest_retry.py",
+      "lineno": 31,
+      "qual": "test_create_order_does_not_retry_post",
+      "name": "client.create_order"
+    },
+    {
+      "file": "tests/test_rest_sign.py",
+      "lineno": 40,
+      "qual": "test_create_order_refuses_without_live_confirmed",
+      "name": "client.create_order"
+    }
+  ],
+  "src_create_order_calls": [
+    {
+      "file": "src/bitbank_bot/api_client.py",
+      "lineno": 106,
+      "qual": "BitbankAPIClient.create_order",
+      "name": "self.rest.create_order"
+    },
+    {
+      "file": "src/bitbank_bot/orders.py",
+      "lineno": 239,
+      "qual": "OrderExecutor.place",
+      "name": "self.client.create_order"
+    }
+  ],
+  "unexpected_src_create_order_calls": [],
+  "buy_sell_hold": [
+    {
+      "file": "run.py",
+      "lineno": 156,
+      "text": "HOLD"
+    },
+    {
+      "file": "run.py",
+      "lineno": 160,
+      "text": "HOLD"
+    },
+    {
+      "file": "run.py",
+      "lineno": 172,
+      "text": "SELL3"
+    },
+    {
+      "file": "run.py",
+      "lineno": 174,
+      "text": "SELL2"
+    },
+    {
+      "file": "run.py",
+      "lineno": 175,
+      "text": "HOLD"
+    },
+    {
+      "file": "run.py",
+      "lineno": 177,
+      "text": "BUY1"
+    },
+    {
+      "file": "run.py",
+      "lineno": 179,
+      "text": "BUY2"
+    },
+    {
+      "file": "run.py",
+      "lineno": 180,
+      "text": "HOLD"
+    },
+    {
+      "file": "run.py",
+      "lineno": 180,
+      "text": "no_buy_setup"
+    },
+    {
+      "file": "run.py",
+      "lineno": 216,
+      "text": "  HOLD/待機は正常です。このプログラムは注文しません。Ctrl-C で停止"
+    },
+    {
+      "file": "run.py",
+      "lineno": 258,
+      "text": "BUY1"
+    },
+    {
+      "file": "run.py",
+      "lineno": 258,
+      "text": "BUY2"
+    },
+    {
+      "file": "run.py",
+      "lineno": 272,
+      "text": "SELL2"
+    },
+    {
+      "file": "run.py",
+      "lineno": 272,
+      "text": "SELL3"
+    },
+    {
+      "file": "src/bitbank_bot/code_audit.py",
+      "lineno": 43,
+      "text": "\\b(BUY[1-4]|SELL[1-4]|HOLD|no_buy_setup)\\b"
+    },
+    {
+      "file": "src/bitbank_bot/engine.py",
+      "lineno": 952,
+      "text": "FAIL stuck errors; still not exiting on HOLD"
+    },
+    {
+      "file": "src/bitbank_bot/main.py",
+      "lineno": 141,
+      "text": "continuous loop (HOLD/WAIT is normal; Ctrl-C to stop)"
+    },
+    {
+      "file": "src/bitbank_bot/rate_engine.py",
+      "lineno": 52,
+      "text": "BUY1"
+    },
+    {
+      "file": "src/bitbank_bot/rate_engine.py",
+      "lineno": 53,
+      "text": "BUY2"
+    },
+    {
+      "file": "src/bitbank_bot/rate_engine.py",
+      "lineno": 54,
+      "text": "BUY3"
+    },
+    {
+      "file": "src/bitbank_bot/rate_engine.py",
+      "lineno": 55,
+      "text": "BUY4"
+    },
+    {
+      "file": "src/bitbank_bot/screen.py",
+      "lineno": 58,
+      "text": "HOLD/待機は正常です。Ctrl-C で停止"
+    },
+    {
+      "file": "src/bitbank_bot/screen.py",
+      "lineno": 117,
+      "text": "  HOLD/待機は正常です。JSONログではありません。"
+    },
+    {
+      "file": "src/bitbank_bot/smoke_order.py",
+      "lineno": 47,
+      "text": "BUY1"
+    },
+    {
+      "file": "src/bitbank_bot/strategy.py",
+      "lineno": 74,
+      "text": "WAIT/HOLD requires an explicit reason"
+    },
+    {
+      "file": "src/bitbank_bot/strategy.py",
+      "lineno": 75,
+      "text": "HOLD"
+    },
+    {
+      "file": "src/bitbank_bot/strategy.py",
+      "lineno": 273,
+      "text": "HOLD"
+    },
+    {
+      "file": "src/bitbank_bot/strategy.py",
+      "lineno": 276,
+      "text": "HOLD"
+    },
+    {
+      "file": "src/bitbank_bot/strategy.py",
+      "lineno": 282,
+      "text": "HOLD"
+    },
+    {
+      "file": "src/bitbank_bot/strategy.py",
+      "lineno": 285,
+      "text": "no_buy_setup"
+    },
+    {
+      "file": "src/bitbank_bot/strategy.py",
+      "lineno": 304,
+      "text": "SELL1"
+    },
+    {
+      "file": "src/bitbank_bot/strategy.py",
+      "lineno": 312,
+      "text": "SELL3"
+    },
+    {
+      "file": "src/bitbank_bot/strategy.py",
+      "lineno": 322,
+      "text": "SELL2"
+    },
+    {
+      "file": "src/bitbank_bot/strategy.py",
+      "lineno": 332,
+      "text": "SELL4"
+    },
+    {
+      "file": "src/bitbank_bot/strategy.py",
+      "lineno": 348,
+      "text": "BUY1"
+    },
+    {
+      "file": "src/bitbank_bot/strategy.py",
+      "lineno": 359,
+      "text": "BUY2"
+    },
+    {
+      "file": "src/bitbank_bot/strategy.py",
+      "lineno": 370,
+      "text": "BUY3"
+    },
+    {
+      "file": "src/bitbank_bot/strategy.py",
+      "lineno": 378,
+      "text": "BUY4"
+    },
+    {
+      "file": "src/bitbank_bot/strategy.py",
+      "lineno": 384,
+      "text": "no_buy_setup"
+    },
+    {
+      "file": "src/bitbank_bot/strategy.py",
+      "lineno": 395,
+      "text": "no_buy_setup"
+    },
+    {
+      "file": "src/bitbank_bot/watchdog.py",
+      "lineno": 1,
+      "text": "15-minute trade watchdog: NORMAL WAIT vs LONG_WAIT vs FAIL.\n\nHOLD for 15 minutes"
+    },
+    {
+      "file": "src/bitbank_bot/watchdog.py",
+      "lineno": 34,
+      "text": "Classify bot health after each loop.\n\n    ``timeout_sec`` defaults to 900 (15 mi"
+    },
+    {
+      "file": "src/bitbank_bot/watchdog.py",
+      "lineno": 59,
+      "text": "Stable ROOT_CAUSE for HOLD stalls. Healthy no-cross is not FAIL."
+    },
+    {
+      "file": "src/bitbank_bot/watchdog.py",
+      "lineno": 67,
+      "text": "HOLD:"
+    },
+    {
+      "file": "tests/test_engine.py",
+      "lineno": 203,
+      "text": "BUY1"
+    },
+    {
+      "file": "tests/test_engine.py",
+      "lineno": 255,
+      "text": "BUY1"
+    },
+    {
+      "file": "tests/test_engine.py",
+      "lineno": 261,
+      "text": "HOLD"
+    },
+    {
+      "file": "tests/test_engine.py",
+      "lineno": 310,
+      "text": "BUY1"
+    },
+    {
+      "file": "tests/test_engine.py",
+      "lineno": 323,
+      "text": "BUY1"
+    },
+    {
+      "file": "tests/test_engine.py",
+      "lineno": 362,
+      "text": "BUY1"
+    },
+    {
+      "file": "tests/test_engine.py",
+      "lineno": 412,
+      "text": "BUY1"
+    },
+    {
+      "file": "tests/test_engine.py",
+      "lineno": 437,
+      "text": "BUY1"
+    },
+    {
+      "file": "tests/test_engine.py",
+      "lineno": 474,
+      "text": "BUY1"
+    },
+    {
+      "file": "tests/test_engine.py",
+      "lineno": 484,
+      "text": "SELL1"
+    },
+    {
+      "file": "tests/test_engine.py",
+      "lineno": 526,
+      "text": "BUY1"
+    },
+    {
+      "file": "tests/test_engine.py",
+      "lineno": 558,
+      "text": "BUY1"
+    },
+    {
+      "file": "tests/test_engine.py",
+      "lineno": 603,
+      "text": "BUY1"
+    },
+    {
+      "file": "tests/test_engine.py",
+      "lineno": 640,
+      "text": "BUY1"
+    },
+    {
+      "file": "tests/test_execution_gate.py",
+      "lineno": 12,
+      "text": "BUY1"
+    },
+    {
+      "file": "tests/test_orders.py",
+      "lineno": 37,
+      "text": "BUY1"
+    },
+    {
+      "file": "tests/test_orders.py",
+      "lineno": 50,
+      "text": "BUY1"
+    },
+    {
+      "file": "tests/test_orders.py",
+      "lineno": 82,
+      "text": "BUY1"
+    },
+    {
+      "file": "tests/test_orders.py",
+      "lineno": 111,
+      "text": "BUY1"
+    },
+    {
+      "file": "tests/test_orders.py",
+      "lineno": 124,
+      "text": "BUY1"
+    },
+    {
+      "file": "tests/test_orders.py",
+      "lineno": 137,
+      "text": "BUY1"
+    },
+    {
+      "file": "tests/test_orders.py",
+      "lineno": 207,
+      "text": "BUY1"
+    },
+    {
+      "file": "tests/test_orders.py",
+      "lineno": 223,
+      "text": "BUY1"
+    },
+    {
+      "file": "tests/test_orders.py",
+      "lineno": 243,
+      "text": "BUY1"
+    },
+    {
+      "file": "tests/test_orders.py",
+      "lineno": 261,
+      "text": "BUY1"
+    },
+    {
+      "file": "tests/test_orders.py",
+      "lineno": 272,
+      "text": "BUY1"
+    },
+    {
+      "file": "tests/test_orders.py",
+      "lineno": 284,
+      "text": "BUY1"
+    },
+    {
+      "file": "tests/test_orders.py",
+      "lineno": 329,
+      "text": "BUY1"
+    },
+    {
+      "file": "tests/test_rate_engine.py",
+      "lineno": 13,
+      "text": "BUY1"
+    },
+    {
+      "file": "tests/test_rate_engine.py",
+      "lineno": 13,
+      "text": "BUY3"
+    },
+    {
+      "file": "tests/test_rate_engine.py",
+      "lineno": 13,
+      "text": "BUY4"
+    },
+    {
+      "file": "tests/test_rate_engine.py",
+      "lineno": 21,
+      "text": "BUY2"
+    },
+    {
+      "file": "tests/test_rate_engine.py",
+      "lineno": 29,
+      "text": "BUY1"
+    },
+    {
+      "file": "tests/test_rate_engine.py",
+      "lineno": 32,
+      "text": "BUY1"
+    },
+    {
+      "file": "tests/test_rate_engine.py",
+      "lineno": 39,
+      "text": "BUY1"
+    },
+    {
+      "file": "tests/test_rate_engine.py",
+      "lineno": 67,
+      "text": "BUY1"
+    },
+    {
+      "file": "tests/test_rate_engine.py",
+      "lineno": 78,
+      "text": "BUY1"
+    },
+    {
+      "file": "tests/test_screen.py",
+      "lineno": 24,
+      "text": "HOLD"
+    },
+    {
+      "file": "tests/test_screen.py",
+      "lineno": 25,
+      "text": "no_buy_setup"
+    },
+    {
+      "file": "tests/test_screen.py",
+      "lineno": 43,
+      "text": "HOLD"
+    },
+    {
+      "file": "tests/test_screen.py",
+      "lineno": 53,
+      "text": "HOLD"
+    },
+    {
+      "file": "tests/test_screen.py",
+      "lineno": 54,
+      "text": "no_buy_setup"
+    },
+    {
+      "file": "tests/test_screen.py",
+      "lineno": 66,
+      "text": "LONG_WAIT:no_buy_setup"
+    },
+    {
+      "file": "tests/test_screen.py",
+      "lineno": 68,
+      "text": "ROOT_CAUSE LONG_WAIT:no_buy_setup"
+    },
+    {
+      "file": "tests/test_screen.py",
+      "lineno": 102,
+      "text": "HOLD"
+    },
+    {
+      "file": "tests/test_screen.py",
+      "lineno": 103,
+      "text": "no_buy_setup"
+    },
+    {
+      "file": "tests/test_screen.py",
+      "lineno": 138,
+      "text": "HOLD"
+    },
+    {
+      "file": "tests/test_strategy.py",
+      "lineno": 45,
+      "text": "BUY1"
+    },
+    {
+      "file": "tests/test_strategy.py",
+      "lineno": 63,
+      "text": "BUY1"
+    },
+    {
+      "file": "tests/test_strategy.py",
+      "lineno": 66,
+      "text": "HOLD"
+    },
+    {
+      "file": "tests/test_strategy.py",
+      "lineno": 81,
+      "text": "BUY1"
+    },
+    {
+      "file": "tests/test_strategy.py",
+      "lineno": 103,
+      "text": "BUY1"
+    },
+    {
+      "file": "tests/test_strategy.py",
+      "lineno": 116,
+      "text": "no_buy_setup"
+    },
+    {
+      "file": "tests/test_strategy.py",
+      "lineno": 116,
+      "text": "no_buy_setup"
+    },
+    {
+      "file": "tests/test_strategy.py",
+      "lineno": 125,
+      "text": "HOLD"
+    },
+    {
+      "file": "tests/test_strategy.py",
+      "lineno": 126,
+      "text": "no_buy_setup"
+    },
+    {
+      "file": "tests/test_strategy.py",
+      "lineno": 128,
+      "text": "no_buy_setup"
+    },
+    {
+      "file": "tests/test_strategy.py",
+      "lineno": 145,
+      "text": "BUY4"
+    },
+    {
+      "file": "tests/test_strategy.py",
+      "lineno": 151,
+      "text": "SELL3"
+    },
+    {
+      "file": "tests/test_trade_signal_executor.py",
+      "lineno": 35,
+      "text": "BUY1"
+    },
+    {
+      "file": "tests/test_trade_signal_executor.py",
+      "lineno": 61,
+      "text": "BUY1"
+    },
+    {
+      "file": "tests/test_watchdog.py",
+      "lineno": 77,
+      "text": "no_buy_setup"
+    },
+    {
+      "file": "tests/test_watchdog.py",
+      "lineno": 78,
+      "text": "HOLD"
+    },
+    {
+      "file": "tests/test_watchdog.py",
+      "lineno": 79,
+      "text": "HOLD:no_buy_setup"
+    },
+    {
+      "file": "tests/test_watchdog.py",
+      "lineno": 83,
+      "text": "no_buy_setup"
+    },
+    {
+      "file": "tests/test_watchdog.py",
+      "lineno": 84,
+      "text": "HOLD"
+    },
+    {
+      "file": "tests/test_watchdog.py",
+      "lineno": 85,
+      "text": "LONG_WAIT:no_buy_setup"
+    },
+    {
+      "file": "tests/test_watchdog.py",
+      "lineno": 93,
+      "text": "BUY1"
+    },
+    {
+      "file": "tests/test_watchdog.py",
+      "lineno": 94,
+      "text": "SIGNAL:BUY1"
+    }
+  ],
+  "pair_aliases": [
+    {
+      "file": "src/bitbank_bot/code_audit.py",
+      "lineno": 40,
+      "text": "btc_jpn"
+    },
+    {
+      "file": "src/bitbank_bot/code_audit.py",
+      "lineno": 40,
+      "text": "jpn_btc"
+    },
+    {
+      "file": "src/bitbank_bot/code_audit.py",
+      "lineno": 40,
+      "text": "jpy_btc"
+    },
+    {
+      "file": "src/bitbank_bot/code_audit.py",
+      "lineno": 40,
+      "text": "jpc_btc"
+    },
+    {
+      "file": "src/bitbank_bot/code_audit.py",
+      "lineno": 40,
+      "text": "btc_jpc"
+    },
+    {
+      "file": "src/bitbank_bot/code_audit.py",
+      "lineno": 40,
+      "text": "btcjpy"
+    },
+    {
+      "file": "src/bitbank_bot/code_audit.py",
+      "lineno": 40,
+      "text": "jpn_jpy"
+    },
+    {
+      "file": "src/bitbank_bot/code_audit.py",
+      "lineno": 40,
+      "text": "jpc_jpy"
+    },
+    {
+      "file": "src/bitbank_bot/config.py",
+      "lineno": 104,
+      "text": "btc_jpn"
+    },
+    {
+      "file": "src/bitbank_bot/config.py",
+      "lineno": 105,
+      "text": "jpn_btc"
+    },
+    {
+      "file": "src/bitbank_bot/config.py",
+      "lineno": 106,
+      "text": "jpy_btc"
+    },
+    {
+      "file": "src/bitbank_bot/config.py",
+      "lineno": 107,
+      "text": "jpc_btc"
+    },
+    {
+      "file": "src/bitbank_bot/config.py",
+      "lineno": 108,
+      "text": "btc_jpc"
+    },
+    {
+      "file": "src/bitbank_bot/config.py",
+      "lineno": 109,
+      "text": "jpn_jpy"
+    },
+    {
+      "file": "src/bitbank_bot/config.py",
+      "lineno": 110,
+      "text": "btcjpy"
+    },
+    {
+      "file": "src/bitbank_bot/config.py",
+      "lineno": 111,
+      "text": "jpc_jpy"
+    },
+    {
+      "file": "tests/test_config.py",
+      "lineno": 78,
+      "text": "btcjpy"
+    }
+  ],
+  "other_exchanges": [
+    {
+      "file": "src/bitbank_bot/code_audit.py",
+      "lineno": 36,
+      "text": "bitflyer"
+    },
+    {
+      "file": "src/bitbank_bot/code_audit.py",
+      "lineno": 36,
+      "text": "coincheck"
+    },
+    {
+      "file": "src/bitbank_bot/code_audit.py",
+      "lineno": 36,
+      "text": "zaif"
+    },
+    {
+      "file": "src/bitbank_bot/code_audit.py",
+      "lineno": 36,
+      "text": "binance"
+    },
+    {
+      "file": "src/bitbank_bot/code_audit.py",
+      "lineno": 36,
+      "text": "bybit"
+    },
+    {
+      "file": "src/bitbank_bot/code_audit.py",
+      "lineno": 36,
+      "text": "kraken"
+    },
+    {
+      "file": "src/bitbank_bot/code_audit.py",
+      "lineno": 36,
+      "text": "bitfinex"
+    }
+  ],
+  "other_exchanges_in_src": [],
+  "bare_excepts": [],
+  "parse_errors": []
+}

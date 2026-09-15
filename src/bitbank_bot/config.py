@@ -60,6 +60,40 @@ DEFAULT_LOOKBACK_DAYS = 14
 DEFAULT_ACCESS_WINDOW_MS = 5000
 DEFAULT_CIRCUIT_BREAKER_ERRORS = 5
 DEFAULT_MAX_DRAWDOWN_JPY = "0"
+DEFAULT_RATE_MODE = "fixed"
+DEFAULT_MIN_TP = "0.01"
+DEFAULT_MAX_TP = "0.20"
+DEFAULT_MIN_SL = "0.01"
+DEFAULT_MAX_SL = "0.20"
+DEFAULT_MIN_RISK = "0.05"
+DEFAULT_MAX_RISK = "1"
+DEFAULT_ATR_PERIOD = 14
+DEFAULT_ATR_BASELINE_PCT = "0.01"
+DEFAULT_LOW_VOL_ATR_PCT = "0.005"
+DEFAULT_HIGH_VOL_ATR_PCT = "0.02"
+DEFAULT_HIGH_VOL_SIZE_MULT = "0.5"
+DEFAULT_STALE_PRICE_PCT = "0.03"
+DEFAULT_RECONCILE_EVERY = 10
+
+LIVE_CONFIRM_PHRASE = "YES_I_ACCEPT_REAL_MONEY_RISK"
+MODE_DRY_RUN = "DRY_RUN"
+MODE_LIVE_READY = "LIVE_READY"
+MODE_LIVE = "LIVE"
+RATE_MODE_FIXED = "fixed"
+RATE_MODE_DYNAMIC = "dynamic"
+RATE_MODE_AUTO = "auto"
+RATE_MODES = frozenset({RATE_MODE_FIXED, RATE_MODE_DYNAMIC, RATE_MODE_AUTO})
+TRADING_MODE_ALIASES = {
+    "": "",
+    "dry_run": MODE_DRY_RUN,
+    "dry-run": MODE_DRY_RUN,
+    "paper": MODE_DRY_RUN,
+    "live_ready": MODE_LIVE_READY,
+    "live-ready": MODE_LIVE_READY,
+    "signal_only": MODE_LIVE_READY,
+    "signal-only": MODE_LIVE_READY,
+    "live": MODE_LIVE,
+}
 
 SHORT_CANDLE_TYPES = frozenset({"1min", "5min", "15min", "30min", "1hour"})
 LONG_CANDLE_TYPES = frozenset({"4hour", "8hour", "12hour", "1day", "1week", "1month"})
@@ -173,9 +207,28 @@ class Config:
     circuit_breaker_errors: int = DEFAULT_CIRCUIT_BREAKER_ERRORS
     max_drawdown_jpy: Decimal = D(DEFAULT_MAX_DRAWDOWN_JPY)
     ws_rooms: tuple[str, ...] = ("ticker_btc_jpy",)
+    trading_mode: str = ""
+    live_trading_confirm: bool = False
+    rate_mode: str = DEFAULT_RATE_MODE
+    min_tp_pct: Decimal = D(DEFAULT_MIN_TP)
+    max_tp_pct: Decimal = D(DEFAULT_MAX_TP)
+    min_sl_pct: Decimal = D(DEFAULT_MIN_SL)
+    max_sl_pct: Decimal = D(DEFAULT_MAX_SL)
+    min_risk_pct: Decimal = D(DEFAULT_MIN_RISK)
+    max_risk_pct: Decimal = D(DEFAULT_MAX_RISK)
+    atr_period: int = DEFAULT_ATR_PERIOD
+    atr_baseline_pct: Decimal = D(DEFAULT_ATR_BASELINE_PCT)
+    low_vol_atr_pct: Decimal = D(DEFAULT_LOW_VOL_ATR_PCT)
+    high_vol_atr_pct: Decimal = D(DEFAULT_HIGH_VOL_ATR_PCT)
+    high_vol_size_mult: Decimal = D(DEFAULT_HIGH_VOL_SIZE_MULT)
+    stale_price_pct: Decimal = D(DEFAULT_STALE_PRICE_PCT)
+    reconcile_every_cycles: int = DEFAULT_RECONCILE_EVERY
 
     def __str__(self) -> str:
-        return f"Config(pair={self.pair}, dry_run={self.dry_run}, live_trading={self.live_trading})"
+        return (
+            f"Config(pair={self.pair}, dry_run={self.dry_run}, "
+            f"live_trading={self.live_trading}, mode={self.resolved_trading_mode()})"
+        )
 
     def __repr__(self) -> str:
         return self.__str__()
@@ -184,9 +237,45 @@ class Config:
     def has_keys(self) -> bool:
         return bool(self.api_key) and bool(self.api_secret)
 
+    def resolved_trading_mode(self) -> str:
+        raw = (self.trading_mode or "").strip().lower().replace("-", "_")
+        mapped = TRADING_MODE_ALIASES.get(raw, raw.upper() if raw else "")
+        if mapped == MODE_LIVE:
+            if self.live_trading_confirm and self.has_keys and not self.dry_run:
+                return MODE_LIVE
+            return MODE_LIVE_READY
+        if mapped == MODE_LIVE_READY:
+            return MODE_LIVE_READY
+        if mapped == MODE_DRY_RUN:
+            return MODE_DRY_RUN
+        if self.dry_run:
+            return MODE_DRY_RUN
+        if self.live_trading and self.has_keys:
+            return MODE_LIVE if self.live_trading_confirm else MODE_LIVE_READY
+        if not self.dry_run and self.live_trading:
+            return MODE_LIVE_READY
+        return MODE_DRY_RUN
+
+    @property
+    def is_live_ready(self) -> bool:
+        return self.resolved_trading_mode() == MODE_LIVE_READY
+
+    @property
+    def is_live(self) -> bool:
+        return self.resolved_trading_mode() == MODE_LIVE
+
+    @property
+    def live_trading_confirmed(self) -> bool:
+        return bool(self.live_trading_confirm)
+
     @property
     def may_place_live_orders(self) -> bool:
-        return (not self.dry_run) and self.live_trading and self.has_keys
+        return (
+            self.resolved_trading_mode() == MODE_LIVE
+            and (not self.dry_run)
+            and self.has_keys
+            and self.live_trading_confirm
+        )
 
     def safe_dict(self) -> dict[str, object]:
         return {
@@ -195,6 +284,9 @@ class Config:
             "has_api_secret": bool(self.api_secret),
             "dry_run": self.dry_run,
             "live_trading": self.live_trading,
+            "live_trading_confirm": bool(self.live_trading_confirm),
+            "trading_mode": self.resolved_trading_mode(),
+            "rate_mode": self.rate_mode,
             "may_place_live_orders": self.may_place_live_orders,
             "simulate_fill": self.simulate_fill,
             "candle_type": self.candle_type,
@@ -214,6 +306,8 @@ class Config:
             "min_amount_btc": str(self.min_amount_btc),
             "circuit_breaker_errors": self.circuit_breaker_errors,
             "max_drawdown_jpy": str(self.max_drawdown_jpy),
+            "reconcile_every_cycles": self.reconcile_every_cycles,
+            "is_live_ready": self.is_live_ready,
         }
 
 
@@ -235,10 +329,33 @@ def load_config(
 
     dry_run = _bool(env, "DRY_RUN", True)
     live_trading = _bool(env, "LIVE_TRADING", False)
-    if dry_run and live_trading:
+    confirm_raw = _env(env, "LIVE_TRADING_CONFIRM", "") or ""
+    live_trading_confirm = confirm_raw == LIVE_CONFIRM_PHRASE
+    mode_raw = (_env(env, "TRADING_MODE", "") or "").strip().lower().replace("-", "_")
+    if mode_raw and mode_raw not in TRADING_MODE_ALIASES:
+        raise ConfigError("TRADING_MODE must be DRY_RUN, LIVE_READY, LIVE, or SIGNAL_ONLY")
+    mapped_mode = TRADING_MODE_ALIASES.get(mode_raw, "")
+    if mapped_mode == MODE_LIVE:
+        dry_run = False
+        live_trading = True
+        if not live_trading_confirm:
+            mapped_mode = MODE_LIVE_READY
+    elif mapped_mode == MODE_LIVE_READY:
+        dry_run = False
+    elif mapped_mode == MODE_DRY_RUN:
+        dry_run = True
+        live_trading = False
+    if dry_run and live_trading and mapped_mode not in {MODE_LIVE_READY, MODE_LIVE}:
         raise ConfigError("LIVE_TRADING and DRY_RUN cannot both be true")
-    if not live_trading and not dry_run:
+    if not live_trading and not dry_run and mapped_mode != MODE_LIVE_READY:
         raise ConfigError("DRY_RUN=false requires LIVE_TRADING=true (dual confirmation).")
+    if not mapped_mode:
+        if dry_run:
+            mapped_mode = MODE_DRY_RUN
+        elif live_trading:
+            mapped_mode = MODE_LIVE if live_trading_confirm else MODE_LIVE_READY
+    if mapped_mode == MODE_LIVE and not live_trading_confirm:
+        mapped_mode = MODE_LIVE_READY
 
     candle_type = _env(env, "CANDLE_TYPE", DEFAULT_CANDLE_TYPE) or DEFAULT_CANDLE_TYPE
     if candle_type not in CANDLE_TYPES:
@@ -335,9 +452,41 @@ def load_config(
             env, "CIRCUIT_BREAKER_ERRORS", DEFAULT_CIRCUIT_BREAKER_ERRORS
         ),
         max_drawdown_jpy=_dec(env, "MAX_DRAWDOWN_JPY", DEFAULT_MAX_DRAWDOWN_JPY),
+        trading_mode=mapped_mode,
+        live_trading_confirm=live_trading_confirm,
+        rate_mode=(_env(env, "RATE_MODE", DEFAULT_RATE_MODE) or DEFAULT_RATE_MODE).lower(),
+        min_tp_pct=_dec(env, "MIN_TP_PCT", DEFAULT_MIN_TP),
+        max_tp_pct=_dec(env, "MAX_TP_PCT", DEFAULT_MAX_TP),
+        min_sl_pct=_dec(env, "MIN_SL_PCT", DEFAULT_MIN_SL),
+        max_sl_pct=_dec(env, "MAX_SL_PCT", DEFAULT_MAX_SL),
+        min_risk_pct=_dec(env, "MIN_RISK_PCT", DEFAULT_MIN_RISK),
+        max_risk_pct=_dec(env, "MAX_RISK_PCT", DEFAULT_MAX_RISK),
+        atr_period=_int(env, "ATR_PERIOD", DEFAULT_ATR_PERIOD),
+        atr_baseline_pct=_dec(env, "ATR_BASELINE_PCT", DEFAULT_ATR_BASELINE_PCT),
+        low_vol_atr_pct=_dec(env, "LOW_VOL_ATR_PCT", DEFAULT_LOW_VOL_ATR_PCT),
+        high_vol_atr_pct=_dec(env, "HIGH_VOL_ATR_PCT", DEFAULT_HIGH_VOL_ATR_PCT),
+        high_vol_size_mult=_dec(env, "HIGH_VOL_SIZE_MULT", DEFAULT_HIGH_VOL_SIZE_MULT),
+        stale_price_pct=_dec(env, "STALE_PRICE_PCT", DEFAULT_STALE_PRICE_PCT),
+        reconcile_every_cycles=_int(env, "RECONCILE_EVERY_CYCLES", DEFAULT_RECONCILE_EVERY),
     )
+    if cfg.rate_mode not in RATE_MODES:
+        raise ConfigError("RATE_MODE must be fixed, dynamic, or auto")
     if live_trading and not cfg.has_keys:
-        raise ConfigError("LIVE_TRADING requires BITBANK_API_KEY and BITBANK_API_SECRET")
+        explicit_ready = bool(mode_raw) and mapped_mode == MODE_LIVE_READY
+        if not explicit_ready:
+            raise ConfigError("LIVE_TRADING requires BITBANK_API_KEY and BITBANK_API_SECRET")
+    if cfg.resolved_trading_mode() == MODE_LIVE and not cfg.has_keys:
+        raise ConfigError("LIVE mode requires BITBANK_API_KEY and BITBANK_API_SECRET")
+    if cfg.min_tp_pct <= D(0) or cfg.max_tp_pct < cfg.min_tp_pct:
+        raise ConfigError("MIN_TP_PCT / MAX_TP_PCT are invalid")
+    if cfg.min_sl_pct <= D(0) or cfg.max_sl_pct < cfg.min_sl_pct:
+        raise ConfigError("MIN_SL_PCT / MAX_SL_PCT are invalid")
+    if cfg.min_risk_pct <= D(0) or cfg.max_risk_pct < cfg.min_risk_pct:
+        raise ConfigError("MIN_RISK_PCT / MAX_RISK_PCT are invalid")
+    if cfg.high_vol_size_mult <= D(0) or cfg.high_vol_size_mult > D(1):
+        raise ConfigError("HIGH_VOL_SIZE_MULT must be in (0, 1]")
+    if cfg.low_vol_atr_pct <= D(0) or cfg.high_vol_atr_pct <= cfg.low_vol_atr_pct:
+        raise ConfigError("LOW_VOL_ATR_PCT / HIGH_VOL_ATR_PCT are invalid")
     if cfg.ma_period < 2 or cfg.short_ma_period < 2 or cfg.long_ma_period < 2:
         raise ConfigError("MA periods must be >= 2")
     if cfg.long_ma_period < cfg.short_ma_period:

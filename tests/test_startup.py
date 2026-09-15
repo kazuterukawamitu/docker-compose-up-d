@@ -16,6 +16,7 @@ def test_compileall_src() -> None:
         py_compile.compile(str(path), doraise=True)
     py_compile.compile(str(root / "main.py"), doraise=True)
     py_compile.compile(str(root / "run.py"), doraise=True)
+    py_compile.compile(str(root / "launch_bot.py"), doraise=True)
     diag = root / "diagnostics.py"
     if diag.is_file():
         py_compile.compile(str(diag), doraise=True)
@@ -44,6 +45,8 @@ def test_start_sh_is_venv_loop_launcher() -> None:
     text = Path(__file__).resolve().parents[1].joinpath("start.sh").read_text(encoding="utf-8")
     assert ".venv" in text
     assert 'VPY="$VENV/bin/python"' in text
+    assert "BASH_SOURCE" in text
+    assert "CommandLineTools" in text
     assert "exec" in text
     after_exec = text.rsplit("exec", 1)[-1]
     assert "--once" not in after_exec
@@ -52,8 +55,27 @@ def test_start_sh_is_venv_loop_launcher() -> None:
     assert ".env.example" in text
     assert "python3.12" in text
     assert "python3" in text
-    assert 'BOT_BRANCH="cursor/bitbank-audit-unify-f5fd"' in text
+    assert 'BOT_BRANCH="cursor/closed-loop-launcher-563e"' in text
     assert "run.py" in text
+    assert "bitbank_bot.launch" in text
+    assert "launch_bot.py" in text
+    assert "run_transaction.sh" in text
+    assert "/Users/kazuteru" not in text
+    assert "without printing secrets" in text or "values not printed" in text
+    assert "cd to the repo first" in text
+    assert "RATE_MODE" in text
+    assert "RECONCILE_EVERY_CYCLES" in text
+    assert "--self-test" in text
+    assert "docker-compose-up-d" in text
+    assert "PYTHONPATH=src python3 -m pytest -q" not in text
+
+
+def test_trading_modes_file_compiles_without_stray_paren() -> None:
+    root = Path(__file__).resolve().parents[1]
+    path = root / "tests" / "test_trading_modes.py"
+    py_compile.compile(str(path), doraise=True)
+    source = path.read_text(encoding="utf-8")
+    assert source.count("(") == source.count(")")
 
 
 def test_loop_cli_exits_after_max_cycles(tmp_path, monkeypatch) -> None:

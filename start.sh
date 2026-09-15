@@ -1,11 +1,20 @@
 #!/usr/bin/env bash
-# Bitbank BTC/JPY launcher — opens the iTerm 取引画面 (trading screen).
+# Enhanced Bitbank BTC/JPY launcher (Mac iTerm + Sakura VPS).
 #
-# Paste this ONE line in iTerm (zsh is fine; this wraps bash):
-#   bash -lc 'REPO="$HOME/docker-compose-up-d"; set -euo pipefail; if [ ! -d "$REPO/.git" ]; then git clone https://github.com/kazuterukawamitu/docker-compose-up-d.git "$REPO"; fi; cd "$REPO"; git fetch origin cursor/bitbank-audit-unify-f5fd; git checkout -B cursor/bitbank-audit-unify-f5fd origin/cursor/bitbank-audit-unify-f5fd; exec bash ./start.sh --screen'
+# Always cds to the repo that contains THIS file (BASH_SOURCE), never $PWD.
+# From the clone, or from ~ via absolute path:
+#   cd <repo> && bash ./start.sh
+#   bash /absolute/path/to/start.sh
+#   bash ./start.sh --help
 #
-# That line clones if needed, checks out the bot branch (main is wiki HTML only),
-# then opens the trading dashboard. Do not paste python3 main.py. Do not use !.
+# First-time clone (paste this ONE line, not pytest output):
+#   bash -lc 'REPO="$HOME/docker-compose-up-d"; set -euo pipefail; if [ ! -d "$REPO/.git" ]; then git clone https://github.com/kazuterukawamitu/docker-compose-up-d.git "$REPO"; fi; cd "$REPO"; git fetch origin cursor/closed-loop-launcher-563e; git checkout -B cursor/closed-loop-launcher-563e origin/cursor/closed-loop-launcher-563e; exec bash ./start.sh --screen'
+#
+# Locates this repo (no hardcoded /Users/... path), creates .venv if needed,
+# prefers .venv/bin/python (never CommandLineTools python when a venv exists),
+# loads .env without printing secrets, then starts the existing bot entrypoint.
+# Do not paste python3 main.py. Do not paste pytest dots. Do not use bangs.
+# Do not run /usr/bin/python3 on a random file (test_public.py, ~/main.py).
 
 if [ -z "${BASH_VERSION:-}" ]; then
   exec /usr/bin/env bash "$0" "$@"
@@ -13,35 +22,175 @@ fi
 
 set -euo pipefail
 
-export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:${PATH:-}"
+# Prefer Homebrew on Mac, then the caller PATH (CI hosted Python). Do not
+# put /usr/bin first — that shadows Actions' python and breaks --self-test.
+export PATH="/opt/homebrew/bin:/usr/local/bin:${PATH:-}:/usr/bin:/bin"
 export PYTHONUNBUFFERED=1
 export PYTHONIOENCODING=utf-8
 
-ROOT="$(cd "$(dirname "$0")" && pwd)"
+usage() {
+  cat <<'EOF'
+Usage: bash /path/to/start.sh [options]
+       cd <repo> && bash ./start.sh [options]
+
+Enhanced launcher for the existing Bitbank BTC/JPY bot (DRY_RUN by default).
+This is the program-launching program. It cds to the repo from BASH_SOURCE
+(so cwd may be ~). Either cd, or pass the absolute path:
+
+  bash ./start.sh
+  bash ~/docker-compose-up-d/start.sh
+  bash ./start.sh --help
+  bash ./start.sh --once --synthetic --skip-lock --no-screen
+  bash ./start.sh --check-config
+  bash ./start.sh --smoke-order
+  bash ./start.sh --execute
+  bash ./run_transaction.sh
+  bash ./start.sh --no-supervise
+  bash ./start.sh --supervise
+  bash ./start.sh --self-test
+
+If bash says: ./start.sh: No such file or directory
+  You ran ./start.sh from ~ (relative path). Use the absolute path or cd:
+    bash ~/docker-compose-up-d/start.sh
+    cd ~/docker-compose-up-d && bash ./start.sh
+  Confirm branch cursor/closed-loop-launcher-563e:
+    git ls-files start.sh
+  Optional home-safe finder (so cd ~ && bash ./start.sh prints this hint):
+    bash scripts/install_launch_alias.sh
+  Do not use CommandLineTools python3 on test_public.py / main.py from ~.
+
+Locates the repo from this script (not a hardcoded Mac path), uses .venv,
+loads .env without printing secrets, prints SET/UNSET diagnostics
+(RATE_MODE, RECONCILE_EVERY_CYCLES, keys SET/UNSET), and restarts on crash
+with backoff (not on config/lock failures). systemd already restarts:
+pass --no-supervise (or run python -m bitbank_bot).
+
+LIVE requires TRADING_MODE=LIVE and LIVE_TRADING_CONFIRM=YES_I_ACCEPT_REAL_MONEY_RISK.
+JSON logs: logs/bot.log (rotated 5MB x 5). Ctrl-C stops. data/KILL halts new orders.
+Other flags pass through to python -m bitbank_bot.
+
+If zsh says: command not found: ....
+  You pasted pytest progress (.... [ 40%] / 179 passed), not a crash.
+  Press Ctrl-C to leave a stuck '>' prompt, then:
+    cd <repo> && bash ./start.sh
+  Do not paste pytest output or Python snippets into the terminal.
+
+pytest is not a launch step. Developer tests (script cds to the repo):
+  bash scripts/run_tests.sh
+  bash /path/to/scripts/run_tests.sh
+  bash ./start.sh --self-test
+  Do not run pytest from ~ (that is "no tests ran").
+EOF
+}
+
+suggest_clones() {
+  echo "Typical clone name: docker-compose-up-d" >&2
+  echo "  cd ~/docker-compose-up-d" >&2
+  echo "  git checkout cursor/closed-loop-launcher-563e" >&2
+  echo "  git ls-files start.sh    # must print: start.sh" >&2
+  echo "  bash ./start.sh" >&2
+  echo "Or from ~: bash ~/docker-compose-up-d/start.sh" >&2
+  echo "If start.sh is missing, you are on main or not in the clone." >&2
+  local names="docker-compose-up-d docker-compose-up-d.git bitbank-bot"
+  local b n p
+  if [[ -n "${HOME:-}" ]]; then
+    for b in "$HOME" "$HOME/src" "$HOME/code" "$HOME/dev" "$HOME/Projects" "$HOME/github" "$HOME/repos"; do
+      for n in $names; do
+        p="$b/$n"
+        if [[ -f "$p/start.sh" && -f "$p/src/bitbank_bot/launch.py" ]]; then
+          echo "Found a clone at: $p" >&2
+          echo "  cd $p && bash ./start.sh" >&2
+        fi
+      done
+    done
+  fi
+}
+
+not_in_repo() {
+  echo "cd to the repo first, then run: bash ./start.sh" >&2
+  suggest_clones
+  echo "Do not paste pytest output (.... [ 40%] / 179 passed) into the terminal." >&2
+  echo "pytest is not a launch step. Do not paste test commands at ~." >&2
+  echo "If zsh shows a lone '>' prompt, press Ctrl-C, then cd to the repo." >&2
+}
+
+resolve_root() {
+  local src="${BASH_SOURCE[0]}"
+  while [[ -L "$src" ]]; do
+    local dir
+    dir="$(cd "$(dirname "$src")" && pwd)"
+    src="$(readlink "$src")"
+    [[ "$src" != /* ]] && src="$dir/$src"
+  done
+  cd "$(dirname "$src")" && pwd
+}
+
+ROOT="$(resolve_root)"
 cd "$ROOT"
 
-BOT_BRANCH="cursor/bitbank-audit-unify-f5fd"
+home_now="$(cd "${HOME:-/}" && pwd -P 2>/dev/null || true)"
+if [[ -n "$home_now" && "$ROOT" == "$home_now" ]]; then
+  echo "start.sh must live inside the cloned repo, not your home directory." >&2
+  not_in_repo
+  exit 2
+fi
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+  usage
+  exit 0
+fi
+
+for a in "$@"; do
+  if [[ "$a" =~ ^\.+$ ]] || [[ "$a" =~ ^\[[[:space:]]*[0-9]+%\]$ ]] || [[ "$a" == "passed" || "$a" == "failed" ]]; then
+    echo "That looks like pytest output pasted into the shell, not a launcher command." >&2
+    not_in_repo
+    exit 2
+  fi
+done
+
+BOT_BRANCH="cursor/closed-loop-launcher-563e"
 
 ensure_bot_source() {
-  if [[ -f "$ROOT/src/bitbank_bot/__init__.py" && -f "$ROOT/main.py" ]]; then
+  if [[ -f "$ROOT/src/bitbank_bot/__init__.py" && -f "$ROOT/src/bitbank_bot/launch.py" && -f "$ROOT/main.py" ]]; then
     return 0
   fi
-  echo "bot source not found at $ROOT (this clone is probably still on main / wiki dump)" >&2
+  echo "bot source not found at $ROOT (need src/bitbank_bot/launch.py next to start.sh)" >&2
   if [[ ! -d "$ROOT/.git" ]]; then
-    echo "Paste this ONE line in iTerm:" >&2
-    echo "  bash -lc 'git clone https://github.com/kazuterukawamitu/docker-compose-up-d.git \"\$HOME/docker-compose-up-d\" && bash \"\$HOME/docker-compose-up-d/start.sh\" --screen'" >&2
+    not_in_repo
     exit 2
   fi
   echo "fetching $BOT_BRANCH so the trading screen can start" >&2
   git fetch origin "$BOT_BRANCH"
   git checkout -B "$BOT_BRANCH" "origin/$BOT_BRANCH"
-  if [[ ! -f "$ROOT/src/bitbank_bot/__init__.py" || ! -f "$ROOT/main.py" ]]; then
+  if [[ ! -f "$ROOT/src/bitbank_bot/__init__.py" || ! -f "$ROOT/src/bitbank_bot/launch.py" || ! -f "$ROOT/main.py" ]]; then
     echo "still no bitbank_bot after checkout; branch may not be fetched" >&2
+    not_in_repo
     exit 2
   fi
 }
 
 ensure_bot_source
+
+self_test=0
+self_test_args=()
+for a in "$@"; do
+  if [[ "$a" == "--self-test" ]]; then
+    self_test=1
+  else
+    self_test_args+=("$a")
+  fi
+done
+if [[ "$self_test" -eq 1 ]]; then
+  if [[ ! -f "$ROOT/scripts/run_tests.sh" ]]; then
+    echo "cd to the repo first, then run: bash scripts/run_tests.sh" >&2
+    not_in_repo
+    exit 2
+  fi
+  if [[ ${#self_test_args[@]} -eq 0 ]]; then
+    exec bash "$ROOT/scripts/run_tests.sh"
+  fi
+  exec bash "$ROOT/scripts/run_tests.sh" "${self_test_args[@]}"
+fi
 
 pick_python() {
   local c
@@ -63,7 +212,19 @@ pick_python() {
   return 1
 }
 
-PY="$(pick_python)"
+# Prefer $ROOT/.venv/bin/python. Do not run the bot with
+# /Library/Developer/CommandLineTools/usr/bin/python3 when a venv exists.
+# Never exec a cwd-relative main.py / test_public.py (Errno 2 on Mac).
+VENV="$ROOT/.venv"
+VPY="$VENV/bin/python"
+VPIP="$VENV/bin/pip"
+
+if [[ -x "$VPY" ]]; then
+  PY="$VPY"
+else
+  PY="$(pick_python)"
+fi
+
 PY_MAJ="$("$PY" -c 'import sys; print(sys.version_info.major)')"
 PY_MIN="$("$PY" -c 'import sys; print(sys.version_info.minor)')"
 if [[ "$PY_MAJ" -lt 3 || ( "$PY_MAJ" -eq 3 && "$PY_MIN" -lt 9 ) ]]; then
@@ -74,10 +235,6 @@ fi
 if [[ "$PY_MAJ" -eq 3 && "$PY_MIN" -lt 12 ]]; then
   echo "note: $PY is $($PY -V 2>&1); 3.12 is preferred, continuing with this interpreter." >&2
 fi
-
-VENV="$ROOT/.venv"
-VPY="$VENV/bin/python"
-VPIP="$VENV/bin/pip"
 
 if [[ ! -x "$VPY" ]]; then
   echo "creating venv at $VENV with $PY"
@@ -131,18 +288,66 @@ if [[ "$need_install" -eq 1 ]]; then
   set -e
 fi
 
+oneshot=0
+want_stdlib_loop=1
+for a in "$@"; do
+  case "$a" in
+    --once|--check-config|--preflight|--backtest|--help|-h|--max-cycles|--self-test|--smoke-order|--execute)
+      oneshot=1
+      want_stdlib_loop=0
+      ;;
+    --no-supervise)
+      want_stdlib_loop=0
+      ;;
+  esac
+done
+
 if ! "$VPY" -c "import dotenv, httpx" >/dev/null 2>&1; then
+  for a in "$@"; do
+    if [[ "$a" == "--smoke-order" || "$a" == "--execute" ]]; then
+      echo "smoke-order needs the package (httpx). run.py never places orders." >&2
+      exit 2
+    fi
+  done
   echo "pip packages missing; starting stdlib DRY_RUN (python3 run.py, no orders)"
-  exec "$PY" "$ROOT/run.py" "$@"
+  if [[ ! -f "$ROOT/run.py" ]]; then
+    echo "cannot start: missing $ROOT/run.py" >&2
+    echo "Do not run CommandLineTools python3 on a file under ~ (test_public.py / main.py)." >&2
+    not_in_repo
+    exit 2
+  fi
+  if [[ "$oneshot" -eq 1 || "$want_stdlib_loop" -eq 0 ]]; then
+    exec "$PY" "$ROOT/run.py" "$@"
+  fi
+  delay=2
+  while true; do
+    set +e
+    "$PY" "$ROOT/run.py" "$@"
+    rc=$?
+    set -e
+    if [[ "$rc" -eq 0 || "$rc" -eq 130 || "$rc" -eq 143 || "$rc" -eq 2 ]]; then
+      if [[ "$rc" -eq 2 ]]; then
+        echo "stdlib launcher: fatal exit 2 (not restarting)" >&2
+      fi
+      exit "$rc"
+    fi
+    echo "stdlib launcher: crash exit $rc; restart in ${delay}s" >&2
+    sleep "$delay"
+    delay=$((delay * 2))
+    if [[ "$delay" -gt 30 ]]; then
+      delay=30
+    fi
+  done
 fi
 
 if [[ ! -f "$ROOT/.env" ]]; then
   if [[ -f "$ROOT/.env.example" ]]; then
     cp "$ROOT/.env.example" "$ROOT/.env"
-    echo "wrote $ROOT/.env from .env.example (DRY_RUN=true, keys empty)"
+    echo "wrote $ROOT/.env from .env.example (DRY_RUN=true, keys empty; values not printed)"
   fi
 fi
 
+mkdir -p "$ROOT/logs" "$ROOT/data"
 export PYTHONPATH="$ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
 
 want_screen=0
@@ -151,7 +356,7 @@ if [[ -t 1 ]]; then
 fi
 for a in "$@"; do
   case "$a" in
-    --once|--check-config|--preflight|--backtest|--no-screen)
+    --once|--check-config|--preflight|--backtest|--no-screen|--smoke-order|--execute)
       want_screen=0
       ;;
     --screen)
@@ -173,10 +378,44 @@ if [[ "$want_screen" -eq 1 ]]; then
   fi
 fi
 
+SUPERVISE_ARGS=()
+if [[ -n "${INVOCATION_ID:-}" ]]; then
+  has_sup=0
+  for a in "$@"; do
+    case "$a" in
+      --supervise|--no-supervise) has_sup=1 ;;
+    esac
+  done
+  if [[ "$has_sup" -eq 0 ]]; then
+    SUPERVISE_ARGS=(--no-supervise)
+  fi
+fi
+
 echo "opening Bitbank BTC/JPY 取引画面 (Ctrl-C to stop)"
-echo "HOLD/WAIT is normal. JSON detail is logs/bot.log"
+echo "HOLD/WAIT is normal. JSON detail is logs/bot.log (rotated; do not dump stdout)"
+echo "To complete one paper BUY now: bash $ROOT/run_transaction.sh"
+echo "project_root=$ROOT"
 echo "using $VPY"
+echo "lock=$ROOT/data/bot.lock kill=$ROOT/data/KILL (create KILL to halt new orders)"
 
 # Default (no extra args): continuous loop + trading screen on a TTY.
-# Do not pass --once here.
-exec "$VPY" "$ROOT/main.py" "${SCREEN_ARGS[@]}" "$@"
+# Crash backoff lives in bitbank_bot.launch. Transaction proof is
+# launch_bot.py --smoke-order / bash ./run_transaction.sh (never POST).
+if [[ ! -f "$ROOT/src/bitbank_bot/launch.py" || ! -f "$ROOT/main.py" ]]; then
+  echo "cannot start: missing $ROOT/src/bitbank_bot/launch.py or $ROOT/main.py" >&2
+  echo "Do not run CommandLineTools python3 on a file under ~ (test_public.py / main.py)." >&2
+  not_in_repo
+  exit 2
+fi
+
+# Drop a venv .pth so `.venv/bin/python -m bitbank_bot.launch` works
+# without PYTHONPATH (the previous ModuleNotFoundError).
+SITE="$("$VPY" -c 'import sysconfig; print(sysconfig.get_path("purelib"))' 2>/dev/null || true)"
+if [[ -n "$SITE" && -d "$SITE" ]]; then
+  printf '%s\n' "$ROOT/src" > "$SITE/bitbank_bot_src.pth"
+fi
+
+if [[ -f "$ROOT/launch_bot.py" ]]; then
+  exec "$VPY" "$ROOT/launch_bot.py" "${SUPERVISE_ARGS[@]}" "${SCREEN_ARGS[@]}" "$@"
+fi
+exec "$VPY" -m bitbank_bot.launch "${SUPERVISE_ARGS[@]}" "${SCREEN_ARGS[@]}" "$@"

@@ -120,3 +120,29 @@ def test_string_balances_from_api() -> None:
     )
     assert plan.ok
     assert plan.amount >= Decimal("0.0001")
+
+
+def test_apply_size_mult_shrinks_buy_only() -> None:
+    from bitbank_bot.amounts import apply_size_mult
+
+    c = cfg()
+    plan = plan_buy(
+        available_jpy=Decimal("100000"),
+        available_btc=Decimal("0"),
+        price=Decimal("10000000"),
+        cfg=c,
+        risk=risk(c),
+    )
+    assert plan.ok
+    half = apply_size_mult(plan, c, Decimal("0.5"))
+    assert half.ok
+    assert half.amount == plan.amount * Decimal("0.5")
+    sell = plan_sell(
+        available_jpy=Decimal("0"),
+        available_btc=Decimal("0.01"),
+        price=Decimal("10000000"),
+        cfg=c,
+        risk=risk(c),
+    )
+    same = apply_size_mult(sell, c, Decimal("0.5"))
+    assert same.amount == sell.amount

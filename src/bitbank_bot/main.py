@@ -5,12 +5,12 @@ from __future__ import annotations
 import argparse
 import sys
 
+from bitbank_bot.api_client import BitbankAPIClient
 from bitbank_bot.config import ConfigError, load_config
 from bitbank_bot.engine import Engine, install_signal_handlers
 from bitbank_bot.instance_lock import InstanceLock, InstanceLockError
 from bitbank_bot.logging_setup import setup_logging, slog
 from bitbank_bot.preflight import preflight
-from bitbank_bot.rest_client import RestClient
 from bitbank_bot.screen import TradingScreen, should_use_screen
 
 
@@ -33,6 +33,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--backtest",
         action="store_true",
         help="replay README rules on synthetic candles (no orders) and exit",
+    )
+    parser.add_argument(
+        "--smoke-order",
+        "--execute",
+        action="store_true",
+        dest="smoke_order",
+        help="DRY_RUN paper BUY through OrderExecutor then exit (never Bitbank POST)",
     )
     parser.add_argument(
         "--screen",
@@ -70,6 +77,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.dry_run:
         cfg.dry_run = True
         cfg.live_trading = False
+        cfg.trading_mode = "DRY_RUN"
+        cfg.live_trading_confirm = False
     use_screen = should_use_screen(args, sys.stdout)
     setup_logging(cfg.log_level, cfg.log_dir, console=not use_screen)
     slog("BOOT", "starting", **cfg.safe_dict())
@@ -80,22 +89,14 @@ def main(argv: list[str] | None = None) -> int:
         synthetic=bool(args.synthetic),
         loop=not args.once,
         dry_run=cfg.dry_run,
+        trading_mode=cfg.resolved_trading_mode(),
         screen=use_screen,
     )
-    rest = RestClient(
-        public_url=cfg.public_url,
-        private_url=cfg.private_url,
-        api_key=cfg.api_key,
-        api_secret=cfg.api_secret,
-        access_time_window_ms=cfg.access_time_window_ms,
-        timeout_sec=cfg.http_timeout_sec,
-        max_retries=cfg.max_retries,
-        query_rps=cfg.query_rps,
-        update_rps=cfg.update_rps,
-    )
+    api = BitbankAPIClient.from_config(cfg)
+    rest = api.rest
     if args.check_config:
         slog("BOOT", "config ok", **cfg.safe_dict())
-        rest.close()
+        api.close()
         return 0
     if args.backtest:
         from bitbank_bot.backtest import report_lines, run_backtest
@@ -104,17 +105,23 @@ def main(argv: list[str] | None = None) -> int:
         report = run_backtest(synthetic_candles(240), cfg)
         for line in report_lines(report):
             slog("BACKTEST", line)
-        rest.close()
+        api.close()
         return 0
+    if args.smoke_order:
+        from bitbank_bot.smoke_order import run_smoke_order
+
+        rc = run_smoke_order(cfg)
+        api.close()
+        return rc
     if args.preflight:
         result = preflight(cfg, rest, require_public=not (args.synthetic or cfg.dry_run))
-        rest.close()
+        api.close()
         return 0 if result.ok else 2
 
     screen = TradingScreen(sys.stdout) if use_screen else None
     if use_screen and cfg.poll_sec > 3:
         cfg.poll_sec = 3
-    engine = Engine(cfg, client=rest, screen=screen)
+    engine = Engine(cfg, client=api, screen=screen)
     lock: InstanceLock | None = None
     if not args.skip_lock:
         try:
@@ -125,7 +132,7 @@ def main(argv: list[str] | None = None) -> int:
             slog("BOOT", "another instance is running; stop it or pass --skip-lock")
             if screen is not None:
                 screen.boot("別プロセスが data/bot.lock を保持しています。止めてから再実行してください。")
-            rest.close()
+            api.close()
             return 3
     try:
         if args.once:
@@ -143,7 +150,7 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         if lock:
             lock.release()
-        rest.close()
+        api.close()
 
 
 def cli() -> None:

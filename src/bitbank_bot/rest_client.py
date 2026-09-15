@@ -29,11 +29,15 @@ class BitbankAPIError(RuntimeError):
         code: int | None = None,
         http_status: int | None = None,
         body: Any = None,
+        endpoint: str = "",
+        retry_count: int = 0,
     ) -> None:
         super().__init__(message)
         self.code = code
         self.http_status = http_status
         self.body = body
+        self.endpoint = endpoint
+        self.retry_count = retry_count
 
 
 def is_auth_error(exc: BitbankAPIError) -> bool:
@@ -43,6 +47,42 @@ def is_auth_error(exc: BitbankAPIError) -> bool:
         return True
     msg = str(exc).lower()
     return "api key" in msg or "secret missing" in msg
+
+
+def _as_dict(data: Any, what: str) -> dict[str, Any]:
+    if not isinstance(data, dict):
+        raise BitbankAPIError(f"{what}_unreadable")
+    return data
+
+
+def coerce_active_orders(payload: Any) -> list[dict[str, Any]]:
+    """Normalize Bitbank active-order payloads to a list of order dicts.
+
+    Empty list / empty dict / missing ``orders`` → no open orders.
+    A mapping of order_id → order becomes the values.
+    Unknown types raise so callers do not treat an unreadable book as empty.
+    """
+    if payload is None:
+        return []
+    if isinstance(payload, list):
+        out: list[dict[str, Any]] = []
+        for row in payload:
+            if row is None:
+                continue
+            if not isinstance(row, dict):
+                raise BitbankAPIError("active_orders_unreadable")
+            out.append(row)
+        return out
+    if isinstance(payload, dict):
+        if "orders" in payload:
+            return coerce_active_orders(payload.get("orders"))
+        if not payload:
+            return []
+        values = list(payload.values())
+        if values and all(isinstance(value, dict) for value in values):
+            return values
+        raise BitbankAPIError("active_orders_unreadable")
+    raise BitbankAPIError("active_orders_unreadable")
 
 
 def dump_json(obj: dict[str, Any]) -> str:
@@ -83,18 +123,19 @@ class RateLimiter:
     def wait(self, kind: Literal["query", "update"]) -> None:
         limit = self.query_rps if kind == "query" else self.update_rps
         bucket = self._q if kind == "query" else self._u
-        with self._lock:
-            now = time.monotonic()
-            while bucket and now - bucket[0] >= 1.0:
-                bucket.popleft()
-            if len(bucket) >= limit:
-                sleep_for = 1.0 - (now - bucket[0]) + 0.02
-                if sleep_for > 0:
-                    time.sleep(sleep_for)
+        while True:
+            sleep_for = 0.0
+            with self._lock:
                 now = time.monotonic()
                 while bucket and now - bucket[0] >= 1.0:
                     bucket.popleft()
-            bucket.append(time.monotonic())
+                if len(bucket) >= limit:
+                    sleep_for = 1.0 - (now - bucket[0]) + 0.02
+                else:
+                    bucket.append(now)
+                    return
+            if sleep_for > 0:
+                time.sleep(sleep_for)
 
 
 def _backoff_seconds(attempt: int, cap: float = 16.0) -> float:
@@ -146,9 +187,11 @@ class RestClient:
         headers: dict[str, str] | None = None,
         content: bytes | None = None,
         public: bool = False,
+        retry: bool = True,
     ) -> Any:
         last_error: Exception | None = None
-        attempts = max(1, self.max_retries)
+        endpoint = url.split(".cc")[-1][:120]
+        attempts = max(1, self.max_retries) if retry else 1
         for attempt in range(attempts):
             self.limiter.wait(kind)
             try:
@@ -157,26 +200,32 @@ class RestClient:
                 )
             except httpx.HTTPError as exc:
                 last_error = exc
-                slog("ERROR", "http transport error", error=type(exc).__name__)
+                slog("ERROR", "http transport error", error=type(exc).__name__, endpoint=endpoint)
                 if attempt + 1 >= attempts:
                     break
                 time.sleep(_backoff_seconds(attempt))
                 continue
             if response.status_code == 429:
-                slog("ERROR", "HTTP 429 rate limited", attempt=attempt)
+                slog("ERROR", "HTTP 429 rate limited", attempt=attempt, endpoint=endpoint)
                 if attempt + 1 >= attempts:
                     raise BitbankAPIError(
-                        "rate limited", http_status=429, body=response.text
+                        "rate limited",
+                        http_status=429,
+                        body=response.text,
+                        endpoint=endpoint,
+                        retry_count=attempt,
                     )
                 time.sleep(_backoff_seconds(attempt))
                 continue
             if response.status_code >= 500:
-                slog("ERROR", "HTTP 5xx", status=response.status_code, attempt=attempt)
+                slog("ERROR", "HTTP 5xx", status=response.status_code, attempt=attempt, endpoint=endpoint)
                 if attempt + 1 >= attempts:
                     raise BitbankAPIError(
                         "server error",
                         http_status=response.status_code,
                         body=response.text,
+                        endpoint=endpoint,
+                        retry_count=attempt,
                     )
                 time.sleep(_backoff_seconds(attempt))
                 continue
@@ -185,11 +234,25 @@ class RestClient:
                     f"http {response.status_code}",
                     http_status=response.status_code,
                     body=response.text,
+                    endpoint=endpoint,
+                    retry_count=attempt,
                 )
             try:
                 payload = response.json()
             except json.JSONDecodeError as exc:
-                raise BitbankAPIError("invalid json", body=response.text) from exc
+                raise BitbankAPIError(
+                    "invalid json",
+                    body=response.text,
+                    endpoint=endpoint,
+                    retry_count=attempt,
+                ) from exc
+            if not isinstance(payload, dict):
+                raise BitbankAPIError(
+                    "invalid json payload",
+                    body=payload,
+                    endpoint=endpoint,
+                    retry_count=attempt,
+                )
             if payload.get("success") != 1:
                 data = payload.get("data") or {}
                 code = data.get("code") if isinstance(data, dict) else None
@@ -198,11 +261,17 @@ class RestClient:
                     code=code,
                     http_status=response.status_code,
                     body=payload,
+                    endpoint=endpoint,
+                    retry_count=attempt,
                 )
             stage = "PUBLIC_API" if public else "PRIVATE_API"
-            slog(stage, f"{method} ok", url_path=url.split(".cc")[-1][:80])
+            slog(stage, f"{method} ok", url_path=endpoint)
             return payload.get("data")
-        raise BitbankAPIError(f"request failed: {last_error}")
+        raise BitbankAPIError(
+            f"request failed: {last_error}",
+            endpoint=endpoint,
+            retry_count=max(0, attempts - 1),
+        )
 
     def public_get(self, path: str) -> Any:
         if not path.startswith("/"):
@@ -211,25 +280,31 @@ class RestClient:
         return self._request("GET", url, kind="query", public=True)
 
     def get_ticker(self, pair: str) -> dict[str, Any]:
-        data = self.public_get(f"/{pair}/ticker")
+        data = _as_dict(self.public_get(f"/{pair}/ticker"), "ticker")
         slog("PUBLIC_API", "ticker", pair=pair, last=data.get("last"))
         return data
 
     def get_candlestick(self, pair: str, candle_type: str, date_key: str) -> list[list[Any]]:
-        data = self.public_get(f"/{pair}/candlestick/{candle_type}/{date_key}")
+        data = _as_dict(
+            self.public_get(f"/{pair}/candlestick/{candle_type}/{date_key}"),
+            "candlestick",
+        )
         sticks = data.get("candlestick") or []
         if not sticks:
             return []
-        return list(sticks[0].get("ohlcv") or [])
+        first = sticks[0]
+        if not isinstance(first, dict):
+            return []
+        return list(first.get("ohlcv") or [])
 
     def get_spot_status(self, pair: str | None = None) -> dict[str, Any] | None:
         url = self.private_url + "/spot/status"
-        data = self._request("GET", url, kind="query", public=True)
+        data = _as_dict(self._request("GET", url, kind="query", public=True), "spot_status")
         statuses = data.get("statuses") or []
         if pair is None:
             return data
         for row in statuses:
-            if row.get("pair") == pair:
+            if isinstance(row, dict) and row.get("pair") == pair:
                 return row
         return None
 
@@ -260,7 +335,14 @@ class RestClient:
         headers = self._private_headers(payload)
         return self._request("GET", url, kind="query", headers=headers)
 
-    def private_post(self, path: str, body: dict[str, Any], *, update: bool = True) -> Any:
+    def private_post(
+        self,
+        path: str,
+        body: dict[str, Any],
+        *,
+        update: bool = True,
+        retry: bool = True,
+    ) -> Any:
         if not path.startswith("/"):
             path = "/" + path
         raw = dump_json(body)
@@ -273,29 +355,36 @@ class RestClient:
             kind=kind,
             headers=headers,
             content=raw.encode("utf-8"),
+            retry=retry,
         )
 
     def get_assets(self) -> dict[str, Any]:
-        data = self.private_get("/user/assets")
+        data = _as_dict(self.private_get("/user/assets"), "assets")
         slog("ASSET", "assets fetched", count=len(data.get("assets") or []))
         return data
 
     def free_amount(self, asset: str) -> Decimal:
         data = self.get_assets()
         for row in data.get("assets") or []:
-            if row.get("asset") == asset:
+            if isinstance(row, dict) and row.get("asset") == asset:
                 return D(row.get("free_amount") or 0)
         return D(0)
 
     def get_order(self, pair: str, order_id: str) -> dict[str, Any]:
-        return self.private_get(
-            "/user/spot/order",
-            {"pair": pair, "order_id": order_id},
+        return _as_dict(
+            self.private_get(
+                "/user/spot/order",
+                {"pair": pair, "order_id": order_id},
+            ),
+            "order",
         )
 
     def get_trade_history(self, pair: str) -> list[dict[str, Any]]:
-        data = self.private_get("/user/spot/trade_history", {"pair": pair})
-        return list(data.get("trades") or [])
+        data = _as_dict(
+            self.private_get("/user/spot/trade_history", {"pair": pair}),
+            "trade_history",
+        )
+        return [row for row in (data.get("trades") or []) if isinstance(row, dict)]
 
     def create_order(
         self,
@@ -320,8 +409,14 @@ class RestClient:
             body["price"] = price
         if post_only is not None:
             body["post_only"] = post_only
-        return self.private_post("/user/spot/order", body, update=True)
+        return _as_dict(
+            self.private_post("/user/spot/order", body, update=True, retry=False),
+            "order",
+        )
 
     def get_active_orders(self, pair: str) -> list[dict[str, Any]]:
-        data = self.private_get("/user/spot/active_orders", {"pair": pair})
-        return list(data.get("orders") or [])
+        data = _as_dict(
+            self.private_get("/user/spot/active_orders", {"pair": pair}),
+            "active_orders",
+        )
+        return coerce_active_orders(data.get("orders"))

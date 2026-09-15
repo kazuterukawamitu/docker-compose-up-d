@@ -53,3 +53,4 @@ def test_start_sh_falls_back_to_run_py() -> None:
     text = Path(__file__).resolve().parents[1].joinpath("start.sh").read_text(encoding="utf-8")
     assert "run.py" in text
     assert "stdlib DRY_RUN" in text
+    assert "bitbank_bot.launch" in text

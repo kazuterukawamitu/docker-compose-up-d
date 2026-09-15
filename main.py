@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""Repo-root launcher. Prefers the full package; falls back to stdlib run.py.
+"""Repo-root launcher. Prefers the enhanced package launcher; falls back to stdlib run.py.
 
+    cd <repo> && bash ./start.sh
     python3 main.py
     python3 run.py
 
-Both stay DRY_RUN. Neither places a Bitbank order.
+All stay DRY_RUN unless dual-auth LIVE is set in .env. None of these place a
+Bitbank order from defaults. Do not paste this file or pytest output into zsh.
 """
 
 from __future__ import annotations
@@ -17,6 +19,14 @@ ROOT = Path(__file__).resolve().parent
 SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
+
+if not (SRC / "bitbank_bot" / "launch.py").is_file() and not (ROOT / "run.py").is_file():
+    sys.stderr.write(
+        "main.py is not inside the Bitbank clone.\n"
+        "cd to the repo or run: bash /path/to/start.sh\n"
+        "Do not point CommandLineTools python3 at test_public.py / a copy of main.py.\n"
+    )
+    raise SystemExit(2)
 
 
 def _stdlib() -> int:
@@ -33,11 +43,11 @@ def _stdlib() -> int:
 def _launch() -> int:
     try:
         import httpx  # noqa: F401
-        from bitbank_bot.main import main
+        from bitbank_bot.launch import main as launch_main
     except ModuleNotFoundError:
         sys.stderr.write("full package/deps missing; starting stdlib DRY_RUN (run.py)\n")
         return _stdlib()
-    return int(main())
+    return int(launch_main())
 
 
 if __name__ == "__main__":

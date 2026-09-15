@@ -2,31 +2,140 @@
 
 Bitbank-only `btc_jpy` bot. Default is a **continuous DRY_RUN loop** with an iTerm **取引画面** (trading dashboard). HOLD/WAIT on a bar is normal. JSON lines are written to `logs/bot.log`, not the dashboard.
 
-`main` on GitHub is still wiki HTML. The runnable bot is branch `cursor/bitbank-audit-unify-f5fd`.
+`main` on GitHub is still mostly wiki HTML plus an older launcher. The
+runnable bot on this PR is branch `cursor/closed-loop-launcher-563e`.
 
 HOLD for 15 minutes while market data and strategy are healthy is `LONG_WAIT`, not a crash. Public-API fallback candles never place orders. Live UNFILLED limits are persisted and polled. New BUY is blocked when both 4h and 1d SMA slopes are down (`ENABLE_HTF_FILTER`).
 
 ## Start (this is the program)
 
-`main` on GitHub is wiki HTML. You do **not** need pip, venv, or `start.sh` for the bot to run.
+### Execute on a Mac
 
-Paste **this one line** in iTerm. It downloads `run.py` and starts a DRY_RUN 取引画面 (no orders):
+Apple `/usr/bin/python3` (Xcode CommandLineTools) must not be aimed at a
+random file while your cwd is `~` — that is
+`can't open file ... [Errno 2]` (`python3 test_public.py`,
+`python3 main.py`, `/Users/.../test_public.py`). `pytest` from `~` is
+`no tests ran`.
+
+`start.sh` always `cd`s to the repo from its own path (`BASH_SOURCE`) and
+runs `.venv/bin/python -m bitbank_bot.launch` (it creates `.venv` first).
+Either `cd` into the clone **or** call `start.sh` by absolute path from
+home. Branch `cursor/closed-loop-launcher-563e`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/kazuterukawamitu/docker-compose-up-d/cursor/bitbank-audit-unify-f5fd/run.py -o "$HOME/bitbank_run.py" && python3 "$HOME/bitbank_run.py"
+cd ~/docker-compose-up-d
+git fetch origin cursor/closed-loop-launcher-563e
+git checkout cursor/closed-loop-launcher-563e
+git ls-files start.sh    # must print: start.sh
+bash ./start.sh
+
+# same program from ~ or any cwd (no cd required):
+bash ~/docker-compose-up-d/start.sh
 ```
 
-You should see `Bitbank  BTC/JPY  取引画面`. HOLD/待機 is normal. Stop with Ctrl-C.
+`bash ./start.sh --help` prints the same instructions. A thin wrapper is
+`bash scripts/run_bot.sh` (refuses unless cwd is this repo). Tests:
+`bash ~/docker-compose-up-d/scripts/run_tests.sh` (not `pytest` from `~`).
 
-If this repo is already checked out on this branch:
+Launcher startup prints `PROGRAM_INVENTORY vs origin/main` (6 → 11 output
+programs, none removed). Spec: [docs/MASTER_REQUIREMENTS.md](docs/MASTER_REQUIREMENTS.md),
+[docs/PROGRAM_INVENTORY.md](docs/PROGRAM_INVENTORY.md),
+[docs/COMPLETION_MATRIX.md](docs/COMPLETION_MATRIX.md).
+
+`RATE_MODE=fixed` (default) keeps README take-profits +3/+4/+5/+8%.
+`dynamic` / `auto` scale TP/SL/size from ATR and never POST on synthetic data.
+
+### `bash: ./start.sh: No such file or directory`
+
+That message is from **bash**, before any bot code runs. Either:
+
+1. The current directory is `~` / `/tmp` / somewhere else — not the clone, or
+2. This checkout is `main` without the PR branch, so the enhanced `start.sh`
+   is not what you think (or is missing). Run `git ls-files start.sh`.
+
+Fix:
+
+```bash
+cd ~/docker-compose-up-d
+git checkout cursor/closed-loop-launcher-563e
+bash ./start.sh
+# or: bash ~/docker-compose-up-d/start.sh
+```
+
+Optional: install a **home-safe finder** so `cd ~ && bash ./start.sh` prints
+the same "cd to the repo" hint instead of a raw "No such file":
+
+```bash
+cd ~/docker-compose-up-d
+bash scripts/install_launch_alias.sh
+```
+
+That copies `scripts/home_start.sh` to `~/start.sh` and adds a `bitbank-start`
+function. The home copy does **not** launch the bot and does **not** run tests.
+
+`bash start.sh` or `./start.sh` from `~` with no finder on `PATH` is expected
+to fail — there is no global `start.sh`. Use the absolute path shown above.
+
+One-cycle dry health check (no orders):
+
+```bash
+bash ./start.sh --once --synthetic --skip-lock --no-screen
+```
+
+`start.sh` finds this repo from its own path (not a hardcoded Mac home), uses
+`.venv`, loads `.env` without printing secrets, and starts the existing
+`python -m bitbank_bot` entry. LIVE is refused unless `TRADING_MODE=LIVE` **and**
+`LIVE_TRADING_CONFIRM=YES_I_ACCEPT_REAL_MONEY_RISK` **and** both API keys.
+Default remains `DRY_RUN`. JSON logs go to `logs/bot.log` (rotated 5MB × 5).
+`data/KILL` halts new orders. `data/bot.lock` is the instance lock.
+
+Same launcher without the shell wrapper:
+
+```bash
+PYTHONPATH=src python3 -m bitbank_bot.launch
+python3 main.py
+```
+
+Stdlib-only fallback (no pip / no venv), still DRY_RUN and no orders:
 
 ```bash
 python3 run.py
 ```
 
-`python3 main.py` also works: it uses the full package when httpx is installed, otherwise the same stdlib `run.py`.
+`python -m bitbank_bot` is the engine only (no crash-restart wrapper). Use that
+under systemd (`deploy/bitbank-bot.service`) or pass `--no-supervise`.
 
-Live trading stays **off** unless `.env` has `DRY_RUN=false` **and** `LIVE_TRADING=true` **and** both API keys.
+Paste **this one line** in iTerm to clone and open the 取引画面:
+
+```bash
+bash -lc 'REPO="$HOME/docker-compose-up-d"; set -euo pipefail; if [ ! -d "$REPO/.git" ]; then git clone https://github.com/kazuterukawamitu/docker-compose-up-d.git "$REPO"; fi; cd "$REPO"; git fetch origin cursor/closed-loop-launcher-563e; git checkout -B cursor/closed-loop-launcher-563e origin/cursor/closed-loop-launcher-563e; exec bash ./start.sh --screen'
+```
+
+HOLD/待機 is normal. Stop with Ctrl-C.
+
+### If you see `zsh: command not found: ....`
+
+That is **not** a bot crash. pytest progress (`.... [ 40%]`) and `179 passed`
+were pasted into zsh at `~`. zsh tried to run the dots as commands.
+
+1. If the prompt is a lone `>` (continuation after an unclosed quote), press **Ctrl-C**.
+2. Then start the program from the repo:
+
+```bash
+cd ~/docker-compose-up-d
+bash ./start.sh
+```
+
+Do **not** paste pytest output, Python snippets, or chat excerpts into the terminal.
+
+Live trading stays **off** unless `.env` has `TRADING_MODE=LIVE` **and**
+`LIVE_TRADING_CONFIRM=YES_I_ACCEPT_REAL_MONEY_RISK` **and** both API keys.
+If either LIVE flag is missing, the bot is `LIVE_READY` (full path except the
+order POST; logs `WOULD_SUBMIT_ORDER`). `DRY_RUN=true` remains the default.
+
+`CANDLE_TYPE=5min` is supported (Bitbank `btc_jpy` / `5min` / JST `YYYYMMDD`,
+including yesterday near midnight). Accidental synthetic candles never place
+orders (`EXECUTION_BLOCKED` / `synthetic_market_data`).
 
 `--once --synthetic` is a one-cycle smoke test that **exits on purpose**. The launcher above does **not** use `--once`.
 
@@ -63,12 +172,22 @@ State-machine mapping: [docs/STRATEGY.md](docs/STRATEGY.md).
 - `DRY_RUN=true` and `LIVE_TRADING=true` are mutually exclusive.
 - Create `data/KILL` to halt new orders.
 
-## Tests
+## Tests (not launch)
+
+Do **not** paste a pytest command into iTerm at `~`. That is how
+`src` goes missing and a pytest line "appears" as if it were a start step.
+Launchers never run the test suite unless you pass `--self-test`.
+
+From any cwd (the script `cd`s to the repo; do not run `pytest` from `~`):
 
 ```bash
-bash ~/docker-compose-up-d/start.sh --once --synthetic --skip-lock
-PYTHONPATH=src .venv/bin/python -m pytest -q
+cd ~/docker-compose-up-d
+bash scripts/run_tests.sh
+# or: bash ~/docker-compose-up-d/scripts/run_tests.sh
 ```
+
+or `bash ./start.sh --self-test`. Do not paste the dots or `N passed` line
+back into zsh.
 
 Read-only execution check (never places an order):
 

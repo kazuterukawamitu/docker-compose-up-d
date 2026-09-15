@@ -7,16 +7,20 @@ runnable bot lives in `src/bitbank_bot/`. This branch is Bitbank `btc_jpy` only.
 
 | Area | Where | Role |
 | --- | --- | --- |
-| Config / dual live flags | `config.py` | `DRY_RUN` default; live needs `DRY_RUN=false` and `LIVE_TRADING=true` and keys |
+| Config / dual live flags | `config.py` | `DRY_RUN` default; `TRADING_MODE` + `LIVE_TRADING_CONFIRM=YES_I_ACCEPT_REAL_MONEY_RISK` for LIVE; otherwise LIVE_READY / DRY_RUN |
 | Public + private REST | `rest_client.py` | HMAC `ACCESS-TIME-WINDOW`; `create_order` requires `live_confirmed` |
 | README MA rules | `strategy.py`, `docs/STRATEGY.md` | BUY1–4 / SELL1–4; HOLD always has a reason |
 | Size | `amounts.py` | Only place that sets quantity; TARGET vs PLANNED; ACTUAL unset until fill |
 | Risk | `risk.py` | Kill switch, daily loss, position cap, circuit breaker |
-| Orders | `orders.py` | DRY_RUN never calls `create_order`; live unfilled is polled |
-| Loop | `engine.py` | Candles → signal → size → order; state in `data/state.json` |
+| Orders | `orders.py` | DRY_RUN never calls `create_order`; LIVE_READY logs `WOULD_SUBMIT_ORDER`; live unfilled is polled; POST timeout checks open orders instead of re-POST |
+| Loop | `engine.py` | Candles → signal → gate → `TradeSignalExecutor` → `OrderExecutor`; state in `data/state.json` |
 | Screen | `screen.py` | iTerm 取引画面; JSON stays in `logs/bot.log` |
 | 4h+1d filter | `multi_timeframe.py` | Hard BUY block when both HTF SMAs slope down, or HTF data missing |
 | Watchdog | `watchdog.py` | HOLD past 15 minutes is `LONG_WAIT`, not `FAIL` |
+| RateEngine | `rate_engine.py` | FIXED keeps 3/4/5/8% TPs; DYNAMIC/AUTO scale from ATR |
+| Execution gate | `execution_gate.py` | Last checks before OrderExecutor |
+| Reconcile | `reconciliation.py` | Bitbank balances/open orders are source of truth |
+| Launcher | `launch.py` + `start.sh` | Enhanced start; prints PROGRAM_INVENTORY |
 | Read-only audit | `scripts/bitbank_execution_audit.py` | ticker / assets / active_orders / trade_history |
 
 `run.py` is a stdlib-only DRY_RUN 取引画面. It is the program that
@@ -63,7 +67,13 @@ bitFlyer, Coincheck, and GMO are not imported and are not executed.
 - Does not SSH to a VPS or install systemd for you.
 - Does not implement quantum / multi-exchange / guaranteed fills or profits.
 - Does not log API keys or secrets (`safe_dict` / `Config.__repr__`).
-- Does not place a live order unless both flags and keys are set.
+- Does not place a live order unless `TRADING_MODE=LIVE` **and**
+  `LIVE_TRADING_CONFIRM=YES_I_ACCEPT_REAL_MONEY_RISK` **and** API keys.
+  Legacy `DRY_RUN=false` + `LIVE_TRADING=true` without the confirm phrase is
+  LIVE_READY (would-submit only).
+
+See [reports/closed_loop_audit.md](../reports/closed_loop_audit.md) for the
+closed-loop pass notes.
 
 If keys were pasted into chat, rotate them in the bitbank console. Do not put
 them in git, screenshots, or logs.
