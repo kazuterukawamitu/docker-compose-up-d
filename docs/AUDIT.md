@@ -57,6 +57,12 @@ bitFlyer, Coincheck, and GMO are not imported and are not executed.
 10. **Partial fills.** `PARTIALLY_FILLED` stays in `state.pending` and is polled
     until the remainder fills.
 11. **Kill file.** `data/KILL` blocks sells as well as buys.
+12. **Home venv vs repo venv.** `start.sh` runs `$ROOT/.venv/bin/python` only
+    (never `~/.venv`), writes `bitbank_bot_src.pth`, and exports `PYTHONPATH`
+    so `-m bitbank_bot.launch` works. Mac start is
+    `bash ~/docker-compose-up-d/start.sh` on branch
+    `cursor/bitbank-closed-loop-f964`. `run_transaction.sh` is a one-shot
+    DRY_RUN wrapper around `start.sh`. Live POST is still off.
 
 ## What this bot does not do
 

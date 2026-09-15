@@ -19,6 +19,9 @@ if [[ ! -f "$root/start.sh" || ! -f "$root/src/bitbank_bot/launch.py" || ! -f "$
   echo "This helper lives at scripts/run_bot.sh inside the repo." >&2
   echo "Typical clone: cd ~/docker-compose-up-d && bash ./start.sh" >&2
   echo "Need branch cursor/bitbank-closed-loop-f964 (git ls-files start.sh)." >&2
+  echo "Do not paste JSON logs, agent reports, or script source into the terminal. Ctrl-C if you see '>'. Then run ONLY:" >&2
+  echo "  bash ~/docker-compose-up-d/start.sh" >&2
+  echo "Never bash /workspace/start.sh on a Mac. Uses repo .venv, never ~/.venv." >&2
   echo "Do not paste pytest output (.... [ 40%] / 179 passed) into zsh." >&2
   echo "pytest is not a launch step." >&2
   exit 2

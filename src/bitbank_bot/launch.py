@@ -1,15 +1,15 @@
 """Enhanced launcher for the existing bitbank_bot entrypoint.
 
-Used by ``start.sh`` and ``python -m bitbank_bot.launch``. Locates the repo
-root, loads ``.env`` without printing secrets, prints SET/UNSET diagnostics,
-refuses LIVE without dual-auth, and optionally restarts on crash with backoff.
+Used by ``start.sh``, ``python -m bitbank_bot.launch``, and ``launch_bot.py``.
+Locates the repo root, loads ``.env`` without printing secrets, prints SET/UNSET
+diagnostics, refuses LIVE without dual-auth, and optionally restarts on crash
+with backoff.
 
 It does not place Bitbank orders. Child process is ``python -m bitbank_bot``.
 
-Do not paste this file or pytest output into zsh. From any cwd::
+Do not paste this file, JSON logs, or agent reports into zsh. From ~ on a Mac::
 
-    bash ./start.sh
-    bash /absolute/path/to/start.sh
+    bash ~/docker-compose-up-d/start.sh
 """
 
 from __future__ import annotations
@@ -21,6 +21,12 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
+
+_SRC_DIR = Path(__file__).resolve().parents[1]
+if _SRC_DIR.name == "src":
+    _src_s = str(_SRC_DIR)
+    if _src_s not in sys.path:
+        sys.path.insert(0, _src_s)
 
 from bitbank_bot.config import (
     LIVE_CONFIRM_PHRASE,
@@ -54,8 +60,10 @@ SMART_QUOTES = frozenset("\u201c\u201d\u2018\u2019")
 NOT_IN_REPO_HINT = (
     "cd to the repo first, then run: bash ./start.sh\n"
     "Typical clone name: docker-compose-up-d\n"
-    "  cd ~/docker-compose-up-d && bash ./start.sh\n"
-    "Or from ~ (no cd): bash ~/docker-compose-up-d/start.sh\n"
+    "Do not paste JSON logs, agent reports, or script source into the terminal. "
+    "Ctrl-C if you see '>'. Then run ONLY:\n"
+    "  bash ~/docker-compose-up-d/start.sh\n"
+    "Never bash /workspace/start.sh on a Mac. Uses repo .venv, never ~/.venv.\n"
     "start.sh is on branch cursor/bitbank-closed-loop-f964 "
     "(git ls-files start.sh must print start.sh).\n"
     "If you are on main, checkout that branch or merge the PR.\n"
@@ -63,7 +71,7 @@ NOT_IN_REPO_HINT = (
     "Do not run CommandLineTools python3 on test_public.py / main.py from ~.\n"
     "pytest is not a launch step. Tests: bash scripts/run_tests.sh "
     "(absolute path is fine; do not run pytest from ~).\n"
-    "If zsh shows a lone '>' prompt, press Ctrl-C, then cd to the repo."
+    "If zsh shows a lone '>' prompt, press Ctrl-C, then run the one command above."
 )
 PYTEST_HOME_HINT = (
     "pytest found no Bitbank tests in this directory.\n"
@@ -186,7 +194,39 @@ def find_project_root(start: Path | None = None) -> Path:
     )
 
 
-def ensure_src_on_path(root: Path) -> None:
+def executable_is_home_venv(
+    python_exe: str | None = None,
+    *,
+    home: Path | None = None,
+    root: Path | None = None,
+) -> bool:
+    """True when the interpreter lives in ``~/.venv`` and that is not the repo venv."""
+    exe = Path(python_exe or sys.executable).resolve()
+    home_venv = (Path(home) if home is not None else Path.home()) / ".venv"
+    try:
+        home_resolved = home_venv.resolve()
+    except OSError:
+        return False
+    if not home_resolved.exists():
+        return False
+    try:
+        exe.relative_to(home_resolved)
+    except ValueError:
+        return False
+    if root is not None:
+        repo_venv = (Path(root) / ".venv").resolve()
+        try:
+            if exe.relative_to(repo_venv):
+                return False
+        except ValueError:
+            pass
+    return True
+
+
+def ensure_src_on_path(root: Path | None = None) -> None:
+    if root is None:
+        src_path = Path(__file__).resolve().parents[1]
+        root = src_path.parent
     src = str(root / "src")
     if src not in sys.path:
         sys.path.insert(0, src)
@@ -430,6 +470,10 @@ def build_parser() -> argparse.ArgumentParser:
 def _usage_epilog() -> str:
     return (
         "The only supported start from a Mac iTerm prompt:\n"
+        "Do not paste JSON logs, agent reports, or script source into the terminal. "
+        "Ctrl-C if you see '>'. Then run ONLY:\n"
+        "  bash ~/docker-compose-up-d/start.sh\n"
+        "Never bash /workspace/start.sh on a Mac. Uses repo .venv, never ~/.venv.\n"
         "  cd <repo> && bash ./start.sh\n"
         "  bash /absolute/path/to/start.sh\n"
         "  bash ./start.sh --help\n"
@@ -439,15 +483,15 @@ def _usage_epilog() -> str:
         "LIVE requires TRADING_MODE=LIVE and "
         f"LIVE_TRADING_CONFIRM={LIVE_CONFIRM_PHRASE}. Default is DRY_RUN.\n"
         "If bash says './start.sh: No such file or directory' you are not in the clone "
-        "(often ~). cd ~/docker-compose-up-d && bash ./start.sh\n"
+        "(often ~). Run: bash ~/docker-compose-up-d/start.sh\n"
         "Optional home-safe wrapper: bash scripts/install_launch_alias.sh\n"
-        "If zsh says 'command not found: ....' you pasted pytest dots; press Ctrl-C "
-        "if stuck at '>', then cd to the repo and run bash ./start.sh.\n"
+        "If zsh says 'command not found: ts:' or SMOKE_ORDER_OK / .... you pasted "
+        "JSON logs or pytest dots; press Ctrl-C if stuck at '>', then run the one command.\n"
         "pytest is not a launch step. Developer tests: "
         "bash scripts/run_tests.sh   or   bash ./start.sh --self-test "
         "(absolute path is fine; do not run pytest from ~).\n"
         "Do not point CommandLineTools python3 at test_public.py / main.py.\n"
-        "Do not paste pytest output or this Python source into the terminal.\n"
+        "Do not paste pytest output, JSON logs, or this Python source into the terminal.\n"
     )
 
 
@@ -495,6 +539,12 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     os.chdir(root)
     ensure_src_on_path(root)
+    if executable_is_home_venv(sys.executable, root=root):
+        sys.stderr.write(
+            "launcher: refusing ~/.venv. Use bash ~/docker-compose-up-d/start.sh "
+            "(repo .venv only).\n"
+        )
+        return 2
     try:
         cfg = load_config(env_file=env_file_from_argv(opts.forwarded))
     except ConfigError as exc:

@@ -18,9 +18,19 @@ random file while your cwd is `~` — that is
 `no tests ran`.
 
 `start.sh` always `cd`s to the repo from its own path (`BASH_SOURCE`) and
-runs `.venv/bin/python -m bitbank_bot.launch` (it creates `.venv` first).
-Either `cd` into the clone **or** call `start.sh` by absolute path from
-home. Branch `cursor/bitbank-closed-loop-f964`:
+runs **`$ROOT/.venv/bin/python` only** (never `~/.venv`). It writes
+`bitbank_bot_src.pth` into the **repo** venv site-packages and exports
+`PYTHONPATH=$ROOT/src` so `-m bitbank_bot.launch` works. Branch
+`cursor/bitbank-closed-loop-f964`.
+
+**Do not paste JSON logs, agent reports, or script source into the terminal. Ctrl-C if you see `>`. Then run ONLY:**
+
+```bash
+bash ~/docker-compose-up-d/start.sh
+```
+
+Never `bash /workspace/start.sh` on a Mac (that path is the cloud VM). Never
+`~/.venv/bin/python -m bitbank_bot.launch`.
 
 ```bash
 cd ~/docker-compose-up-d
@@ -33,8 +43,10 @@ bash ./start.sh
 bash ~/docker-compose-up-d/start.sh
 ```
 
-`bash ./start.sh --help` prints the same instructions. A thin wrapper is
-`bash scripts/run_bot.sh` (refuses unless cwd is this repo). Tests:
+`bash ./start.sh --help` prints the same instructions. Optional one-shot DRY_RUN
+wrapper (not a second bot; no live POST): `bash ~/docker-compose-up-d/run_transaction.sh`.
+`python launch_bot.py` from the clone inserts `src/` then calls the same launcher.
+A cwd-checked wrapper is `bash scripts/run_bot.sh`. Tests:
 `bash ~/docker-compose-up-d/scripts/run_tests.sh` (not `pytest` from `~`).
 
 ### `bash: ./start.sh: No such file or directory`
@@ -75,15 +87,16 @@ bash ./start.sh --once --synthetic --skip-lock --no-screen
 ```
 
 `start.sh` finds this repo from its own path (not a hardcoded Mac home), uses
-`.venv`, loads `.env` without printing secrets, and starts the existing
-`python -m bitbank_bot` entry. LIVE is refused unless `TRADING_MODE=LIVE` **and**
+the repo `.venv` only (never `~/.venv`), loads `.env` without printing secrets,
+and starts the existing `python -m bitbank_bot` entry. LIVE is refused unless `TRADING_MODE=LIVE` **and**
 `LIVE_TRADING_CONFIRM=YES_I_ACCEPT_REAL_MONEY_RISK` **and** both API keys.
 Default remains `DRY_RUN`. JSON logs go to `logs/bot.log` (rotated 5MB × 5).
 `data/KILL` halts new orders. `data/bot.lock` is the instance lock.
 
-Same launcher without the shell wrapper:
+Same launcher without the shell wrapper (still from the clone; still not `~/.venv`):
 
 ```bash
+python3 launch_bot.py
 PYTHONPATH=src python3 -m bitbank_bot.launch
 python3 main.py
 ```
@@ -105,20 +118,24 @@ bash -lc 'REPO="$HOME/docker-compose-up-d"; set -euo pipefail; if [ ! -d "$REPO/
 
 HOLD/待機 is normal. Stop with Ctrl-C.
 
-### If you see `zsh: command not found: ....`
+### If you see `zsh: command not found: ts:` / `SMOKE_ORDER_OK` / `....`
 
-That is **not** a bot crash. pytest progress (`.... [ 40%]`) and `179 passed`
-were pasted into zsh at `~`. zsh tried to run the dots as commands.
+That is **not** a bot crash. JSON bot logs (`"ts":`, `SMOKE_ORDER_OK`,
+`FAILURE`, `compileall:`, `HOW`, `LIVE`), pytest progress (`.... [ 40%]`),
+or an agent report were pasted into zsh at `~`. zsh tried to run those tokens
+as commands. `zsh: event not found` means a shebang bang was pasted (do not
+paste `start.sh` source). `bash: /workspace/start.sh: No such file` is the
+cloud VM path, not a Mac path.
 
 1. If the prompt is a lone `>` (continuation after an unclosed quote), press **Ctrl-C**.
-2. Then start the program from the repo:
+2. Then run ONLY:
 
 ```bash
-cd ~/docker-compose-up-d
-bash ./start.sh
+bash ~/docker-compose-up-d/start.sh
 ```
 
-Do **not** paste pytest output, Python snippets, or chat excerpts into the terminal.
+Do **not** paste JSON logs, agent reports, pytest output, Python snippets, or
+script source into the terminal. Never `~/.venv`.
 
 Live trading stays **off** unless `.env` has `TRADING_MODE=LIVE` **and**
 `LIVE_TRADING_CONFIRM=YES_I_ACCEPT_REAL_MONEY_RISK` **and** both API keys.

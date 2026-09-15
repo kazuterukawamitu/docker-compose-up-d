@@ -16,6 +16,9 @@ def test_compileall_src() -> None:
         py_compile.compile(str(path), doraise=True)
     py_compile.compile(str(root / "main.py"), doraise=True)
     py_compile.compile(str(root / "run.py"), doraise=True)
+    launch_bot = root / "launch_bot.py"
+    if launch_bot.is_file():
+        py_compile.compile(str(launch_bot), doraise=True)
     diag = root / "diagnostics.py"
     if diag.is_file():
         py_compile.compile(str(diag), doraise=True)
@@ -65,6 +68,16 @@ def test_start_sh_is_venv_loop_launcher() -> None:
     assert "--self-test" in text
     assert "docker-compose-up-d" in text
     assert "PYTHONPATH=src python3 -m pytest -q" not in text
+    assert "bitbank_bot_src.pth" in text
+    assert 'PYTHONPATH="$ROOT/src' in text
+    assert "never ~/.venv" in text
+    assert "set +H" in text
+    assert "histexpand" in text
+    assert "JSON logs" in text
+    assert "bash ~/docker-compose-up-d/start.sh" in text
+    assert "/workspace/start.sh" in text
+    assert ("closed-loop-launcher-" + "563e") not in text
+    assert 'VPY="$PY"' not in text
 
 
 def test_trading_modes_file_compiles_without_stray_paren() -> None:

@@ -5,10 +5,15 @@
 # bash's raw "No such file or directory". It does not start the bot from ~.
 # It does not run pytest. LIVE is not enabled.
 #
+# Do not paste JSON logs, agent reports, or script source into the terminal.
+# Ctrl-C if you see '>'. Then run ONLY:
+#   bash ~/docker-compose-up-d/start.sh
+# Never bash /workspace/start.sh on a Mac. Branch cursor/bitbank-closed-loop-f964.
+#
 #   cd <repo> && bash scripts/install_launch_alias.sh
 #
 # Then either:
-#   cd ~/docker-compose-up-d && bash ./start.sh
+#   bash ~/docker-compose-up-d/start.sh
 # or:
 #   bitbank-start
 
@@ -81,6 +86,9 @@ install_rc "$home/.bashrc"
 
 echo "installed home-safe finder: $dest"
 echo "from ~ this prints a cd hint (it does not launch the bot)"
+echo "Do not paste JSON logs, agent reports, or script source into the terminal. Ctrl-C if you see '>'. Then run ONLY:"
+echo "  bash ~/docker-compose-up-d/start.sh"
+echo "Never bash /workspace/start.sh on a Mac. Uses repo .venv, never ~/.venv."
 echo "from the clone, start with:"
 echo "  cd $root && bash ./start.sh"
 echo "or from ~: bash $root/start.sh"

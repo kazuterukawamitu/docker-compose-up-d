@@ -6,6 +6,12 @@
 #
 # This file is NOT the bot. It never starts trading. It never runs pytest.
 # You MUST cd into the clone (common name: docker-compose-up-d).
+# Branch: cursor/bitbank-closed-loop-f964
+#
+# Do not paste JSON logs, agent reports, or script source into the terminal.
+# Ctrl-C if you see '>'. Then run ONLY:
+#   bash ~/docker-compose-up-d/start.sh
+# Never bash /workspace/start.sh on a Mac. Uses repo .venv, never ~/.venv.
 #
 # Install from the repo:
 #   bash scripts/install_launch_alias.sh
@@ -21,13 +27,15 @@ BOT_BRANCH="cursor/bitbank-closed-loop-f964"
 not_in_repo() {
   echo "cd to the repo first, then run: bash ./start.sh" >&2
   echo "This copy is only a finder. The real start.sh lives inside the clone." >&2
+  echo "Do not paste JSON logs, agent reports, or script source into the terminal. Ctrl-C if you see '>'. Then run ONLY:" >&2
+  echo "  bash ~/docker-compose-up-d/start.sh" >&2
+  echo "Never bash /workspace/start.sh on a Mac. Uses repo .venv, never ~/.venv." >&2
   echo "Typical Mac path (clone name docker-compose-up-d):" >&2
   echo "  cd ~/docker-compose-up-d" >&2
   echo "  git fetch origin $BOT_BRANCH" >&2
   echo "  git checkout $BOT_BRANCH" >&2
   echo "  git ls-files start.sh    # must print: start.sh" >&2
   echo "  bash ./start.sh" >&2
-  echo "Or from ~: bash ~/docker-compose-up-d/start.sh" >&2
   echo "If start.sh is missing, you are on main (or not in the clone)." >&2
   echo "Checkout $BOT_BRANCH or merge the PR; do not run tests from ~." >&2
   echo "pytest is not a launch step. Do not paste test commands at ~." >&2

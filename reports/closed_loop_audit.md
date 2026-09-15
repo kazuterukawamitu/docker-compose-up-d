@@ -438,3 +438,61 @@ BASH_SOURCE). `bash /workspace/start.sh --check-config --no-screen` from
 `/tmp` EXIT 2 with `cd ... or use: bash .../scripts/run_tests.sh`.
 No live POST. No secrets.
 
+---
+
+## Eighth pass (Mac zsh paste + home venv ModuleNotFoundError)
+
+### Exact causes (verified from the Mac paste, not treated as bot crashes)
+
+1. `zsh: command not found: ts:` / `SMOKE_ORDER_OK` / `FAILURE` / `compileall:` /
+   `HOW` / `LIVE` / `....` — JSON bot logs, pytest progress, or an agent report
+   pasted into interactive zsh at `~`. zsh tried to run those tokens as
+   commands. The DRY_RUN JSON (`RATE_DECIDED`, `RISK_CHECK_PASSED`,
+   `ORDER_INTENT DRY_RUN`, `SIMULATED_FILL`, `SMOKE_ORDER_OK`, create_order not
+   called) is a **successful** dry cycle, not a failure. LIVE stays off.
+2. `zsh: event not found: /usr/bin/env` — zsh history expansion on `!` in a
+   pasted shebang. `set +H` in `start.sh` cannot disable the *interactive* zsh
+   session. Do not paste script source. Usage never prints that shebang.
+3. `>` continuation prompt — unclosed quote/JSON from the paste. Ctrl-C.
+4. `bash: /workspace/start.sh: No such file or directory` — `/workspace` is the
+   cloud VM, not the Mac.
+5. `bash: ./run_transaction.sh` / missing
+   `/Users/.../docker-compose-up-d/run_transaction.sh` — wrapper was absent;
+   this pass adds a 10-line DRY_RUN exec of existing `start.sh`.
+6. `ModuleNotFoundError: No module named 'bitbank_bot'` —
+   `~/.venv/bin/python -m bitbank_bot.launch` (HOME venv, no `src` on
+   sys.path). `start.sh` now refuses any python outside `$ROOT/.venv`, writes
+   `bitbank_bot_src.pth` into the **repo** venv, and exports `PYTHONPATH`.
+   `launch_bot.py` / `launch.py` insert `src/` from the file location before
+   importing `bitbank_bot`.
+7. Home finder telling the user to checkout an older `closed-loop-launcher`
+   branch — wrong. Every launcher/README string is
+   `cursor/bitbank-closed-loop-f964`.
+
+### The one Mac command (cwd may be `~`)
+
+```bash
+bash ~/docker-compose-up-d/start.sh
+```
+
+Never `bash /workspace/start.sh` on a Mac. Never `~/.venv`.
+
+### Fix
+
+- `start.sh`: `set +H` / `set +o histexpand` for this bash process; refuse
+  `$VPY` outside `$ROOT/.venv`; skip `~/.venv` in `pick_python`; write
+  `bitbank_bot_src.pth`; keep `PYTHONPATH=$ROOT/src`; usage tells users not to
+  paste JSON/agent/script source.
+- `run_transaction.sh`: `cd` via `BASH_SOURCE`, then
+  `exec bash "$ROOT/start.sh" --once --skip-lock --no-screen`.
+- `launch_bot.py`: sys.path `src`, then `bitbank_bot.launch.main`; refuses
+  `~/.venv`.
+- `scripts/home_start.sh` / `install_launch_alias.sh` / README: correct branch
+  and the one-command recovery line.
+
+LIVE stays off. No secrets logged. No live POST.
+
+### Test results (this pass)
+
+Recorded after `compileall` + pytest on this branch.
+

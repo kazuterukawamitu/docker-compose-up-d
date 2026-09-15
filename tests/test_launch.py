@@ -24,6 +24,7 @@ from bitbank_bot.launch import (
     should_supervise,
     split_launch_argv,
     supervise_loop,
+    executable_is_home_venv,
 )
 from bitbank_bot.logging_setup import setup_logging
 
@@ -172,6 +173,11 @@ def test_start_sh_help_smoke() -> None:
     assert "command not found" in proc.stdout
     assert "RATE_MODE" in proc.stdout
     assert "secret" not in proc.stdout.lower() or "without printing secrets" in proc.stdout
+    assert "#!/usr/bin/env" not in proc.stdout
+    assert "JSON logs" in proc.stdout
+    assert "bash ~/docker-compose-up-d/start.sh" in proc.stdout
+    assert "Never bash /workspace/start.sh" in proc.stdout
+    assert "never ~/.venv" in proc.stdout
 
 
 def test_launch_once_synthetic_no_order_post(tmp_path, monkeypatch) -> None:
@@ -240,6 +246,8 @@ def test_launch_py_has_no_smart_quotes_and_parses() -> None:
         "src/bitbank_bot/main.py",
         "src/bitbank_bot/pytest_plugin.py",
         "tests/conftest.py",
+        "launch_bot.py",
+        "run_transaction.sh",
     ):
         other = (root / rel).read_text(encoding="utf-8")
         for ch in SMART_QUOTES:
@@ -249,6 +257,7 @@ def test_launch_py_has_no_smart_quotes_and_parses() -> None:
     ast.parse((root / "src" / "bitbank_bot" / "main.py").read_text(encoding="utf-8"))
     ast.parse((root / "src" / "bitbank_bot" / "pytest_plugin.py").read_text(encoding="utf-8"))
     ast.parse((root / "tests" / "conftest.py").read_text(encoding="utf-8"))
+    ast.parse((root / "launch_bot.py").read_text(encoding="utf-8"))
 
 
 def test_looks_like_pytest_paste_and_repo_cwd() -> None:
@@ -611,3 +620,166 @@ def test_start_sh_self_test_from_other_cwd(tmp_path) -> None:
     assert proc.returncode == 0, out
     assert "no tests ran" not in out.lower()
     assert "test_launch.py" in out or "test_startup.py" in out or "collected" in out.lower()
+
+
+def test_wrong_launcher_branch_string_is_gone() -> None:
+    root = Path(__file__).resolve().parents[1]
+    bad = "closed-loop-launcher-" + "563e"
+    required = "cursor/bitbank-closed-loop-f964"
+    found_required = False
+    skip_dirs = {".git", ".venv", "__pycache__", "node_modules"}
+    keep_suffix = {".sh", ".py", ".md", ".txt", ".toml", ".yml", ".yaml", ".service", ".example"}
+    keep_names = {"start.sh", "run_transaction.sh"}
+    for path in root.rglob("*"):
+        if not path.is_file():
+            continue
+        if any(part in skip_dirs for part in path.parts):
+            continue
+        if path.suffix.lower() not in keep_suffix and path.name not in keep_names:
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        assert bad not in text, f"{path} still names the old branch"
+        if path.name in {
+            "start.sh",
+            "README.md",
+            "home_start.sh",
+            "install_launch_alias.sh",
+            "run_bot.sh",
+            "launch.py",
+        } and required in text:
+            found_required = True
+    assert found_required
+
+
+def test_executable_is_home_venv_skips_repo_venv(tmp_path) -> None:
+    home = tmp_path / "home"
+    home_py = home / ".venv" / "bin" / "python"
+    home_py.parent.mkdir(parents=True)
+    home_py.write_text("#!/bin/sh\n", encoding="utf-8")
+    root = tmp_path / "repo"
+    repo_py = root / ".venv" / "bin" / "python"
+    repo_py.parent.mkdir(parents=True)
+    repo_py.write_text("#!/bin/sh\n", encoding="utf-8")
+    assert executable_is_home_venv(str(home_py), home=home, root=root) is True
+    assert executable_is_home_venv(str(repo_py), home=home, root=root) is False
+    assert executable_is_home_venv("/usr/bin/python3", home=home, root=root) is False
+
+
+def test_start_sh_from_foreign_cwd_uses_repo_venv_not_home(tmp_path) -> None:
+    root = Path(__file__).resolve().parents[1]
+    home = tmp_path / "home"
+    fake_bin = home / ".venv" / "bin"
+    fake_bin.mkdir(parents=True)
+    payload = "#!/bin/sh\necho HOME_VENV_USED >&2\nexit 99\n"
+    for name in ("python", "python3", "python3.12", "pip", "pip3"):
+        path = fake_bin / name
+        path.write_text(payload, encoding="utf-8")
+        path.chmod(0o755)
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+    env["HOME"] = str(home)
+    env["PATH"] = f"{fake_bin}:{env.get('PATH', '')}"
+    env["VIRTUAL_ENV"] = str(home / ".venv")
+    env["DRY_RUN"] = "true"
+    env["LIVE_TRADING"] = "false"
+    proc = subprocess.run(
+        ["bash", str(root / "start.sh"), "--check-config", "--no-screen"],
+        cwd=str(tmp_path),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=180,
+    )
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 0, out
+    assert "HOME_VENV_USED" not in out
+    repo_py = str((root / ".venv" / "bin" / "python").resolve())
+    assert "using " in out
+    assert str(root / ".venv") in out
+    assert repo_py in out or f"{root}/.venv/bin/python" in out
+    assert "may_place_live_orders: False" in out
+    site = None
+    for cand in (root / ".venv").glob("lib/python*/site-packages/bitbank_bot_src.pth"):
+        site = cand
+        break
+    assert site is not None, out
+    pth = site.read_text(encoding="utf-8").strip()
+    assert pth == str((root / "src").resolve()) or pth.endswith("/src")
+    assert "create_order" not in out
+    assert "/user/spot/order" not in out
+
+
+def test_run_transaction_sh_cds_via_bash_source(tmp_path) -> None:
+    root = Path(__file__).resolve().parents[1]
+    wrapper = root / "run_transaction.sh"
+    text = wrapper.read_text(encoding="utf-8")
+    assert "BASH_SOURCE" in text
+    assert "start.sh" in text
+    assert "--once" in text
+    assert "--skip-lock" in text
+    assert "--no-screen" in text
+    assert "create_order" not in text
+    assert "/user/spot/order" not in text
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+    env["DRY_RUN"] = "true"
+    env["LIVE_TRADING"] = "false"
+    proc = subprocess.run(
+        ["bash", str(wrapper), "--check-config"],
+        cwd=str(tmp_path),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=180,
+    )
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 0, out
+    assert str(root) in out
+    assert "may_place_live_orders: False" in out or "DRY_RUN" in out
+    assert "HOME_VENV_USED" not in out
+    assert "/user/spot/order" not in out
+
+
+def test_launch_bot_py_runs_without_pythonpath(tmp_path) -> None:
+    root = Path(__file__).resolve().parents[1]
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+    env["STATE_PATH"] = str(tmp_path / "state.json")
+    env["LOCK_PATH"] = str(tmp_path / "bot.lock")
+    env["LOG_DIR"] = str(tmp_path / "logs")
+    env["DRY_RUN"] = "true"
+    env["LIVE_TRADING"] = "false"
+    env["ENABLE_WEBSOCKET"] = "false"
+    proc = subprocess.run(
+        [sys.executable, str(root / "launch_bot.py"), "--check-config"],
+        cwd=str(root),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=45,
+    )
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 0, out
+    assert "No module named 'bitbank_bot'" not in out
+    assert "may_place_live_orders" in proc.stdout
+    assert "DRY_RUN" in proc.stdout
+
+
+def test_home_start_prints_one_mac_command(tmp_path) -> None:
+    root = Path(__file__).resolve().parents[1]
+    proc = subprocess.run(
+        ["bash", str(root / "scripts" / "home_start.sh")],
+        cwd=str(tmp_path),
+        capture_output=True,
+        text=True,
+        timeout=15,
+        env={**os.environ, "HOME": str(tmp_path)},
+    )
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 2, out
+    assert "bash ~/docker-compose-up-d/start.sh" in out
+    assert "Never bash /workspace/start.sh" in out
+    assert "cursor/bitbank-closed-loop-f964" in out
+    assert ("closed-loop-launcher-" + "563e") not in out
+    assert "JSON logs" in out
+    assert "never ~/.venv" in out

@@ -7,13 +7,19 @@
 #   bash /absolute/path/to/start.sh
 #   bash ./start.sh --help
 #
-# First-time clone (paste this ONE line, not pytest output):
+# Do not paste this file, JSON bot logs, agent reports, or script source
+# into the terminal. Ctrl-C if you see a lone '>'. Then run ONLY:
+#   bash ~/docker-compose-up-d/start.sh
+# Never bash /workspace/start.sh on a Mac (that path is the cloud VM).
+# This launcher uses $ROOT/.venv/bin/python only, never ~/.venv.
+#
+# First-time clone (paste this ONE line, not pytest output or JSON logs):
 #   bash -lc 'REPO="$HOME/docker-compose-up-d"; set -euo pipefail; if [ ! -d "$REPO/.git" ]; then git clone https://github.com/kazuterukawamitu/docker-compose-up-d.git "$REPO"; fi; cd "$REPO"; git fetch origin cursor/bitbank-closed-loop-f964; git checkout -B cursor/bitbank-closed-loop-f964 origin/cursor/bitbank-closed-loop-f964; exec bash ./start.sh --screen'
 #
 # Locates this repo (no hardcoded /Users/... path), creates .venv if needed,
 # prefers .venv/bin/python (never CommandLineTools python when a venv exists),
 # loads .env without printing secrets, then starts the existing bot entrypoint.
-# Do not paste python3 main.py. Do not paste pytest dots. Do not use bangs.
+# Do not paste python3 main.py. Do not paste pytest dots. Do not paste JSON.
 # Do not run /usr/bin/python3 on a random file (test_public.py, ~/main.py).
 
 if [ -z "${BASH_VERSION:-}" ]; then
@@ -21,6 +27,10 @@ if [ -z "${BASH_VERSION:-}" ]; then
 fi
 
 set -euo pipefail
+# Interactive zsh history expansion is NOT disabled by this (do not paste
+# this file into zsh). These only affect this bash process.
+set +H 2>/dev/null || true
+set +o histexpand 2>/dev/null || true
 
 # Prefer Homebrew on Mac, then the caller PATH (CI hosted Python). Do not
 # put /usr/bin first — that shadows Actions' python and breaks --self-test.
@@ -35,7 +45,12 @@ Usage: bash /path/to/start.sh [options]
 
 Enhanced launcher for the existing Bitbank BTC/JPY bot (DRY_RUN by default).
 This is the program-launching program. It cds to the repo from BASH_SOURCE
-(so cwd may be ~). Either cd, or pass the absolute path:
+(so cwd may be ~). Either cd, or pass the absolute path.
+
+Do not paste JSON logs, agent reports, or script source into the terminal. Ctrl-C if you see '>'. Then run ONLY:
+  bash ~/docker-compose-up-d/start.sh
+Never bash /workspace/start.sh on a Mac (that path is the cloud VM).
+Uses the repo .venv only, never ~/.venv. Branch cursor/bitbank-closed-loop-f964.
 
   bash ./start.sh
   bash ~/docker-compose-up-d/start.sh
@@ -56,21 +71,22 @@ If bash says: ./start.sh: No such file or directory
     bash scripts/install_launch_alias.sh
   Do not use CommandLineTools python3 on test_public.py / main.py from ~.
 
-Locates the repo from this script (not a hardcoded Mac path), uses .venv,
-loads .env without printing secrets, prints SET/UNSET diagnostics
-(RATE_MODE, RECONCILE_EVERY_CYCLES, keys SET/UNSET), and restarts on crash
-with backoff (not on config/lock failures). systemd already restarts:
+Locates the repo from this script (not a hardcoded Mac path), uses $ROOT/.venv,
+writes bitbank_bot_src.pth, loads .env without printing secrets, prints SET/UNSET
+diagnostics (RATE_MODE, RECONCILE_EVERY_CYCLES, keys SET/UNSET), and restarts
+on crash with backoff (not on config/lock failures). systemd already restarts:
 pass --no-supervise (or run python -m bitbank_bot).
 
 LIVE requires TRADING_MODE=LIVE and LIVE_TRADING_CONFIRM=YES_I_ACCEPT_REAL_MONEY_RISK.
-JSON logs: logs/bot.log (rotated 5MB x 5). Ctrl-C stops. data/KILL halts new orders.
+Rotated JSON logs live under logs/bot.log (5MB x 5). Ctrl-C stops. data/KILL halts new orders.
 Other flags pass through to python -m bitbank_bot.
 
-If zsh says: command not found: ....
-  You pasted pytest progress (.... [ 40%] / 179 passed), not a crash.
-  Press Ctrl-C to leave a stuck '>' prompt, then:
-    cd <repo> && bash ./start.sh
-  Do not paste pytest output or Python snippets into the terminal.
+If zsh says: command not found: ts: / SMOKE_ORDER_OK / FAILURE / compileall: / HOW / LIVE / ....
+  You pasted JSON bot logs, pytest progress, or an agent report, not a crash.
+  Press Ctrl-C to leave a stuck '>' prompt, then run ONLY:
+    bash ~/docker-compose-up-d/start.sh
+  If zsh says event not found, you pasted script source (a shebang bang).
+  Do not paste JSON logs, agent reports, pytest output, or this file.
 
 pytest is not a launch step. Developer tests (script cds to the repo):
   bash scripts/run_tests.sh
@@ -106,9 +122,12 @@ suggest_clones() {
 not_in_repo() {
   echo "cd to the repo first, then run: bash ./start.sh" >&2
   suggest_clones
+  echo "Do not paste JSON logs, agent reports, or script source into the terminal. Ctrl-C if you see '>'. Then run ONLY:" >&2
+  echo "  bash ~/docker-compose-up-d/start.sh" >&2
+  echo "Never bash /workspace/start.sh on a Mac. Uses repo .venv, never ~/.venv." >&2
   echo "Do not paste pytest output (.... [ 40%] / 179 passed) into the terminal." >&2
   echo "pytest is not a launch step. Do not paste test commands at ~." >&2
-  echo "If zsh shows a lone '>' prompt, press Ctrl-C, then cd to the repo." >&2
+  echo "If zsh shows a lone '>' prompt, press Ctrl-C, then run the one command above." >&2
 }
 
 resolve_root() {
@@ -189,29 +208,77 @@ if [[ "$self_test" -eq 1 ]]; then
   exec bash "$ROOT/scripts/run_tests.sh" "${self_test_args[@]}"
 fi
 
+abs_file() {
+  local p="$1"
+  if [[ -e "$p" ]]; then
+    echo "$(cd "$(dirname "$p")" && pwd -P)/$(basename "$p")"
+  else
+    echo "$p"
+  fi
+}
+
+is_disallowed_home_venv() {
+  local cand abs home_abs root_abs
+  cand="$1"
+  root_abs="$(cd "$ROOT" && pwd -P)"
+  if [[ "$cand" == */* ]]; then
+    abs="$cand"
+  else
+    abs="$(command -v "$cand" 2>/dev/null || true)"
+  fi
+  [[ -n "$abs" && -e "$abs" ]] || return 1
+  abs="$(abs_file "$abs")"
+  if [[ -n "${HOME:-}" ]]; then
+    home_abs="$(cd "$HOME" && pwd -P 2>/dev/null || true)"
+    if [[ -n "$home_abs" && "$home_abs" != "$root_abs" ]]; then
+      case "$abs" in
+        "$home_abs"/.venv/*)
+          return 0
+          ;;
+      esac
+    fi
+  fi
+  return 1
+}
+
 pick_python() {
-  local c
+  local c path_dir rest
   for c in \
     /opt/homebrew/bin/python3.12 \
     /usr/local/bin/python3.12 \
-    python3.12 \
     /opt/homebrew/bin/python3 \
-    /usr/local/bin/python3 \
-    python3 \
-    python
+    /usr/local/bin/python3
   do
-    if command -v "$c" >/dev/null 2>&1; then
+    if [[ -x "$c" ]] && ! is_disallowed_home_venv "$c"; then
       echo "$c"
       return 0
     fi
   done
+  rest="${PATH:-}"
+  while [[ -n "$rest" ]]; do
+    path_dir="${rest%%:*}"
+    if [[ "$rest" == *:* ]]; then
+      rest="${rest#*:}"
+    else
+      rest=""
+    fi
+    [[ -n "$path_dir" ]] || continue
+    for c in python3.12 python3 python; do
+      if [[ -x "$path_dir/$c" ]] && ! is_disallowed_home_venv "$path_dir/$c"; then
+        echo "$path_dir/$c"
+        return 0
+      fi
+    done
+  done
   echo "python3 not found. On a Mac: brew install python@3.12" >&2
+  echo "Do not use ~/.venv. This launcher creates and uses $ROOT/.venv only." >&2
   return 1
 }
 
 # Prefer $ROOT/.venv/bin/python. Do not run the bot with
 # /Library/Developer/CommandLineTools/usr/bin/python3 when a venv exists.
 # Never exec a cwd-relative main.py / test_public.py (Errno 2 on Mac).
+# Never ~/.venv (that is the home venv; ModuleNotFoundError bitbank_bot).
 VENV="$ROOT/.venv"
 VPY="$VENV/bin/python"
 VPIP="$VENV/bin/pip"
@@ -245,13 +312,72 @@ if [[ ! -x "$VPY" ]]; then
     set -e
   fi
   if [[ ! -x "$VPY" ]]; then
-    echo "venv python missing; using $PY directly" >&2
-    VPY="$PY"
-    VPIP=""
+    echo "venv python missing at $VPY; refusing to use a python outside $ROOT/.venv" >&2
+    echo "Do not use ~/.venv. On a Mac: brew install python@3.12 then rerun:" >&2
+    echo "  bash ~/docker-compose-up-d/start.sh" >&2
+    exit 2
   elif [[ "$venv_rc" -ne 0 ]]; then
     echo "note: python -m venv reported an error (often missing ensurepip); continuing."
   fi
 fi
+
+assert_repo_venv_python() {
+  local root_abs vpy_abs home_abs
+  root_abs="$(cd "$ROOT" && pwd -P)"
+  if [[ ! -x "$VPY" ]]; then
+    echo "repo venv python missing: $VPY" >&2
+    echo "This launcher only runs $root_abs/.venv/bin/python, never ~/.venv." >&2
+    exit 2
+  fi
+  vpy_abs="$(abs_file "$VPY")"
+  case "$vpy_abs" in
+    "$root_abs"/.venv/*) ;;
+    *)
+      echo "refusing python outside the repo venv: $vpy_abs (ROOT=$root_abs)" >&2
+      echo "Do not use ~/.venv. Run: bash ~/docker-compose-up-d/start.sh" >&2
+      exit 2
+      ;;
+  esac
+  if [[ -n "${HOME:-}" ]]; then
+    home_abs="$(cd "$HOME" && pwd -P 2>/dev/null || true)"
+    if [[ -n "$home_abs" && "$home_abs" != "$root_abs" ]]; then
+      case "$vpy_abs" in
+        "$home_abs"/.venv/*)
+          echo "refusing home venv $vpy_abs" >&2
+          echo "This launcher only runs $root_abs/.venv/bin/python, never ~/.venv." >&2
+          exit 2
+          ;;
+      esac
+    fi
+  fi
+}
+
+write_bitbank_src_pth() {
+  local site root_abs site_abs
+  root_abs="$(cd "$ROOT" && pwd -P)"
+  site="$("$VPY" -c 'import sysconfig; print(sysconfig.get_path("purelib"))')"
+  if [[ -z "$site" ]]; then
+    echo "cannot locate site-packages for $VPY" >&2
+    exit 2
+  fi
+  mkdir -p "$site"
+  site_abs="$(cd "$site" && pwd -P)"
+  case "$site_abs" in
+    "$root_abs"/.venv/*) ;;
+    *)
+      echo "refusing to write bitbank_bot_src.pth outside the repo venv (site=$site_abs)" >&2
+      echo "This launcher only uses $root_abs/.venv, never ~/.venv." >&2
+      exit 2
+      ;;
+  esac
+  printf '%s\n' "$root_abs/src" > "$site_abs/bitbank_bot_src.pth"
+}
+
+assert_repo_venv_python
+unset PYTHONHOME || true
+export VIRTUAL_ENV="$VENV"
+export PATH="$VENV/bin:${PATH}"
+VPIP="$VENV/bin/pip"
 
 install_reqs() {
   if [[ -n "${VPIP}" && -x "$VPIP" ]]; then
@@ -263,6 +389,10 @@ install_reqs() {
     return
   fi
   if "$PY" -m pip --version >/dev/null 2>&1; then
+    if is_disallowed_home_venv "$PY"; then
+      echo "refusing pip from ~/.venv; install into $ROOT/.venv only." >&2
+      exit 2
+    fi
     SITE="$("$VPY" -c 'import sysconfig; print(sysconfig.get_path("purelib"))')"
     mkdir -p "$SITE"
     "$PY" -m pip install -q -r "$ROOT/requirements.txt" --target "$SITE"
@@ -299,6 +429,8 @@ for a in "$@"; do
   esac
 done
 
+write_bitbank_src_pth
+
 if ! "$VPY" -c "import dotenv, httpx" >/dev/null 2>&1; then
   echo "pip packages missing; starting stdlib DRY_RUN (python3 run.py, no orders)"
   if [[ ! -f "$ROOT/run.py" ]]; then
@@ -308,12 +440,12 @@ if ! "$VPY" -c "import dotenv, httpx" >/dev/null 2>&1; then
     exit 2
   fi
   if [[ "$oneshot" -eq 1 || "$want_stdlib_loop" -eq 0 ]]; then
-    exec "$PY" "$ROOT/run.py" "$@"
+    exec "$VPY" "$ROOT/run.py" "$@"
   fi
   delay=2
   while true; do
     set +e
-    "$PY" "$ROOT/run.py" "$@"
+    "$VPY" "$ROOT/run.py" "$@"
     rc=$?
     set -e
     if [[ "$rc" -eq 0 || "$rc" -eq 130 || "$rc" -eq 143 || "$rc" -eq 2 ]]; then
