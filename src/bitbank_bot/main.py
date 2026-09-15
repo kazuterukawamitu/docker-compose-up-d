@@ -10,6 +10,7 @@ _SRC = Path(__file__).resolve().parent.parent
 if _SRC.name == "src" and str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
+from bitbank_bot.boot import announce, prepare_process
 from bitbank_bot.config import ConfigError, load_config
 from bitbank_bot.engine import Engine, install_signal_handlers
 from bitbank_bot.instance_lock import InstanceLock, InstanceLockError
@@ -65,19 +66,23 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    prepare_process(_SRC.parent if _SRC.name == "src" else Path.cwd())
     args = build_parser().parse_args(argv)
     try:
         cfg = load_config(env_file=args.env_file)
     except ConfigError as exc:
         setup_logging()
         slog("ERROR", "config failed", reason=str(exc))
+        announce(f"LAUNCH_FAIL config: {exc}")
         return 2
     if args.dry_run:
         cfg.dry_run = True
         cfg.live_trading = False
         cfg.trading_mode = "dry_run"
     use_screen = should_use_screen(args, sys.stdout)
-    setup_logging(cfg.log_level, cfg.log_dir, console=not use_screen)
+    # Always keep a console handler. TTY 取引画面 used to disable it, so a
+    # failed screen write looked like the process never started.
+    setup_logging(cfg.log_level, cfg.log_dir, console=True)
     slog("BOOT", "starting", **cfg.safe_dict())
     slog(
         "BOOT",
@@ -90,12 +95,11 @@ def main(argv: list[str] | None = None) -> int:
         trading_mode=cfg.trading_mode,
         screen=use_screen,
     )
-    sys.stderr.write(
+    announce(
         "LAUNCH_OK  Bitbank BTC/JPY bot "
         f"mode={cfg.trading_mode} dry_run={cfg.dry_run} "
-        "HOLD/WAIT is normal. Ctrl-C to stop.\n"
+        "HOLD/WAIT is normal. Ctrl-C to stop."
     )
-    sys.stderr.flush()
     rest = RestClient(
         public_url=cfg.public_url,
         private_url=cfg.private_url,
@@ -125,8 +129,15 @@ def main(argv: list[str] | None = None) -> int:
         rest.close()
         return 0 if result.ok else 2
 
-    screen = TradingScreen(sys.stdout) if use_screen else None
-    if use_screen and cfg.poll_sec > 3:
+    screen = None
+    if use_screen:
+        try:
+            screen = TradingScreen(sys.stdout)
+            screen.boot("起動しました DRY_RUN（HOLD/WAIT は正常）")
+        except OSError as exc:
+            slog("BOOT", "screen failed; JSON console", error=type(exc).__name__)
+            screen = None
+    if screen is not None and cfg.poll_sec > 3:
         cfg.poll_sec = 3
     engine = Engine(cfg, client=rest, screen=screen)
     lock: InstanceLock | None = None
@@ -137,6 +148,7 @@ def main(argv: list[str] | None = None) -> int:
         except InstanceLockError as exc:
             slog("ERROR", str(exc))
             slog("BOOT", "another instance is running; stop it or pass --skip-lock")
+            announce(f"LAUNCH_FAIL lock: {exc}. Re-run with --skip-lock")
             if screen is not None:
                 screen.boot("別プロセスが data/bot.lock を保持しています。止めてから再実行してください。")
             rest.close()

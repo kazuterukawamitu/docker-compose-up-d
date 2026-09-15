@@ -13,7 +13,9 @@ for candidate in (_SRC, _ROOT / "src"):
         sys.path.insert(0, str(candidate))
         break
 
+from bitbank_bot.boot import prepare_process
 from bitbank_bot.main import main
 
 if __name__ == "__main__":
+    prepare_process(_ROOT)
     raise SystemExit(main())

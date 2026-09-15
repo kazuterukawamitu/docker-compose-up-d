@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """Repo-root launcher. Prefers the full package; falls back to stdlib run.py.
 
-    python3 main.py
+    python3 closed_loop.py --go
+    python3 main.py --once --synthetic --skip-lock --no-screen
     python3 run.py
-
-Both stay DRY_RUN. Neither places a Bitbank order.
 """
 
 from __future__ import annotations
@@ -32,11 +31,15 @@ def _stdlib() -> int:
 
 def _launch() -> int:
     try:
+        from bitbank_bot.boot import announce, prepare_process
+
+        prepare_process(ROOT)
         import httpx  # noqa: F401
         from bitbank_bot.main import main
     except ModuleNotFoundError:
         sys.stderr.write("full package/deps missing; starting stdlib DRY_RUN (run.py)\n")
         return _stdlib()
+    announce("LAUNCH_OK python3 main.py")
     return int(main())
 
 

@@ -161,6 +161,18 @@ for a in "$@"; do
 done
 
 SCREEN_ARGS=()
+if [[ "$want_screen" -eq 1 && ! -t 1 ]]; then
+  echo "LAUNCH_OK stdout is not a TTY; printing JSON instead of 取引画面"
+  FILTERED=()
+  for a in "$@"; do
+    if [[ "$a" != "--screen" ]]; then
+      FILTERED+=("$a")
+    fi
+  done
+  set -- "${FILTERED[@]}"
+  SCREEN_ARGS=(--no-screen)
+  want_screen=0
+fi
 if [[ "$want_screen" -eq 1 ]]; then
   has_screen=0
   for a in "$@"; do
@@ -173,9 +185,13 @@ if [[ "$want_screen" -eq 1 ]]; then
   fi
 fi
 
-echo "LAUNCH_OK opening Bitbank BTC/JPY 取引画面 (Ctrl-C to stop)"
 echo "HOLD/WAIT is normal. JSON detail is logs/bot.log"
 echo "using $VPY"
+if [[ "$want_screen" -eq 1 ]]; then
+  echo "LAUNCH_OK opening Bitbank BTC/JPY 取引画面 (Ctrl-C to stop)"
+else
+  echo "LAUNCH_OK starting Bitbank BTC/JPY JSON DRY_RUN (Ctrl-C to stop)"
+fi
 
 # Default (no extra args): continuous loop + trading screen on a TTY.
 # Do not pass --once here.

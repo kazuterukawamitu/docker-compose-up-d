@@ -1,6 +1,31 @@
 # Bitbank BTC/JPY spot bot
 
-Bitbank-only `btc_jpy` bot. Default is a **continuous DRY_RUN loop** with an iTerm **取引画面** (trading dashboard). HOLD/WAIT on a bar is normal. JSON lines are written to `logs/bot.log`, not the dashboard.
+**This is the command that starts it** (works from any current directory; DRY_RUN; no live orders):
+
+```bash
+python3 /path/to/docker-compose-up-d/closed_loop.py --go
+```
+
+If you are already in the repository folder:
+
+```bash
+python3 closed_loop.py --go
+```
+
+You should see `LAUNCH_OK`, then JSON, then `run_once complete`. HOLD / `no_buy_setup` is normal. That is a successful start.
+
+Continuous JSON loop (Ctrl-C to stop):
+
+```bash
+python3 closed_loop.py --dry-run --skip-lock --no-screen
+```
+
+iTerm 取引画面:
+
+```bash
+bash ./start.sh --screen
+```
+
 
 The runnable bot is in `src/bitbank_bot/` on branch `cursor/bitbank-closed-loop-1114` (and recent `main` after merge). Wiki HTML files in the repo root are leftover chart dumps and are not loaded.
 

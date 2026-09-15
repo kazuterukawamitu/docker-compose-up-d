@@ -1,19 +1,12 @@
 #!/usr/bin/env python3
 """Start the Bitbank btc_jpy closed-loop bot (DRY_RUN by default).
 
-Working launchers (run from the repository root):
+This file cds to the repository root, so it works from any current directory:
 
-    python3 closed_loop.py
-    python3 closed_loop.py --verify
-    python3 closed_loop.py --verify --no-public
-    python3 closed_loop.py --review
-    python3 main.py
-    python3 src/bitbank_bot/main.py
-    python3 -m bitbank_bot
-    bash ./start.sh --screen
+    python3 closed_loop.py --go
 
-None of these place a live Bitbank order unless .env has DRY_RUN=false,
-LIVE_TRADING=true, keys, and LIVE_TRADING_CONFIRM=YES_I_ACCEPT_REAL_MONEY_RISK.
+`--go` prints LAUNCH_OK, runs one synthetic DRY_RUN cycle, and exits.
+No Bitbank POST. HOLD/no_buy_setup is normal.
 """
 
 from __future__ import annotations
@@ -26,71 +19,81 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
+from bitbank_bot.boot import announce, prepare_process
 
 REVIEW = """LAUNCH_OK  Bitbank BTC/JPY closed-loop bot
 
-Run this from the repository root (the folder that contains main.py):
+Command that always starts (any current directory):
 
-  python3 closed_loop.py --dry-run --skip-lock --no-screen --max-cycles 1
+  python3 closed_loop.py --go
 
-That starts the full package once, prints JSON, and exits. HOLD/no_buy_setup
-is normal. For a continuous 取引画面 on a Mac iTerm TTY:
+If this file is not in the current directory, use the full path:
 
-  bash ./start.sh --screen
+  python3 {root}/closed_loop.py --go
 
-Other entry points (same bot, still DRY_RUN by default):
-  python3 main.py
-  python3 src/bitbank_bot/main.py
-  python3 -m bitbank_bot
-  python3 run.py                    # stdlib screen only; never create_order
+That prints LAUNCH_OK, runs one DRY_RUN cycle, and exits.
 
-Checks:
-  python3 closed_loop.py --verify
-  python3 closed_loop.py --verify --no-public
+Continuous JSON loop (Ctrl-C to stop):
 
-Live POST is not implied by any of these commands.
+  python3 closed_loop.py --dry-run --skip-lock --no-screen
 
-Added by the closed-loop work: trade_signal_executor, execution_gate,
-rate_engine, hold_tracer, trade_trace, reconciliation, this launcher.
-Not removed: run.py, engine.py, BUY1-4/SELL1-4, HTF filter.
-Not built: Sentry, extra exchanges, concatenated all-in-one dump.
+iTerm 取引画面:
+
+  bash {root}/start.sh --screen
 """
 
 
-def _banner(command: str) -> None:
-    sys.stderr.write(
-        f"LAUNCH_OK  {command}\n"
-        "Bitbank BTC/JPY  DRY_RUN (no live orders). HOLD/WAIT is normal. Ctrl-C to stop.\n"
-    )
-    sys.stderr.flush()
-
-
 def main(argv: list[str] | None = None) -> int:
+    prepare_process(ROOT)
     args = list(sys.argv[1:] if argv is None else argv)
+
     if "--review" in args:
-        sys.stdout.write(REVIEW)
+        sys.stdout.write(REVIEW.format(root=ROOT))
         sys.stdout.flush()
         return 0
 
+    if "--go" in args:
+        announce("LAUNCH_OK  python3 closed_loop.py --go")
+        from bitbank_bot.main import main as bot_main
+
+        return int(
+            bot_main(
+                [
+                    "--once",
+                    "--synthetic",
+                    "--dry-run",
+                    "--skip-lock",
+                    "--no-screen",
+                    *[a for a in args if a != "--go"],
+                ]
+            )
+        )
+
     verify = "--verify" in args
     no_public = "--no-public" in args
-    args = [a for a in args if a not in {"--verify", "--no-public", "--review"}]
+    args = [a for a in args if a not in {"--verify", "--no-public", "--review", "--go"}]
+
+    if "--screen" not in args and "--no-screen" not in args:
+        args.append("--no-screen")
 
     if verify:
         forwarded = ["--once", "--skip-lock", "--no-screen", "--dry-run"]
         if no_public:
             forwarded.append("--synthetic")
         forwarded.extend(args)
-        _banner("python3 closed_loop.py --verify" + (" --no-public" if no_public else ""))
+        announce(
+            "LAUNCH_OK  python3 closed_loop.py --verify"
+            + (" --no-public" if no_public else "")
+        )
         from bitbank_bot.main import main as bot_main
 
         return int(bot_main(forwarded))
 
     if no_public:
-        sys.stderr.write("--no-public is only valid with --verify\n")
+        sys.stderr.write("--no-public is only valid with --verify or --go\n")
         return 2
 
-    _banner("python3 closed_loop.py")
+    announce("LAUNCH_OK  python3 closed_loop.py  (JSON DRY_RUN loop, Ctrl-C to stop)")
     from bitbank_bot.main import main as bot_main
 
     return int(bot_main(args))

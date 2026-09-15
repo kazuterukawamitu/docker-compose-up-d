@@ -73,3 +73,24 @@ def test_root_main_py_check_config(tmp_path) -> None:
     out = proc.stderr + proc.stdout
     assert proc.returncode == 0, out
     assert "LAUNCH_OK" in out
+
+
+def test_closed_loop_go_from_other_cwd(tmp_path) -> None:
+    proc = _run(
+        [sys.executable, str(ROOT / "closed_loop.py"), "--go"],
+        tmp_path,
+        cwd=tmp_path,
+    )
+    out = proc.stderr + proc.stdout
+    assert proc.returncode == 0, out
+    assert "LAUNCH_OK" in out
+    assert "run_once complete" in out
+    assert "No module named 'bitbank_bot'" not in out
+
+
+def test_closed_loop_go_prints_launch_ok(tmp_path) -> None:
+    proc = _run([sys.executable, str(ROOT / "closed_loop.py"), "--go"], tmp_path)
+    out = proc.stderr + proc.stdout
+    assert proc.returncode == 0, out
+    assert "LAUNCH_OK" in proc.stdout
+    assert "run_once complete" in out
