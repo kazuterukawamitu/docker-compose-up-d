@@ -608,6 +608,8 @@ if [[ "$want_smoke" -eq 1 ]]; then
   echo "HOLD on the 取引画面 is the other command: bash ~/docker-compose-up-d/start.sh"
 elif [[ "$want_plan" -eq 1 ]]; then
   echo "print start graph only (Engine not started; DRY_RUN default; no Bitbank POST)"
+elif [[ "$oneshot" -eq 1 ]]; then
+  echo "oneshot launcher path (not the 取引画面 loop; DRY_RUN default; no Bitbank POST)"
 else
   echo "opening Bitbank BTC/JPY 取引画面 (Ctrl-C to stop)"
   echo "HOLD/WAIT is normal. JSON detail is logs/bot.log (rotated; do not dump stdout)"

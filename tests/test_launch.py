@@ -556,6 +556,8 @@ def test_start_sh_absolute_path_check_config_from_other_cwd(tmp_path) -> None:
     assert "project_root=" in out or "project_root:" in out
     assert str(root) in out
     assert "/user/spot/order" not in out
+    assert "opening Bitbank BTC/JPY" not in out
+    assert "oneshot launcher path" in out or "engine_path: load_config" in out
 
 
 def test_guard_pytest_cwd_from_home(tmp_path) -> None:
