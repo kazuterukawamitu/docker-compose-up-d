@@ -21,9 +21,10 @@ not implemented twice.
 6. One order POST path: Strategy → RateEngine → Risk/Sizer →
    ExecutionGate → OrderExecutor → Bitbank. Strategies never call
    `create_order`.
-7. Enhanced launcher is `start.sh` → `python -m bitbank_bot.launch`.
+7. Enhanced launcher is `start.sh` → `launch_bot.py` → `bitbank_bot.launch`.
    Wrappers (`run_bot.sh`, installed `$HOME/start.sh`) exec that start.sh
-   even when the shell cwd is `~`. `--smoke-order` proves a DRY_RUN paper fill.
+   even when the shell cwd is `~`. `--smoke-order` / `--execute` /
+   `bash ./run_transaction.sh` prove a DRY_RUN paper fill via `launch_bot.py`.
 8. Output-program count vs `origin/main` must be disclosed at launch.
 
 9. `BitbankAPIClient` is a façade over existing `RestClient` + optional WS.

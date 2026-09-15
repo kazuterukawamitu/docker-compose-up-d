@@ -6,8 +6,10 @@ No Python duplicates were deleted; none were archived because none were duplicat
 | path | role | in_use | api | order | strategy | config | notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `diagnostics.py` | diagnostics | True | False | False | False | True |  |
+| `launch_bot.py` | path_safe_launcher | True | False | False | False | True |  |
 | `main.py` | root_cli | True | False | False | False | False |  |
 | `run.py` | stdlib_screen_fallback | True | True | False | True | False |  |
+| `run_transaction.sh` | paper_transaction_launcher | True | False | True | False | False |  |
 | `scripts/analyze_ast.py` | analysis | True | False | False | False | False |  |
 | `scripts/bitbank_execution_audit.py` | audit | True | True | False | False | False |  |
 | `scripts/completion_percent.py` | analysis | True | False | False | False | False |  |

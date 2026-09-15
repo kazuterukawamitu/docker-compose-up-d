@@ -16,6 +16,7 @@ def test_compileall_src() -> None:
         py_compile.compile(str(path), doraise=True)
     py_compile.compile(str(root / "main.py"), doraise=True)
     py_compile.compile(str(root / "run.py"), doraise=True)
+    py_compile.compile(str(root / "launch_bot.py"), doraise=True)
     diag = root / "diagnostics.py"
     if diag.is_file():
         py_compile.compile(str(diag), doraise=True)
@@ -57,6 +58,8 @@ def test_start_sh_is_venv_loop_launcher() -> None:
     assert 'BOT_BRANCH="cursor/closed-loop-launcher-563e"' in text
     assert "run.py" in text
     assert "bitbank_bot.launch" in text
+    assert "launch_bot.py" in text
+    assert "run_transaction.sh" in text
     assert "/Users/kazuteru" not in text
     assert "without printing secrets" in text or "values not printed" in text
     assert "cd to the repo first" in text

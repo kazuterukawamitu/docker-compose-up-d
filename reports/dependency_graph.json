@@ -13,6 +13,15 @@
         "sys"
       ]
     },
+    "launch_bot.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.launch",
+        "pathlib",
+        "sys",
+        "sysconfig"
+      ]
+    },
     "main.py": {
       "imports": [
         "__future__",
@@ -752,6 +761,7 @@
   "imported_by": {
     "__future__": [
       "diagnostics.py",
+      "launch_bot.py",
       "main.py",
       "run.py",
       "scripts/analyze_ast.py",
@@ -856,6 +866,7 @@
     ],
     "pathlib": [
       "diagnostics.py",
+      "launch_bot.py",
       "main.py",
       "scripts/analyze_ast.py",
       "scripts/bitbank_execution_audit.py",
@@ -893,6 +904,7 @@
     ],
     "sys": [
       "diagnostics.py",
+      "launch_bot.py",
       "main.py",
       "run.py",
       "scripts/analyze_ast.py",
@@ -910,10 +922,14 @@
       "tests/test_startup.py"
     ],
     "bitbank_bot.launch": [
+      "launch_bot.py",
       "main.py",
       "src/bitbank_bot/pytest_plugin.py",
       "tests/conftest.py",
       "tests/test_launch.py"
+    ],
+    "sysconfig": [
+      "launch_bot.py"
     ],
     "importlib.util": [
       "main.py",

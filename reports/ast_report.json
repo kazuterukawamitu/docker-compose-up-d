@@ -1,6 +1,6 @@
 {
   "root": "/workspace",
-  "file_count": 70,
+  "file_count": 71,
   "modules": {
     "diagnostics.py": {
       "imports": [
@@ -17,6 +17,23 @@
       "classes": [],
       "functions": [
         "_run",
+        "main"
+      ],
+      "parse_error": ""
+    },
+    "launch_bot.py": {
+      "imports": [
+        "__future__",
+        "bitbank_bot.launch",
+        "pathlib",
+        "sys",
+        "sysconfig"
+      ],
+      "classes": [],
+      "functions": [
+        "_repo_root",
+        "_ensure_src_on_path",
+        "_write_venv_pth",
         "main"
       ],
       "parse_error": ""
@@ -1545,6 +1562,8 @@
         "test_smoke_order_refuses_live",
         "test_smoke_order_cli_never_posts",
         "test_launch_smoke_order_from_other_cwd",
+        "test_launch_bot_py_smoke_order_without_pythonpath",
+        "test_run_transaction_sh_from_other_cwd",
         "test_start_sh_smoke_order_from_other_cwd"
       ],
       "parse_error": ""
@@ -1670,6 +1689,7 @@
   "imported_by": {
     "__future__": [
       "diagnostics.py",
+      "launch_bot.py",
       "main.py",
       "run.py",
       "scripts/analyze_ast.py",
@@ -1774,6 +1794,7 @@
     ],
     "pathlib": [
       "diagnostics.py",
+      "launch_bot.py",
       "main.py",
       "scripts/analyze_ast.py",
       "scripts/bitbank_execution_audit.py",
@@ -1811,6 +1832,7 @@
     ],
     "sys": [
       "diagnostics.py",
+      "launch_bot.py",
       "main.py",
       "run.py",
       "scripts/analyze_ast.py",
@@ -1828,10 +1850,14 @@
       "tests/test_startup.py"
     ],
     "bitbank_bot.launch": [
+      "launch_bot.py",
       "main.py",
       "src/bitbank_bot/pytest_plugin.py",
       "tests/conftest.py",
       "tests/test_launch.py"
+    ],
+    "sysconfig": [
+      "launch_bot.py"
     ],
     "importlib.util": [
       "main.py",
@@ -2427,7 +2453,7 @@
     },
     {
       "file": "src/bitbank_bot/main.py",
-      "lineno": 139,
+      "lineno": 141,
       "text": "continuous loop (HOLD/WAIT is normal; Ctrl-C to stop)"
     },
     {

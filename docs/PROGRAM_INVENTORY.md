@@ -9,7 +9,7 @@ Library modules and pytest files are not counted.
 | Snapshot | Count | Change |
 | --- | --- | --- |
 | origin/main | 6 | baseline |
-| this branch `cursor/closed-loop-launcher-563e` | 11 | **+5** |
+| this branch `cursor/closed-loop-launcher-563e` | 13 | **+7** |
 
 Removed: **none**.
 
@@ -22,13 +22,15 @@ Removed: **none**.
 5. `diagnostics.py` — JSON env check, no secrets
 6. `scripts/bitbank_execution_audit.py` — read-only private/public audit
 
-## Added on this branch (+5)
+## Added on this branch (+7)
 
 7. `src/bitbank_bot/launch.py` — enhanced program-launching program
-8. `scripts/home_start.sh` — finds the clone and **execs** `start.sh`
-9. `scripts/install_launch_alias.sh` — installs `$HOME/start.sh` wrapper that launches
-10. `scripts/run_bot.sh` — cds to this clone (any cwd), then `start.sh`
-11. `scripts/run_tests.sh` — pytest only, not 取引画面
+8. `launch_bot.py` — path-safe launcher (no PYTHONPATH / no pip install -e)
+9. `run_transaction.sh` — completes one DRY_RUN paper BUY (`SMOKE_ORDER_OK`)
+10. `scripts/home_start.sh` — finds the clone and **execs** `start.sh`
+11. `scripts/install_launch_alias.sh` — installs `$HOME/start.sh` wrapper that launches
+12. `scripts/run_bot.sh` — cds to this clone (any cwd), then `start.sh`
+13. `scripts/run_tests.sh` — pytest only, not 取引画面
 
 ## Library modules added (not output programs)
 

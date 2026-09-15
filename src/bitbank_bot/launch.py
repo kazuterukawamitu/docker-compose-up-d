@@ -40,6 +40,7 @@ ONESHOT_FLAGS = frozenset(
         "--preflight",
         "--backtest",
         "--smoke-order",
+        "--execute",
         "--help",
         "-h",
         "--self-test",
@@ -294,6 +295,8 @@ def env_file_from_argv(forwarded: list[str]) -> str | None:
 
 ADDED_OUTPUT_PROGRAMS = (
     "src/bitbank_bot/launch.py",
+    "launch_bot.py",
+    "run_transaction.sh",
     "scripts/home_start.sh",
     "scripts/install_launch_alias.sh",
     "scripts/run_bot.sh",
@@ -470,6 +473,8 @@ def _usage_epilog() -> str:
         "  bash ./start.sh --once --synthetic --skip-lock --no-screen\n"
         "  bash ./start.sh --check-config\n"
         "  bash ./start.sh --smoke-order\n"
+        "  bash ./start.sh --execute\n"
+        "  bash ./run_transaction.sh\n"
         "From ~ after install_launch_alias.sh, bash ./start.sh execs the clone.\n"
         "RATE_MODE and RECONCILE_EVERY_CYCLES come from .env (printed SET/UNSET, no secrets).\n"
         "LIVE requires TRADING_MODE=LIVE and "

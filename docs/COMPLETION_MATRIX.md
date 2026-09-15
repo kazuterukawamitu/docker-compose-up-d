@@ -47,6 +47,8 @@ and code paths, not string presence.
 | 40 | completion_percent | PASS | `scripts/completion_percent.py` (live POST skipped) |
 | 41 | Launcher execs from other cwd | PASS | `run_bot.sh` / `launch.py` chdir |
 | 42 | `--smoke-order` paper fill | PASS | `tests/test_smoke_order.py`; never POST |
+| 43 | Path-safe `launch_bot.py` | PASS | no PYTHONPATH required |
+| 44 | `run_transaction.sh` | PASS | completes `SMOKE_ORDER_OK` from any cwd |
 
 LIVE Bitbank POST is **not** claimed PASS. DRY_RUN paper fills and
 LIVE_READY `WOULD_SUBMIT_ORDER` are tested.

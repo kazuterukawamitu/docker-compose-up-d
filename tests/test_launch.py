@@ -64,10 +64,12 @@ def test_diagnostics_hide_secrets_and_show_modes() -> None:
     assert "CANDLE_TYPE: 1hour" in text
     assert "DRY_RUN/LIVE_READY/LIVE: DRY_RUN" in text
     assert "PROGRAM_INVENTORY vs origin/main" in text
-    assert "output_programs: 6 -> 11" in text
+    assert "output_programs: 6 -> 13" in text
     assert "removed: none" in text
     assert "analysis_programs (not 取引画面): +3" in text
     assert "scripts/analyze_ast.py" in text
+    assert "launch_bot.py" in text
+    assert "run_transaction.sh" in text
     assert key_status("") == "UNSET"
 
 

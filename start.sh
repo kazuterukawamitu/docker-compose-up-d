@@ -43,6 +43,8 @@ This is the program-launching program. It cds to the repo from BASH_SOURCE
   bash ./start.sh --once --synthetic --skip-lock --no-screen
   bash ./start.sh --check-config
   bash ./start.sh --smoke-order
+  bash ./start.sh --execute
+  bash ./run_transaction.sh
   bash ./start.sh --no-supervise
   bash ./start.sh --supervise
   bash ./start.sh --self-test
@@ -290,7 +292,7 @@ oneshot=0
 want_stdlib_loop=1
 for a in "$@"; do
   case "$a" in
-    --once|--check-config|--preflight|--backtest|--help|-h|--max-cycles|--self-test|--smoke-order)
+    --once|--check-config|--preflight|--backtest|--help|-h|--max-cycles|--self-test|--smoke-order|--execute)
       oneshot=1
       want_stdlib_loop=0
       ;;
@@ -302,7 +304,7 @@ done
 
 if ! "$VPY" -c "import dotenv, httpx" >/dev/null 2>&1; then
   for a in "$@"; do
-    if [[ "$a" == "--smoke-order" ]]; then
+    if [[ "$a" == "--smoke-order" || "$a" == "--execute" ]]; then
       echo "smoke-order needs the package (httpx). run.py never places orders." >&2
       exit 2
     fi
@@ -354,7 +356,7 @@ if [[ -t 1 ]]; then
 fi
 for a in "$@"; do
   case "$a" in
-    --once|--check-config|--preflight|--backtest|--no-screen|--smoke-order)
+    --once|--check-config|--preflight|--backtest|--no-screen|--smoke-order|--execute)
       want_screen=0
       ;;
     --screen)
@@ -391,16 +393,29 @@ fi
 
 echo "opening Bitbank BTC/JPY 取引画面 (Ctrl-C to stop)"
 echo "HOLD/WAIT is normal. JSON detail is logs/bot.log (rotated; do not dump stdout)"
+echo "To complete one paper BUY now: bash $ROOT/run_transaction.sh"
 echo "project_root=$ROOT"
 echo "using $VPY"
 echo "lock=$ROOT/data/bot.lock kill=$ROOT/data/KILL (create KILL to halt new orders)"
 
 # Default (no extra args): continuous loop + trading screen on a TTY.
-# Crash backoff lives in bitbank_bot.launch.
+# Crash backoff lives in bitbank_bot.launch. Transaction proof is
+# launch_bot.py --smoke-order / bash ./run_transaction.sh (never POST).
 if [[ ! -f "$ROOT/src/bitbank_bot/launch.py" || ! -f "$ROOT/main.py" ]]; then
   echo "cannot start: missing $ROOT/src/bitbank_bot/launch.py or $ROOT/main.py" >&2
   echo "Do not run CommandLineTools python3 on a file under ~ (test_public.py / main.py)." >&2
   not_in_repo
   exit 2
+fi
+
+# Drop a venv .pth so `.venv/bin/python -m bitbank_bot.launch` works
+# without PYTHONPATH (the previous ModuleNotFoundError).
+SITE="$("$VPY" -c 'import sysconfig; print(sysconfig.get_path("purelib"))' 2>/dev/null || true)"
+if [[ -n "$SITE" && -d "$SITE" ]]; then
+  printf '%s\n' "$ROOT/src" > "$SITE/bitbank_bot_src.pth"
+fi
+
+if [[ -f "$ROOT/launch_bot.py" ]]; then
+  exec "$VPY" "$ROOT/launch_bot.py" "${SUPERVISE_ARGS[@]}" "${SCREEN_ARGS[@]}" "$@"
 fi
 exec "$VPY" -m bitbank_bot.launch "${SUPERVISE_ARGS[@]}" "${SCREEN_ARGS[@]}" "$@"

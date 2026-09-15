@@ -11,6 +11,17 @@
     "create_order_calls": 0
   },
   {
+    "path": "launch_bot.py",
+    "role": "path_safe_launcher",
+    "in_use": true,
+    "legacy": false,
+    "api": false,
+    "order": false,
+    "strategy": false,
+    "config": true,
+    "create_order_calls": 0
+  },
+  {
     "path": "main.py",
     "role": "root_cli",
     "in_use": true,
@@ -31,6 +42,18 @@
     "strategy": true,
     "config": false,
     "create_order_calls": 0
+  },
+  {
+    "path": "run_transaction.sh",
+    "role": "paper_transaction_launcher",
+    "in_use": true,
+    "legacy": false,
+    "api": false,
+    "order": true,
+    "strategy": false,
+    "config": false,
+    "create_order_calls": 0,
+    "missing": false
   },
   {
     "path": "scripts/analyze_ast.py",

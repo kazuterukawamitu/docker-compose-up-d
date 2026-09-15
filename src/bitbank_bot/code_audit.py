@@ -288,6 +288,22 @@ FILE_ROLES: dict[str, dict[str, Any]] = {
         "strategy": False,
         "config": False,
     },
+    "launch_bot.py": {
+        "role": "path_safe_launcher",
+        "in_use": True,
+        "api": False,
+        "order": False,
+        "strategy": False,
+        "config": True,
+    },
+    "run_transaction.sh": {
+        "role": "paper_transaction_launcher",
+        "in_use": True,
+        "api": False,
+        "order": True,
+        "strategy": False,
+        "config": False,
+    },
     "run.py": {
         "role": "stdlib_screen_fallback",
         "in_use": True,
@@ -701,6 +717,8 @@ def dump_paths(root: Path) -> list[Path]:
     paths: list[Path] = []
     for rel_name in (
         "start.sh",
+        "launch_bot.py",
+        "run_transaction.sh",
         "main.py",
         "run.py",
         "diagnostics.py",

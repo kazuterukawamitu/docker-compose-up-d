@@ -36,7 +36,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--smoke-order",
+        "--execute",
         action="store_true",
+        dest="smoke_order",
         help="DRY_RUN paper BUY through OrderExecutor then exit (never Bitbank POST)",
     )
     parser.add_argument(
