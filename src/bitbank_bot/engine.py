@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from bitbank_bot.amounts import AmountPlan, PositionSizer
+from bitbank_bot.api_client import BitbankAPIClient
 from bitbank_bot.config import Config
 from bitbank_bot.logging_setup import slog
 from bitbank_bot.market_data import (
@@ -35,6 +36,7 @@ from bitbank_bot.screen import TradingScreen, view_from_engine
 from bitbank_bot.strategy import Position, Signal, Strategy, build_snapshots
 from bitbank_bot.trade_signal_executor import TradeSignalExecutor
 from bitbank_bot.watchdog import classify as classify_watchdog
+from bitbank_bot.watchdog import root_cause_code
 from bitbank_bot.websocket_client import BitbankWebsocket
 
 _LOG = logging.getLogger("bitbank_bot")
@@ -158,11 +160,16 @@ class Engine:
     def __init__(
         self,
         cfg: Config,
-        client: RestClient | None = None,
+        client: RestClient | BitbankAPIClient | None = None,
         screen: TradingScreen | None = None,
     ) -> None:
         self.cfg = cfg
-        self.client = client
+        self.api: BitbankAPIClient | None = None
+        if isinstance(client, BitbankAPIClient):
+            self.api = client
+            self.client = client.rest
+        else:
+            self.client = client
         self.screen = screen
         self._stop = False
         self.ws: BitbankWebsocket | None = None
@@ -173,6 +180,7 @@ class Engine:
         self.used_synthetic_fallback = False
         self._explicit_synthetic = False
         self.last_watchdog = ""
+        self.last_root_cause = ""
         self.last_close: Decimal | str = "-"
         self.last_ma: Decimal | str = "-"
         self.last_trend = "-"
@@ -191,17 +199,11 @@ class Engine:
 
     def _rest(self) -> RestClient:
         if self.client is None:
-            self.client = RestClient(
-                public_url=self.cfg.public_url,
-                private_url=self.cfg.private_url,
-                api_key=self.cfg.api_key,
-                api_secret=self.cfg.api_secret,
-                access_time_window_ms=self.cfg.access_time_window_ms,
-                timeout_sec=self.cfg.http_timeout_sec,
-                max_retries=self.cfg.max_retries,
-                query_rps=self.cfg.query_rps,
-                update_rps=self.cfg.update_rps,
-            )
+            self.api = BitbankAPIClient.from_config(self.cfg)
+            self.client = self.api.rest
+        elif isinstance(self.client, BitbankAPIClient):
+            self.api = self.client
+            self.client = self.client.rest
         return self.client
 
     def _balances(self, rest: RestClient, state: BotState | None = None) -> tuple[Decimal, Decimal]:
@@ -614,14 +616,22 @@ class Engine:
             fail_reason=fail_reason,
             has_order_signal=signal.side in {"buy", "sell"},
         )
+        cause = root_cause_code(
+            status=report.status,
+            watchdog_reason=report.reason,
+            signal_reason=signal.reason,
+            signal_kind=signal.kind,
+        )
         slog(
             "WATCHDOG",
             report.status,
             reason=report.reason,
+            root_cause=cause,
             kind=signal.kind,
             uptime_sec=report.uptime_sec,
         )
         self.last_watchdog = report.status
+        self.last_root_cause = cause
 
     def _apply_fill(
         self,
@@ -935,8 +945,9 @@ class Engine:
                 _LOG.exception("loop error")
                 slog("ERROR", "loop error", error=type(exc).__name__, detail=str(exc)[:200])
                 idle = time.monotonic() - last_ok
-                slog("WATCHDOG", "FAIL", reason="loop_error", idle_sec=int(idle))
+                slog("WATCHDOG", "FAIL", reason="loop_error", root_cause="FAIL:loop_error", idle_sec=int(idle))
                 self.last_watchdog = "FAIL"
+                self.last_root_cause = "FAIL:loop_error"
                 if idle >= timeout:
                     slog("WATCHDOG", "FAIL stuck errors; still not exiting on HOLD")
                 self.cycles += 1
@@ -1034,6 +1045,7 @@ class Engine:
             block_reason=self.last_block_reason,
             error=self.last_error,
             candle_type=self.cfg.candle_type,
+            root_cause=self.last_root_cause,
         )
         self.screen.render(view)
 

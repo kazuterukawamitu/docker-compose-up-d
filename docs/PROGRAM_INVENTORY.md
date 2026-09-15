@@ -37,5 +37,13 @@ Removed: **none**.
 - `reconciliation.py`
 - `trade_signal_executor.py`
 - `pytest_plugin.py` (pytest cwd guard)
+- `api_client.py` (`BitbankAPIClient` façade)
+- `code_audit.py` (AST / inventory / dump helpers)
+
+## Analysis programs (not 取引画面; +3, removed none)
+
+12. `scripts/analyze_ast.py` — writes `reports/*.json` and `reports/FILE_INVENTORY.md`
+13. `scripts/dump_all_source.py` — analysis concatenation; not executable
+14. `scripts/completion_percent.py` — verifiable completion percent (live POST skipped)
 
 The launcher prints this inventory at start (`PROGRAM_INVENTORY vs origin/main`).

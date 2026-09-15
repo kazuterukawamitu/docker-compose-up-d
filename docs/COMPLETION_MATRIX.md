@@ -40,6 +40,11 @@ and code paths, not string presence.
 | 33 | Enhanced launcher | PASS | `start.sh` + `launch.py` |
 | 34 | pytest | PASS | this matrix’s test run |
 | 35 | Live POST in CI | NOT TESTED | requires user keys + dual-auth; not executed here |
+| 36 | AST reports | PASS | `scripts/analyze_ast.py` → `reports/ast_report.json` |
+| 37 | Source dump (not executable) | PASS | `scripts/dump_all_source.py` |
+| 38 | File inventory | PASS | `reports/FILE_INVENTORY.md` |
+| 39 | `BitbankAPIClient` façade | PASS | `api_client.py`; OrderExecutor still the POST caller |
+| 40 | completion_percent | PASS | `scripts/completion_percent.py` (live POST skipped) |
 
 LIVE Bitbank POST is **not** claimed PASS. DRY_RUN paper fills and
 LIVE_READY `WOULD_SUBMIT_ORDER` are tested.

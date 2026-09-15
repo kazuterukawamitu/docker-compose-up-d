@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from bitbank_bot.watchdog import FAIL, LONG_WAIT, NORMAL_WAIT, SIGNAL, classify
+from bitbank_bot.watchdog import FAIL, LONG_WAIT, NORMAL_WAIT, SIGNAL, classify, root_cause_code
 
 
 def test_hold_under_timeout_is_normal_wait() -> None:
@@ -68,3 +68,27 @@ def test_buy_or_sell_is_signal() -> None:
         has_order_signal=True,
     )
     assert report.status == SIGNAL
+
+
+def test_root_cause_codes() -> None:
+    assert root_cause_code(
+        status=NORMAL_WAIT,
+        watchdog_reason="waiting_for_setup",
+        signal_reason="no_buy_setup",
+        signal_kind="HOLD",
+    ) == "HOLD:no_buy_setup"
+    assert root_cause_code(
+        status=LONG_WAIT,
+        watchdog_reason="market_conditions_not_met",
+        signal_reason="no_buy_setup",
+        signal_kind="HOLD",
+    ) == "LONG_WAIT:no_buy_setup"
+    assert root_cause_code(
+        status=FAIL,
+        watchdog_reason="market_data_stale_or_missing",
+    ) == "FAIL:market_data_stale_or_missing"
+    assert root_cause_code(
+        status=SIGNAL,
+        watchdog_reason="buy_or_sell_signal",
+        signal_kind="BUY1",
+    ) == "SIGNAL:BUY1"

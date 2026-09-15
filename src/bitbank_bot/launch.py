@@ -299,6 +299,11 @@ ADDED_OUTPUT_PROGRAMS = (
     "scripts/run_tests.sh",
 )
 REMOVED_OUTPUT_PROGRAMS: tuple[str, ...] = ()
+ANALYSIS_PROGRAMS = (
+    "scripts/analyze_ast.py",
+    "scripts/dump_all_source.py",
+    "scripts/completion_percent.py",
+)
 
 
 def program_inventory_lines() -> list[str]:
@@ -313,6 +318,7 @@ def program_inventory_lines() -> list[str]:
         f"{now} ({delta}; removed {removed})",
         "  added: " + ", ".join(ADDED_OUTPUT_PROGRAMS),
         "  removed: " + (", ".join(REMOVED_OUTPUT_PROGRAMS) if REMOVED_OUTPUT_PROGRAMS else "none"),
+        "  analysis_programs (not 取引画面): +3; " + ", ".join(ANALYSIS_PROGRAMS),
         "  取引画面 still: python3 run.py | python3 main.py | bash ./start.sh",
     ]
 

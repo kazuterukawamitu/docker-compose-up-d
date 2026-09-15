@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, Protocol
@@ -89,10 +90,18 @@ class OrderExecutor:
         slog("ORDER_STATUS", "refreshed from GET /user/spot/order", order_id=order_id)
         return data
 
-    def place(self, signal: Signal, plan: AmountPlan) -> OrderResult:
+    def place(
+        self,
+        signal: Signal,
+        plan: AmountPlan,
+        *,
+        trace_id: str = "",
+    ) -> OrderResult:
+        tid = trace_id or uuid.uuid4().hex[:12]
         slog(
             "ORDER_REQUEST",
             "order request",
+            trace_id=tid,
             kind=signal.kind,
             side=plan.side,
             amount=str(plan.amount),
@@ -138,6 +147,7 @@ class OrderExecutor:
                 slog(
                     "WOULD_SUBMIT_ORDER",
                     "LIVE_READY: not calling Bitbank create_order",
+                    trace_id=tid,
                     side=plan.side,
                     amount=str(plan.amount),
                     price=str(plan.price),
@@ -158,6 +168,7 @@ class OrderExecutor:
             slog(
                 "ORDER_INTENT",
                 "DRY_RUN: not calling Bitbank create_order",
+                trace_id=tid,
                 side=plan.side,
                 amount=str(plan.amount),
                 price=str(plan.price),
@@ -234,6 +245,7 @@ class OrderExecutor:
                 post_only=self.cfg.post_only if self.cfg.order_type == "limit" else None,
                 live_confirmed=True,
             )
+            slog("ORDER_POST", "create_order returned", trace_id=tid, order_id=str(raw.get("order_id") or "") if isinstance(raw, dict) else "")
         except Exception as exc:
             slog(
                 "ERROR",
@@ -252,7 +264,7 @@ class OrderExecutor:
             raise BitbankAPIError("create_order_unreadable")
         order_id = str(raw.get("order_id") or "")
         status = str(raw.get("status") or "")
-        slog("ORDER_ACCEPTED", "order accepted", order_id=order_id, status=status)
+        slog("ORDER_ACCEPTED", "order accepted", trace_id=tid, order_id=order_id, status=status)
         executed = D(raw.get("executed_amount") or 0)
         avg = D(raw.get("average_price") or 0)
         amount_ordered = D(raw.get("start_amount") or plan.amount)

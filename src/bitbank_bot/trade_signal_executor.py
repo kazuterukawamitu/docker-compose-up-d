@@ -8,6 +8,7 @@ LIVE_READY, POST only in dual-confirmed LIVE).
 
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass
 from typing import Any
 
@@ -110,6 +111,7 @@ class TradeSignalExecutor:
         decision = self.gate.evaluate(ctx)
         if not decision.allowed:
             return SubmitOutcome(None, sized, decision.reason, mode)
+        trace_id = uuid.uuid4().hex[:12]
         slog(
             "ORDER_PATH",
             "passing OrderExecutor",
@@ -118,6 +120,7 @@ class TradeSignalExecutor:
             live=self.cfg.may_place_live_orders,
             would_submit=mode == MODE_LIVE_READY,
             size_mult=str(rate.size_mult),
+            trace_id=trace_id,
         )
-        result = self.orders.place(signal, sized)
+        result = self.orders.place(signal, sized, trace_id=trace_id)
         return SubmitOutcome(result, sized, "", mode)

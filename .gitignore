@@ -29,3 +29,4 @@ data/KILL
 id_rsa
 id_ed25519
 .ssh/
+reports/trading_bot_all_source.txt

@@ -24,6 +24,10 @@ not implemented twice.
 7. Enhanced launcher is `start.sh` → `python -m bitbank_bot.launch`.
 8. Output-program count vs `origin/main` must be disclosed at launch.
 
+9. `BitbankAPIClient` is a façade over existing `RestClient` + optional WS.
+   It does not add a second POST path. AST reports live under `reports/`.
+   The concatenated source dump is analysis-only and is not executable.
+
 ## Treated as incorrect / not implemented as written
 
 - Enabling LIVE by flipping only `DRY_RUN=false`.
@@ -36,12 +40,12 @@ not implemented twice.
 
 ## Architecture (actual)
 
-MarketData (REST + optional WS)
+MarketData (REST via `BitbankAPIClient.rest` + optional WS)
 → Strategy (README MA)
 → RateEngine (FIXED / DYNAMIC / AUTO)
 → RiskManager + PositionSizer
 → ExecutionGate
-→ OrderExecutor (only `create_order` caller)
+→ OrderExecutor (only production `create_order` caller; façade delegates to `RestClient`)
 → Fill poll (`state.pending`)
 → ReconciliationManager (Bitbank as source of truth)
 → TradingScreen / logs/bot.log

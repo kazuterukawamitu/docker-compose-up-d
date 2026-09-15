@@ -42,6 +42,30 @@ def test_format_screen_is_trading_dashboard() -> None:
     assert "実注文なし" in text
     assert "HOLD" in text
     assert "12,288,796" in text
+    view_stall = ScreenView(
+        pair="btc_jpy",
+        mode="DRY_RUN",
+        live_orders=False,
+        price="10000000",
+        public_last="12288796",
+        ma="12100000",
+        trend="UP",
+        signal_kind="HOLD",
+        signal_reason="no_buy_setup",
+        in_position=False,
+        position_amount="0",
+        position_avg="0",
+        position_tp="",
+        watchdog="LONG_WAIT",
+        ws_ok=False,
+        cycles=1,
+        uptime_sec=901,
+        block_reason="",
+        error="",
+        candle_type="1hour",
+        root_cause="LONG_WAIT:no_buy_setup",
+    )
+    assert "ROOT_CAUSE LONG_WAIT:no_buy_setup" in format_screen(view_stall)
 
 
 def test_should_use_screen_tty_default() -> None:

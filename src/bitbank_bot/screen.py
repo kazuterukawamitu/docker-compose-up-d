@@ -56,6 +56,7 @@ class ScreenView:
     error: str
     candle_type: str
     note: str = "HOLD/待機は正常です。Ctrl-C で停止"
+    root_cause: str = ""
 
 
 def format_screen(view: ScreenView) -> str:
@@ -86,7 +87,8 @@ def format_screen(view: ScreenView) -> str:
         f"  移動平均     {_commas(view.ma)}    トレンド {view.trend}",
         f"  シグナル     {view.signal_kind}    {view.signal_reason}",
         f"  建玉         {pos}",
-        f"  監視         {view.watchdog}    WS {ws}",
+        f"  監視         {view.watchdog}    WS {ws}"
+        + (f"    ROOT_CAUSE {view.root_cause}" if view.root_cause else ""),
         f"  ブロック     {block}",
         f"  エラー       {err}",
         bar,
@@ -157,6 +159,7 @@ def view_from_engine(
     block_reason: str = "",
     error: str = "",
     candle_type: str = "1hour",
+    root_cause: str = "",
 ) -> ScreenView:
     return ScreenView(
         pair=pair,
@@ -179,6 +182,7 @@ def view_from_engine(
         block_reason=block_reason,
         error=error,
         candle_type=candle_type,
+        root_cause=root_cause,
     )
 
 
