@@ -282,11 +282,23 @@ pick_python() {
 VENV="$ROOT/.venv"
 VPY="$VENV/bin/python"
 VPIP="$VENV/bin/pip"
+set +e
+BOOTSTRAP_PY="$(pick_python)"
+boot_rc=$?
+set -e
+if [[ "$boot_rc" -ne 0 ]]; then
+  BOOTSTRAP_PY=""
+fi
 
 if [[ -x "$VPY" ]]; then
   PY="$VPY"
 else
-  PY="$(pick_python)"
+  if [[ -z "$BOOTSTRAP_PY" ]]; then
+    echo "python3 not found. On a Mac: brew install python@3.12" >&2
+    echo "Do not use ~/.venv. This launcher creates and uses $ROOT/.venv only." >&2
+    exit 2
+  fi
+  PY="$BOOTSTRAP_PY"
 fi
 
 PY_MAJ="$("$PY" -c 'import sys; print(sys.version_info.major)')"
@@ -388,14 +400,14 @@ install_reqs() {
     "$VPY" -m pip install -q -r "$ROOT/requirements.txt"
     return
   fi
-  if "$PY" -m pip --version >/dev/null 2>&1; then
-    if is_disallowed_home_venv "$PY"; then
+  if [[ -n "${BOOTSTRAP_PY:-}" ]] && "$BOOTSTRAP_PY" -m pip --version >/dev/null 2>&1; then
+    if is_disallowed_home_venv "$BOOTSTRAP_PY"; then
       echo "refusing pip from ~/.venv; install into $ROOT/.venv only." >&2
       exit 2
     fi
     SITE="$("$VPY" -c 'import sysconfig; print(sysconfig.get_path("purelib"))')"
     mkdir -p "$SITE"
-    "$PY" -m pip install -q -r "$ROOT/requirements.txt" --target "$SITE"
+    "$BOOTSTRAP_PY" -m pip install -q -r "$ROOT/requirements.txt" --target "$SITE"
     return
   fi
   echo "pip is not available." >&2

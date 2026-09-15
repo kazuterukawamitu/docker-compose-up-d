@@ -494,5 +494,14 @@ LIVE stays off. No secrets logged. No live POST.
 
 ### Test results (this pass)
 
-Recorded after `compileall` + pytest on this branch.
+`python3 -m compileall` PASS. `PYTHONPATH=src pytest` **208 passed**.
+From `/tmp` with a fake `$HOME/.venv/bin/python` first on `PATH`,
+`bash /workspace/start.sh --check-config --no-screen` uses
+`/workspace/.venv/bin/python` (never `HOME_VENV_USED`), writes
+`bitbank_bot_src.pth` containing `/workspace/src`, keys UNSET,
+`may_place_live_orders: False`. `run_transaction.sh --check-config` from
+`/tmp` cds via `BASH_SOURCE` to the same repo venv. Repo venv
+`python -c "import bitbank_bot"` works with `PYTHONPATH` unset. Wrong
+branch string `closed-loop-launcher`+`563e` is absent. LIVE stays off.
+No secrets.
 
