@@ -98,6 +98,40 @@ def test_engine_synthetic_once_dry_run(tmp_path) -> None:
     assert engine.strategy_evaluations >= 1
 
 
+def test_engine_smoke_order_is_paper_fill(tmp_path) -> None:
+    c = cfg(
+        state_path=str(tmp_path / "state.json"),
+        lock_path=str(tmp_path / "bot.lock"),
+        log_dir=str(tmp_path / "logs"),
+        enable_websocket=False,
+        dry_run=True,
+        live_trading=False,
+    )
+    fake = FakeRest()
+    engine = Engine(c, client=fake)  # type: ignore[arg-type]
+    rc = engine.run_smoke_order()
+    assert rc == 0
+    assert fake.create_order_calls == 0
+
+
+def test_engine_smoke_order_refuses_live(tmp_path) -> None:
+    c = cfg(
+        state_path=str(tmp_path / "state.json"),
+        lock_path=str(tmp_path / "bot.lock"),
+        log_dir=str(tmp_path / "logs"),
+        enable_websocket=False,
+        dry_run=False,
+        live_trading=True,
+        api_key="k",
+        api_secret="s",
+    )
+    fake = FakeRest()
+    engine = Engine(c, client=fake)  # type: ignore[arg-type]
+    rc = engine.run_smoke_order()
+    assert rc == 2
+    assert fake.create_order_calls == 0
+
+
 def test_engine_loop_continues_after_hold(tmp_path) -> None:
     c = cfg(
         state_path=str(tmp_path / "state.json"),

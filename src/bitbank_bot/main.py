@@ -52,6 +52,16 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="stop after N loop cycles (tests/smoke; default: run forever)",
     )
+    parser.add_argument(
+        "--execute",
+        action="store_true",
+        help="one-shot DRY_RUN paper fill (SMOKE_ORDER_OK; never Bitbank POST)",
+    )
+    parser.add_argument(
+        "--smoke-order",
+        action="store_true",
+        help="alias of --execute",
+    )
     return parser
 
 
@@ -72,7 +82,8 @@ def main(argv: list[str] | None = None) -> int:
         cfg.live_trading = False
         cfg.trading_mode = "DRY_RUN"
         cfg.live_trading_confirm = False
-    use_screen = should_use_screen(args, sys.stdout)
+    smoke = bool(args.execute or args.smoke_order)
+    use_screen = should_use_screen(args, sys.stdout) and not smoke
     setup_logging(cfg.log_level, cfg.log_dir, console=not use_screen)
     slog("BOOT", "starting", **cfg.safe_dict())
     slog(
@@ -80,11 +91,28 @@ def main(argv: list[str] | None = None) -> int:
         "mode",
         once=bool(args.once),
         synthetic=bool(args.synthetic),
-        loop=not args.once,
+        loop=not args.once and not smoke,
         dry_run=cfg.dry_run,
         trading_mode=cfg.resolved_trading_mode(),
         screen=use_screen,
+        execute=smoke,
     )
+    if smoke:
+        if cfg.may_place_live_orders or cfg.is_live:
+            slog(
+                "ERROR",
+                "smoke_order refused: LIVE",
+                create_order_called=False,
+                may_place_live_orders=cfg.may_place_live_orders,
+            )
+            return 2
+        cfg.dry_run = True
+        cfg.live_trading = False
+        cfg.trading_mode = "DRY_RUN"
+        cfg.live_trading_confirm = False
+        cfg.simulate_fill = True
+        engine = Engine(cfg, client=None, screen=None)
+        return engine.run_smoke_order()
     rest = RestClient(
         public_url=cfg.public_url,
         private_url=cfg.private_url,

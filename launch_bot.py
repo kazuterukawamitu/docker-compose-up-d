@@ -1,7 +1,9 @@
 """Repo-root entry so `python launch_bot.py` works. Not a second bot.
 
 Inserts src/ on sys.path from this file's location, then calls
-bitbank_bot.launch.main. Prefer `bash start.sh`, which uses
+bitbank_bot.launch.main (forwards --execute / --smoke-order). Prefer
+`bash ~/docker-compose-up-d/run_transaction.sh` for a paper fill, or
+`bash ~/docker-compose-up-d/start.sh` for the 取引画面. Both use
 $ROOT/.venv/bin/python only (never ~/.venv).
 """
 

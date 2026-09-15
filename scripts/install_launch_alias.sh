@@ -5,8 +5,9 @@
 # bash's raw "No such file or directory". It does not start the bot from ~.
 # It does not run pytest. LIVE is not enabled.
 #
-# Do not paste JSON logs, agent reports, or script source into the terminal.
-# Ctrl-C if you see '>'. Then run ONLY:
+# Do not paste this chat, JSON logs, agent reports, or script source.
+# Ctrl-C if you see '>'. Then run ONE of:
+#   bash ~/docker-compose-up-d/run_transaction.sh
 #   bash ~/docker-compose-up-d/start.sh
 # Never bash /workspace/start.sh on a Mac. Branch cursor/bitbank-closed-loop-f964.
 #

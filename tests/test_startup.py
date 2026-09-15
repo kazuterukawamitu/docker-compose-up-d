@@ -35,6 +35,52 @@ def test_default_cli_is_continuous_loop_not_once() -> None:
     assert args.once is False
     assert args.synthetic is False
     assert args.max_cycles is None
+    assert args.execute is False
+    assert args.smoke_order is False
+
+
+def test_execute_and_smoke_order_flags() -> None:
+    a = build_parser().parse_args(["--execute", "--skip-lock", "--no-screen"])
+    assert a.execute is True
+    b = build_parser().parse_args(["--smoke-order"])
+    assert b.smoke_order is True
+
+
+def test_main_smoke_order_exits_zero_without_post(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("STATE_PATH", str(tmp_path / "state.json"))
+    monkeypatch.setenv("LOCK_PATH", str(tmp_path / "bot.lock"))
+    monkeypatch.setenv("LOG_DIR", str(tmp_path / "logs"))
+    monkeypatch.setenv("DRY_RUN", "true")
+    monkeypatch.setenv("LIVE_TRADING", "false")
+    monkeypatch.setenv("TRADING_MODE", "DRY_RUN")
+    monkeypatch.setenv("ENABLE_WEBSOCKET", "false")
+    rc = main(["--execute", "--smoke-order", "--skip-lock", "--no-screen"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "SMOKE_ORDER_OK" in out
+    assert "SIMULATED_FILL" in out
+    assert "ORDER_INTENT" in out
+    assert "create_order_called" in out
+    assert "/user/spot/order" not in out
+
+
+def test_main_smoke_order_refuses_live(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("STATE_PATH", str(tmp_path / "state.json"))
+    monkeypatch.setenv("LOCK_PATH", str(tmp_path / "bot.lock"))
+    monkeypatch.setenv("LOG_DIR", str(tmp_path / "logs"))
+    monkeypatch.setenv("DRY_RUN", "false")
+    monkeypatch.setenv("LIVE_TRADING", "true")
+    monkeypatch.setenv("TRADING_MODE", "LIVE")
+    monkeypatch.setenv("LIVE_TRADING_CONFIRM", "YES_I_ACCEPT_REAL_MONEY_RISK")
+    monkeypatch.setenv("BITBANK_API_KEY", "k")
+    monkeypatch.setenv("BITBANK_API_SECRET", "s")
+    monkeypatch.setenv("ENABLE_WEBSOCKET", "false")
+    rc = main(["--execute", "--skip-lock", "--no-screen"])
+    assert rc == 2
+    captured = capsys.readouterr()
+    combined = captured.out + captured.err
+    assert "SMOKE_ORDER_OK" not in combined
+    assert "create_order_called" in combined or "LIVE" in combined
 
 
 def test_synthetic_does_not_imply_once() -> None:
@@ -52,6 +98,8 @@ def test_start_sh_is_venv_loop_launcher() -> None:
     assert "exec" in text
     after_exec = text.rsplit("exec", 1)[-1]
     assert "--once" not in after_exec
+    assert "--execute" not in after_exec
+    assert "--smoke-order" not in after_exec
     assert "--screen" in text
     assert "取引画面" in text
     assert ".env.example" in text
@@ -60,6 +108,9 @@ def test_start_sh_is_venv_loop_launcher() -> None:
     assert 'BOT_BRANCH="cursor/bitbank-closed-loop-f964"' in text
     assert "run.py" in text
     assert "bitbank_bot.launch" in text
+    assert "run_transaction.sh" in text
+    assert "--execute" in text
+    assert "--smoke-order" in text
     assert "/Users/kazuteru" not in text
     assert "without printing secrets" in text or "values not printed" in text
     assert "cd to the repo first" in text

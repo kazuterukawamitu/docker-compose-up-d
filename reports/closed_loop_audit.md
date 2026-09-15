@@ -505,3 +505,35 @@ From `/tmp` with a fake `$HOME/.venv/bin/python` first on `PATH`,
 branch string `closed-loop-launcher`+`563e` is absent. LIVE stays off.
 No secrets.
 
+---
+
+## Ninth pass (working paper-transaction formula)
+
+### Cause of "the program did not execute"
+
+`run_transaction.sh` previously exec'd `start.sh --once --skip-lock --no-screen`.
+That is one strategy cycle. On a quiet bar it logs `HOLD` / `no_buy_setup` and
+exits 0, which looked like "no transaction". A working DRY_RUN paper fill
+already existed on `OrderExecutor.place` (`ORDER_INTENT` → `SIMULATED_FILL`)
+when `simulate_fill` is on; it was not the wrapper's default path.
+
+### Fix
+
+- `OrderExecutor.smoke_order()`: DRY_RUN only (refuses LIVE; never
+  `create_order`); logs `ORDER_REQUEST` → `ORDER_INTENT` → `SIMULATED_FILL` →
+  `SMOKE_ORDER_OK` (`create_order_called=false`).
+- `run_transaction.sh` calls `--execute --smoke-order` (not `--once` HOLD).
+  Forces `DRY_RUN` / `TRADING_MODE=DRY_RUN` for that process. Uses repo
+  `.venv` via `start.sh`.
+- Default `bash ~/docker-compose-up-d/start.sh` remains the continuous
+  取引画面 (HOLD is labeled as normal, not a failed fill).
+- Launcher prints `LAUNCH_OK repo=... python=... mode=DRY_RUN live=false`.
+
+Mac one-liner (cwd may be `~`):
+
+```bash
+bash ~/docker-compose-up-d/run_transaction.sh
+```
+
+LIVE stays off. No secrets. No live POST.
+

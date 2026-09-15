@@ -7,7 +7,12 @@ with backoff.
 
 It does not place Bitbank orders. Child process is ``python -m bitbank_bot``.
 
-Do not paste this file, JSON logs, or agent reports into zsh. From ~ on a Mac::
+Do not paste this file, JSON logs, or agent reports into zsh. From ~ on a Mac,
+paper transaction (one line)::
+
+    bash ~/docker-compose-up-d/run_transaction.sh
+
+Continuous 取引画面 (HOLD is normal)::
 
     bash ~/docker-compose-up-d/start.sh
 """
@@ -48,8 +53,11 @@ ONESHOT_FLAGS = frozenset(
         "--help",
         "-h",
         "--self-test",
+        "--execute",
+        "--smoke-order",
     }
 )
+SMOKE_FLAGS = frozenset({"--execute", "--smoke-order"})
 FATAL_EXIT_CODES = frozenset({2, 3})
 CLEAN_EXIT_CODES = frozenset({0, 130, 143, -2, -15})
 INITIAL_BACKOFF_SEC = 2.0
@@ -60,8 +68,9 @@ SMART_QUOTES = frozenset("\u201c\u201d\u2018\u2019")
 NOT_IN_REPO_HINT = (
     "cd to the repo first, then run: bash ./start.sh\n"
     "Typical clone name: docker-compose-up-d\n"
-    "Do not paste JSON logs, agent reports, or script source into the terminal. "
-    "Ctrl-C if you see '>'. Then run ONLY:\n"
+    "Do not paste this chat, JSON logs, agent reports, or script source. "
+    "Ctrl-C if you see '>'. Then run ONE of:\n"
+    "  bash ~/docker-compose-up-d/run_transaction.sh\n"
     "  bash ~/docker-compose-up-d/start.sh\n"
     "Never bash /workspace/start.sh on a Mac. Uses repo .venv, never ~/.venv.\n"
     "start.sh is on branch cursor/bitbank-closed-loop-f964 "
@@ -312,14 +321,32 @@ def evaluate_live_guard(cfg: Config) -> tuple[bool, str, str]:
     return True, mode, "DRY_RUN default (no Bitbank POST)"
 
 
+def wants_smoke(argv: list[str]) -> bool:
+    return any(item in SMOKE_FLAGS for item in argv)
+
+
 def apply_cli_dry_run(cfg: Config, forwarded: list[str]) -> Config:
-    if "--dry-run" not in forwarded:
+    if "--dry-run" not in forwarded and not wants_smoke(forwarded):
         return cfg
     cfg.dry_run = True
     cfg.live_trading = False
     cfg.trading_mode = MODE_DRY_RUN
     cfg.live_trading_confirm = False
+    if wants_smoke(forwarded):
+        cfg.simulate_fill = True
     return cfg
+
+
+def launch_ok_line(*, root: Path, python_exe: str, cfg: Config) -> str:
+    mode = cfg.resolved_trading_mode()
+    live = "true" if cfg.may_place_live_orders else "false"
+    return f"LAUNCH_OK repo={root} python={python_exe} mode={mode} live={live}"
+
+
+def print_launch_ok(*, root: Path, python_exe: str, cfg: Config) -> None:
+    line = launch_ok_line(root=root, python_exe=python_exe, cfg=cfg)
+    sys.stdout.write(line + "\n")
+    sys.stdout.flush()
 
 
 def env_file_from_argv(forwarded: list[str]) -> str | None:
@@ -469,21 +496,24 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _usage_epilog() -> str:
     return (
-        "The only supported start from a Mac iTerm prompt:\n"
-        "Do not paste JSON logs, agent reports, or script source into the terminal. "
-        "Ctrl-C if you see '>'. Then run ONLY:\n"
+        "Do not paste this chat, JSON logs, agent reports, or script source into zsh.\n"
+        "Never bash /workspace/start.sh on a Mac. Never ~/.venv.\n"
+        "Paper transaction (copy this ONE line; prints SMOKE_ORDER_OK):\n"
+        "  bash ~/docker-compose-up-d/run_transaction.sh\n"
+        "If the clone exists but may be on the wrong branch:\n"
+        "  bash -lc 'cd \"$HOME/docker-compose-up-d\" && git fetch origin "
+        "cursor/bitbank-closed-loop-f964 && git checkout cursor/bitbank-closed-loop-f964 "
+        "&& exec bash ./run_transaction.sh'\n"
+        "Continuous 取引画面 (HOLD/WAIT is normal; not a failed transaction):\n"
         "  bash ~/docker-compose-up-d/start.sh\n"
-        "Never bash /workspace/start.sh on a Mac. Uses repo .venv, never ~/.venv.\n"
         "  cd <repo> && bash ./start.sh\n"
-        "  bash /absolute/path/to/start.sh\n"
         "  bash ./start.sh --help\n"
-        "  bash ./start.sh --once --synthetic --skip-lock --no-screen\n"
         "  bash ./start.sh --check-config\n"
         "RATE_MODE and RECONCILE_EVERY_CYCLES come from .env (printed SET/UNSET, no secrets).\n"
         "LIVE requires TRADING_MODE=LIVE and "
         f"LIVE_TRADING_CONFIRM={LIVE_CONFIRM_PHRASE}. Default is DRY_RUN.\n"
         "If bash says './start.sh: No such file or directory' you are not in the clone "
-        "(often ~). Run: bash ~/docker-compose-up-d/start.sh\n"
+        "(often ~). Use the absolute paths above.\n"
         "Optional home-safe wrapper: bash scripts/install_launch_alias.sh\n"
         "If zsh says 'command not found: ts:' or SMOKE_ORDER_OK / .... you pasted "
         "JSON logs or pytest dots; press Ctrl-C if stuck at '>', then run the one command.\n"
@@ -550,6 +580,13 @@ def main(argv: list[str] | None = None) -> int:
     except ConfigError as exc:
         sys.stderr.write(f"launcher: config failed: {exc}\n")
         return 2
+    if wants_smoke(opts.forwarded) and (
+        cfg.may_place_live_orders or cfg.is_live
+    ):
+        sys.stderr.write(
+            "launcher: smoke_order refused: LIVE (no Bitbank POST)\n"
+        )
+        return 2
     cfg = apply_cli_dry_run(cfg, opts.forwarded)
     allowed, mode, note = evaluate_live_guard(cfg)
     if not allowed:
@@ -557,16 +594,18 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     Path(cfg.log_dir).mkdir(parents=True, exist_ok=True)
     Path(cfg.lock_path).parent.mkdir(parents=True, exist_ok=True)
+    python_exe = resolve_runtime_python(root)
     print_diagnostics(
         diagnostics_lines(
             cfg,
             root=root,
-            python_exe=resolve_runtime_python(root),
+            python_exe=python_exe,
             lock_text=lock_status(Path(cfg.lock_path)),
             kill_text=kill_status(Path(cfg.kill_switch_path)),
             extra_note=note if mode != MODE_DRY_RUN else "",
         )
     )
+    print_launch_ok(root=root, python_exe=python_exe, cfg=cfg)
     if is_oneshot(opts.forwarded) or not should_supervise(opts):
         return int(bot_main(opts.forwarded))
     return supervise_loop(opts.forwarded, root=root, enabled=True)

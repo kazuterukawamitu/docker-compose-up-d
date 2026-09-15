@@ -333,3 +333,26 @@ def test_place_fill_without_average_price_is_pending() -> None:
     assert result.order_id == "8"
     assert result.actual_execution_jpy is None
 
+
+def test_smoke_order_dry_run_never_calls_create_order() -> None:
+    client = MagicMock()
+    client.create_order.side_effect = AssertionError("live order")
+    c = cfg(dry_run=True, live_trading=False, simulate_fill=False)
+    result = OrderExecutor(c, client).smoke_order()
+    assert result.ok
+    assert result.simulated
+    assert result.reason == "simulated"
+    assert result.executed_amount == Decimal("0.001")
+    client.create_order.assert_not_called()
+    client.get_active_orders.assert_not_called()
+
+
+def test_smoke_order_refuses_live_without_create_order() -> None:
+    client = MagicMock()
+    client.create_order.side_effect = AssertionError("live order")
+    c = cfg(dry_run=False, live_trading=True, api_key="k", api_secret="s")
+    result = OrderExecutor(c, client).smoke_order()
+    assert not result.ok
+    assert result.reason == "smoke_requires_dry_run"
+    client.create_order.assert_not_called()
+

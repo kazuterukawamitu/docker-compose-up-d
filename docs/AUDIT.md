@@ -61,8 +61,9 @@ bitFlyer, Coincheck, and GMO are not imported and are not executed.
     (never `~/.venv`), writes `bitbank_bot_src.pth`, and exports `PYTHONPATH`
     so `-m bitbank_bot.launch` works. Mac start is
     `bash ~/docker-compose-up-d/start.sh` on branch
-    `cursor/bitbank-closed-loop-f964`. `run_transaction.sh` is a one-shot
-    DRY_RUN wrapper around `start.sh`. Live POST is still off.
+    `cursor/bitbank-closed-loop-f964`. `run_transaction.sh` is the DRY_RUN
+    paper fill (`SMOKE_ORDER_OK`); `start.sh` is the continuous 取引画面.
+    Live POST is still off.
 
 ## What this bot does not do
 

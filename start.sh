@@ -8,13 +8,19 @@
 #   bash ./start.sh --help
 #
 # Do not paste this file, JSON bot logs, agent reports, or script source
-# into the terminal. Ctrl-C if you see a lone '>'. Then run ONLY:
+# into the terminal. Ctrl-C if you see a lone '>'. Then run ONE of:
+#   bash ~/docker-compose-up-d/run_transaction.sh
 #   bash ~/docker-compose-up-d/start.sh
 # Never bash /workspace/start.sh on a Mac (that path is the cloud VM).
 # This launcher uses $ROOT/.venv/bin/python only, never ~/.venv.
 #
-# First-time clone (paste this ONE line, not pytest output or JSON logs):
-#   bash -lc 'REPO="$HOME/docker-compose-up-d"; set -euo pipefail; if [ ! -d "$REPO/.git" ]; then git clone https://github.com/kazuterukawamitu/docker-compose-up-d.git "$REPO"; fi; cd "$REPO"; git fetch origin cursor/bitbank-closed-loop-f964; git checkout -B cursor/bitbank-closed-loop-f964 origin/cursor/bitbank-closed-loop-f964; exec bash ./start.sh --screen'
+# Paper transaction (ONE line; prints SMOKE_ORDER_OK / SIMULATED_FILL):
+#   bash ~/docker-compose-up-d/run_transaction.sh
+# Continuous 取引画面 (HOLD is normal; not a failed transaction):
+#   bash ~/docker-compose-up-d/start.sh
+#
+# First-time clone + paper transaction (paste this ONE line):
+#   bash -lc 'REPO="$HOME/docker-compose-up-d"; set -euo pipefail; if [ ! -d "$REPO/.git" ]; then git clone https://github.com/kazuterukawamitu/docker-compose-up-d.git "$REPO"; fi; cd "$REPO"; git fetch origin cursor/bitbank-closed-loop-f964; git checkout -B cursor/bitbank-closed-loop-f964 origin/cursor/bitbank-closed-loop-f964; exec bash ./run_transaction.sh'
 #
 # Locates this repo (no hardcoded /Users/... path), creates .venv if needed,
 # prefers .venv/bin/python (never CommandLineTools python when a venv exists),
@@ -47,14 +53,24 @@ Enhanced launcher for the existing Bitbank BTC/JPY bot (DRY_RUN by default).
 This is the program-launching program. It cds to the repo from BASH_SOURCE
 (so cwd may be ~). Either cd, or pass the absolute path.
 
-Do not paste JSON logs, agent reports, or script source into the terminal. Ctrl-C if you see '>'. Then run ONLY:
+Do not paste this chat, JSON logs, agent reports, or script source. Ctrl-C if you see '>'.
+
+Paper transaction (ONE copy-paste line; prints SMOKE_ORDER_OK / SIMULATED_FILL):
+  bash ~/docker-compose-up-d/run_transaction.sh
+
+If the clone exists but may be on the wrong branch:
+  bash -lc 'cd "$HOME/docker-compose-up-d" && git fetch origin cursor/bitbank-closed-loop-f964 && git checkout cursor/bitbank-closed-loop-f964 && exec bash ./run_transaction.sh'
+
+Continuous 取引画面 (HOLD/WAIT is normal; that is NOT a failed transaction):
   bash ~/docker-compose-up-d/start.sh
+
 Never bash /workspace/start.sh on a Mac (that path is the cloud VM).
 Uses the repo .venv only, never ~/.venv. Branch cursor/bitbank-closed-loop-f964.
 
   bash ./start.sh
   bash ~/docker-compose-up-d/start.sh
   bash ./start.sh --help
+  bash ./start.sh --execute --smoke-order --skip-lock --no-screen
   bash ./start.sh --once --synthetic --skip-lock --no-screen
   bash ./start.sh --check-config
   bash ./start.sh --no-supervise
@@ -84,7 +100,7 @@ Other flags pass through to python -m bitbank_bot.
 If zsh says: command not found: ts: / SMOKE_ORDER_OK / FAILURE / compileall: / HOW / LIVE / ....
   You pasted JSON bot logs, pytest progress, or an agent report, not a crash.
   Press Ctrl-C to leave a stuck '>' prompt, then run ONLY:
-    bash ~/docker-compose-up-d/start.sh
+    bash ~/docker-compose-up-d/run_transaction.sh
   If zsh says event not found, you pasted script source (a shebang bang).
   Do not paste JSON logs, agent reports, pytest output, or this file.
 
@@ -122,7 +138,8 @@ suggest_clones() {
 not_in_repo() {
   echo "cd to the repo first, then run: bash ./start.sh" >&2
   suggest_clones
-  echo "Do not paste JSON logs, agent reports, or script source into the terminal. Ctrl-C if you see '>'. Then run ONLY:" >&2
+  echo "Do not paste this chat, JSON logs, agent reports, or script source. Ctrl-C if you see '>'. Then run ONE of:" >&2
+  echo "  bash ~/docker-compose-up-d/run_transaction.sh" >&2
   echo "  bash ~/docker-compose-up-d/start.sh" >&2
   echo "Never bash /workspace/start.sh on a Mac. Uses repo .venv, never ~/.venv." >&2
   echo "Do not paste pytest output (.... [ 40%] / 179 passed) into the terminal." >&2
@@ -431,7 +448,7 @@ oneshot=0
 want_stdlib_loop=1
 for a in "$@"; do
   case "$a" in
-    --once|--check-config|--preflight|--backtest|--help|-h|--max-cycles|--self-test)
+    --once|--check-config|--preflight|--backtest|--help|-h|--max-cycles|--self-test|--execute|--smoke-order)
       oneshot=1
       want_stdlib_loop=0
       ;;
@@ -444,6 +461,17 @@ done
 write_bitbank_src_pth
 
 if ! "$VPY" -c "import dotenv, httpx" >/dev/null 2>&1; then
+  smoke_req=0
+  for a in "$@"; do
+    case "$a" in
+      --execute|--smoke-order) smoke_req=1 ;;
+    esac
+  done
+  if [[ "$smoke_req" -eq 1 ]]; then
+    echo "cannot run paper transaction without $ROOT/.venv packages (dotenv/httpx)" >&2
+    echo "Do not use ~/.venv. Rerun: bash ~/docker-compose-up-d/run_transaction.sh" >&2
+    exit 2
+  fi
   echo "pip packages missing; starting stdlib DRY_RUN (python3 run.py, no orders)"
   if [[ ! -f "$ROOT/run.py" ]]; then
     echo "cannot start: missing $ROOT/run.py" >&2
@@ -491,7 +519,7 @@ if [[ -t 1 ]]; then
 fi
 for a in "$@"; do
   case "$a" in
-    --once|--check-config|--preflight|--backtest|--no-screen)
+    --once|--check-config|--preflight|--backtest|--no-screen|--execute|--smoke-order)
       want_screen=0
       ;;
     --screen)
@@ -526,8 +554,23 @@ if [[ -n "${INVOCATION_ID:-}" ]]; then
   fi
 fi
 
-echo "opening Bitbank BTC/JPY 取引画面 (Ctrl-C to stop)"
-echo "HOLD/WAIT is normal. JSON detail is logs/bot.log (rotated; do not dump stdout)"
+want_smoke=0
+for a in "$@"; do
+  case "$a" in
+    --execute|--smoke-order)
+      want_smoke=1
+      ;;
+  esac
+done
+
+if [[ "$want_smoke" -eq 1 ]]; then
+  echo "paper DRY_RUN transaction (no Bitbank POST). Success prints SMOKE_ORDER_OK."
+  echo "HOLD on the 取引画面 is the other command: bash ~/docker-compose-up-d/start.sh"
+else
+  echo "opening Bitbank BTC/JPY 取引画面 (Ctrl-C to stop)"
+  echo "HOLD/WAIT is normal. JSON detail is logs/bot.log (rotated; do not dump stdout)"
+  echo "This is NOT run_transaction.sh. Paper fill: bash ~/docker-compose-up-d/run_transaction.sh"
+fi
 echo "project_root=$ROOT"
 echo "using $VPY"
 echo "lock=$ROOT/data/bot.lock kill=$ROOT/data/KILL (create KILL to halt new orders)"

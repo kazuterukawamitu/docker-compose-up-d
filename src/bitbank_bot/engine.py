@@ -763,6 +763,22 @@ class Engine:
         slog("BOOT", "run_once complete")
         return 0
 
+    def run_smoke_order(self) -> int:
+        """One paper fill via OrderExecutor.smoke_order. No strategy HOLD, no POST."""
+        slog(
+            "BOOT",
+            "run_smoke_order",
+            dry_run=self.cfg.dry_run,
+            mode=self.cfg.resolved_trading_mode(),
+            may_place_live_orders=self.cfg.may_place_live_orders,
+        )
+        executor = OrderExecutor(self.cfg, None)
+        result = executor.smoke_order()
+        if result.ok and result.simulated:
+            return 0
+        slog("ERROR", "smoke_order failed", reason=result.reason)
+        return 2
+
     def _candles_for_cycle(
         self,
         rest: RestClient,

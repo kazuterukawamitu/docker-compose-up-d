@@ -21,6 +21,7 @@ from bitbank_bot.launch import (
     main,
     guard_pytest_cwd,
     resolve_runtime_python,
+    wants_smoke,
     should_supervise,
     split_launch_argv,
     supervise_loop,
@@ -104,6 +105,10 @@ def test_should_supervise_skips_oneshot_and_systemd() -> None:
     assert should_supervise(split_launch_argv(["--max-cycles", "2"]), clean) is False
     assert should_supervise(split_launch_argv(["--no-supervise"]), clean) is False
     assert should_supervise(split_launch_argv(["--self-test"]), clean) is False
+    assert should_supervise(split_launch_argv(["--execute"]), clean) is False
+    assert should_supervise(split_launch_argv(["--smoke-order"]), clean) is False
+    assert wants_smoke(["--execute"]) is True
+    assert wants_smoke(["--once"]) is False
     assert should_supervise(split_launch_argv(["--supervise"]), {"INVOCATION_ID": "x"}) is True
     assert should_supervise(split_launch_argv([]), {"INVOCATION_ID": "x"}) is False
 
@@ -176,6 +181,7 @@ def test_start_sh_help_smoke() -> None:
     assert "#!/usr/bin/env" not in proc.stdout
     assert "JSON logs" in proc.stdout
     assert "bash ~/docker-compose-up-d/start.sh" in proc.stdout
+    assert "bash ~/docker-compose-up-d/run_transaction.sh" in proc.stdout
     assert "Never bash /workspace/start.sh" in proc.stdout
     assert "never ~/.venv" in proc.stdout
 
@@ -214,6 +220,9 @@ def test_launch_once_synthetic_no_order_post(tmp_path, monkeypatch) -> None:
     assert "/user/spot/order" not in out
     assert "create_order" not in out
     assert "run_once complete" in proc.stdout
+    assert "LAUNCH_OK" in proc.stdout
+    assert "mode=DRY_RUN" in proc.stdout
+    assert "live=false" in proc.stdout
 
 
 def test_rotating_log_handler(tmp_path) -> None:
@@ -717,16 +726,23 @@ def test_run_transaction_sh_cds_via_bash_source(tmp_path) -> None:
     text = wrapper.read_text(encoding="utf-8")
     assert "BASH_SOURCE" in text
     assert "start.sh" in text
-    assert "--once" in text
+    assert "--execute" in text
+    assert "--smoke-order" in text
     assert "--skip-lock" in text
     assert "--no-screen" in text
+    assert "--once" not in text
     assert "create_order" not in text
     assert "/user/spot/order" not in text
     env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
     env["DRY_RUN"] = "true"
     env["LIVE_TRADING"] = "false"
+    env["TRADING_MODE"] = "DRY_RUN"
+    env["ENABLE_WEBSOCKET"] = "false"
+    env["LOG_DIR"] = str(tmp_path / "logs")
+    env["STATE_PATH"] = str(tmp_path / "state.json")
+    env["LOCK_PATH"] = str(tmp_path / "bot.lock")
     proc = subprocess.run(
-        ["bash", str(wrapper), "--check-config"],
+        ["bash", str(wrapper)],
         cwd=str(tmp_path),
         env=env,
         capture_output=True,
@@ -736,8 +752,88 @@ def test_run_transaction_sh_cds_via_bash_source(tmp_path) -> None:
     out = proc.stdout + proc.stderr
     assert proc.returncode == 0, out
     assert str(root) in out
-    assert "may_place_live_orders: False" in out or "DRY_RUN" in out
+    assert "LAUNCH_OK" in out
+    assert "mode=DRY_RUN" in out
+    assert "live=false" in out
+    assert "SMOKE_ORDER_OK" in out
+    assert "SIMULATED_FILL" in out
+    assert "ORDER_INTENT" in out
+    assert "no_buy_setup" not in out
+    assert "run_once complete" not in out
+    assert "create_order_called" in out
+    assert "may_place_live_orders: False" in out or "may_place_live_orders=false" in out
     assert "HOME_VENV_USED" not in out
+    assert "/user/spot/order" not in out
+    assert str(root / ".venv") in out or "python=" in out
+
+
+def test_run_transaction_sh_from_fake_home_tilde_path(tmp_path) -> None:
+    root = Path(__file__).resolve().parents[1]
+    home = tmp_path / "home"
+    foreign = tmp_path / "cwd"
+    home.mkdir()
+    foreign.mkdir()
+    link = home / "docker-compose-up-d"
+    link.symlink_to(root)
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+    env["HOME"] = str(home)
+    env["DRY_RUN"] = "true"
+    env["LIVE_TRADING"] = "false"
+    env["TRADING_MODE"] = "DRY_RUN"
+    env["ENABLE_WEBSOCKET"] = "false"
+    env["LOG_DIR"] = str(tmp_path / "logs")
+    env["STATE_PATH"] = str(tmp_path / "state.json")
+    env["LOCK_PATH"] = str(tmp_path / "bot.lock")
+    proc = subprocess.run(
+        ["bash", "-lc", "bash ~/docker-compose-up-d/run_transaction.sh"],
+        cwd=str(foreign),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=180,
+    )
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 0, out
+    assert "SMOKE_ORDER_OK" in out
+    assert "SIMULATED_FILL" in out
+    assert "LAUNCH_OK" in out
+    assert "live=false" in out
+    assert "no_buy_setup" not in out
+    assert "run_once complete" not in out
+    assert "/user/spot/order" not in out
+
+
+def test_launch_bot_py_smoke_order(tmp_path) -> None:
+    root = Path(__file__).resolve().parents[1]
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+    env["STATE_PATH"] = str(tmp_path / "state.json")
+    env["LOCK_PATH"] = str(tmp_path / "bot.lock")
+    env["LOG_DIR"] = str(tmp_path / "logs")
+    env["DRY_RUN"] = "true"
+    env["LIVE_TRADING"] = "false"
+    env["TRADING_MODE"] = "DRY_RUN"
+    env["ENABLE_WEBSOCKET"] = "false"
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(root / "launch_bot.py"),
+            "--execute",
+            "--smoke-order",
+            "--skip-lock",
+            "--no-screen",
+        ],
+        cwd=str(root),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=45,
+    )
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 0, out
+    assert "LAUNCH_OK" in out
+    assert "SMOKE_ORDER_OK" in out
+    assert "SIMULATED_FILL" in out
+    assert "No module named 'bitbank_bot'" not in out
     assert "/user/spot/order" not in out
 
 
@@ -778,6 +874,7 @@ def test_home_start_prints_one_mac_command(tmp_path) -> None:
     out = proc.stdout + proc.stderr
     assert proc.returncode == 2, out
     assert "bash ~/docker-compose-up-d/start.sh" in out
+    assert "bash ~/docker-compose-up-d/run_transaction.sh" in out
     assert "Never bash /workspace/start.sh" in out
     assert "cursor/bitbank-closed-loop-f964" in out
     assert ("closed-loop-launcher-" + "563e") not in out

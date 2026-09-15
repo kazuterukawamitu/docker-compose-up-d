@@ -9,7 +9,39 @@ HOLD for 15 minutes while market data and strategy are healthy is `LONG_WAIT`, n
 
 ## Start (this is the program)
 
-### Execute on a Mac
+Do **not** paste this chat, JSON logs, agent reports, or script source into
+iTerm. Never `bash /workspace/start.sh` (cloud VM). Never `~/.venv`.
+Branch `cursor/bitbank-closed-loop-f964`. Launchers `cd` via `BASH_SOURCE`
+and run **`$ROOT/.venv/bin/python` only**.
+
+### Paper transaction (copy this ONE line)
+
+From `~` on a Mac this finds `~/docker-compose-up-d`, uses the repo `.venv`,
+and completes a DRY_RUN paper fill (`LAUNCH_OK`, `ORDER_INTENT`,
+`SIMULATED_FILL`, `SMOKE_ORDER_OK`). Bitbank is **not** POSTed.
+
+```bash
+bash ~/docker-compose-up-d/run_transaction.sh
+```
+
+If the clone exists but may be on the wrong branch, this is still one line:
+
+```bash
+bash -lc 'cd "$HOME/docker-compose-up-d" && git fetch origin cursor/bitbank-closed-loop-f964 && git checkout cursor/bitbank-closed-loop-f964 && exec bash ./run_transaction.sh'
+```
+
+Success looks like `LAUNCH_OK ... mode=DRY_RUN live=false` then
+`SMOKE_ORDER_OK` / `SIMULATED_FILL` with `create_order_called=false`.
+That is a paper transaction, not HOLD.
+
+### Continuous 取引画面 (HOLD is normal)
+
+This is the looping dashboard. HOLD / `no_buy_setup` on a bar is **not** a
+failed transaction. Stop with Ctrl-C.
+
+```bash
+bash ~/docker-compose-up-d/start.sh
+```
 
 Apple `/usr/bin/python3` (Xcode CommandLineTools) must not be aimed at a
 random file while your cwd is `~` — that is
@@ -17,36 +49,17 @@ random file while your cwd is `~` — that is
 `python3 main.py`, `/Users/.../test_public.py`). `pytest` from `~` is
 `no tests ran`.
 
-`start.sh` always `cd`s to the repo from its own path (`BASH_SOURCE`) and
-runs **`$ROOT/.venv/bin/python` only** (never `~/.venv`). It writes
-`bitbank_bot_src.pth` into the **repo** venv site-packages and exports
-`PYTHONPATH=$ROOT/src` so `-m bitbank_bot.launch` works. Branch
-`cursor/bitbank-closed-loop-f964`.
-
-**Do not paste JSON logs, agent reports, or script source into the terminal. Ctrl-C if you see `>`. Then run ONLY:**
-
-```bash
-bash ~/docker-compose-up-d/start.sh
-```
-
-Never `bash /workspace/start.sh` on a Mac (that path is the cloud VM). Never
-`~/.venv/bin/python -m bitbank_bot.launch`.
-
 ```bash
 cd ~/docker-compose-up-d
 git fetch origin cursor/bitbank-closed-loop-f964
 git checkout cursor/bitbank-closed-loop-f964
 git ls-files start.sh    # must print: start.sh
 bash ./start.sh
-
-# same program from ~ or any cwd (no cd required):
-bash ~/docker-compose-up-d/start.sh
 ```
 
-`bash ./start.sh --help` prints the same instructions. Optional one-shot DRY_RUN
-wrapper (not a second bot; no live POST): `bash ~/docker-compose-up-d/run_transaction.sh`.
-`python launch_bot.py` from the clone inserts `src/` then calls the same launcher.
-A cwd-checked wrapper is `bash scripts/run_bot.sh`. Tests:
+`bash ./start.sh --help` prints the same instructions.
+`python launch_bot.py --execute --smoke-order` from the clone forwards to
+the same paper path. Tests:
 `bash ~/docker-compose-up-d/scripts/run_tests.sh` (not `pytest` from `~`).
 
 ### `bash: ./start.sh: No such file or directory`
@@ -128,9 +141,10 @@ paste `start.sh` source). `bash: /workspace/start.sh: No such file` is the
 cloud VM path, not a Mac path.
 
 1. If the prompt is a lone `>` (continuation after an unclosed quote), press **Ctrl-C**.
-2. Then run ONLY:
+2. Then run ONE of:
 
 ```bash
+bash ~/docker-compose-up-d/run_transaction.sh
 bash ~/docker-compose-up-d/start.sh
 ```
 
@@ -146,7 +160,11 @@ order POST; logs `WOULD_SUBMIT_ORDER`). `DRY_RUN=true` remains the default.
 including yesterday near midnight). Accidental synthetic candles never place
 orders (`EXECUTION_BLOCKED` / `synthetic_market_data`).
 
-`--once --synthetic` is a one-cycle smoke test that **exits on purpose**. The launcher above does **not** use `--once`.
+`run_transaction.sh` is the paper-fill path (`--execute --smoke-order`). It is
+not `--once` strategy HOLD. Default `bash ./start.sh` is the continuous loop
+and does **not** inject `--once` or `--execute`.
+
+`--once --synthetic` remains a one-cycle health check that **exits on purpose**.
 
 
 ## Strategy (from original README)

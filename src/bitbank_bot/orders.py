@@ -13,6 +13,32 @@ from bitbank_bot.money import D, ZERO, ensure_decimal, quantize_price
 from bitbank_bot.rest_client import BitbankAPIError, coerce_active_orders
 from bitbank_bot.strategy import Signal
 
+SMOKE_PRICE = Decimal("10000000")
+SMOKE_AMOUNT = Decimal("0.001")
+
+
+def default_smoke_plan() -> AmountPlan:
+    """Fixed paper size for --execute/--smoke-order. Not a live lot."""
+    planned = SMOKE_AMOUNT * SMOKE_PRICE
+    return AmountPlan(
+        side="buy",
+        amount=SMOKE_AMOUNT,
+        price=SMOKE_PRICE,
+        available_jpy=Decimal("100000"),
+        available_btc=ZERO,
+        target_jpy=planned,
+        planned_order_jpy=planned,
+        actual_execution_jpy=None,
+        actual_balance_jpy=Decimal("100000"),
+        actual_balance_btc=ZERO,
+        ok=True,
+        reason="smoke_order",
+    )
+
+
+def default_smoke_signal() -> Signal:
+    return Signal("BUY1", "buy", Decimal("0.03"), "smoke_order")
+
 
 def _fill_status(raw_status: str, executed: Decimal, ordered: Decimal) -> str:
     if executed <= ZERO:
@@ -337,6 +363,60 @@ class OrderExecutor:
             )
         reason = "partial_fill" if status == "PARTIALLY_FILLED" else "fill"
         return OrderResult(True, reason, False, False, order_id, status, executed, avg, actual, match)
+
+    def smoke_order(
+        self,
+        signal: Signal | None = None,
+        plan: AmountPlan | None = None,
+    ) -> OrderResult:
+        """DRY_RUN paper fill. Never calls create_order. Refuses LIVE."""
+        if self.cfg.may_place_live_orders or self.cfg.is_live or not self.cfg.dry_run:
+            slog(
+                "ERROR",
+                "smoke_order refused: DRY_RUN required; not calling create_order",
+                dry_run=self.cfg.dry_run,
+                mode=self.cfg.resolved_trading_mode(),
+                may_place_live_orders=self.cfg.may_place_live_orders,
+                create_order_called=False,
+            )
+            return OrderResult(
+                False,
+                "smoke_requires_dry_run",
+                self.cfg.dry_run,
+                False,
+                None,
+                None,
+                ZERO,
+                ZERO,
+                None,
+                None,
+            )
+        signal = signal or default_smoke_signal()
+        plan = plan or default_smoke_plan()
+        prev = self.cfg.simulate_fill
+        self.cfg.simulate_fill = True
+        try:
+            result = self.place(signal, plan)
+        finally:
+            self.cfg.simulate_fill = prev
+        if result.ok and result.simulated:
+            slog(
+                "SMOKE_ORDER_OK",
+                "paper fill only; Bitbank create_order not called",
+                create_order_called=False,
+                may_place_live_orders=False,
+                executed_amount=str(result.executed_amount),
+                average_price=str(result.average_price),
+                actual_execution_jpy=str(result.actual_execution_jpy),
+            )
+            return result
+        slog(
+            "ERROR",
+            "smoke_order did not simulate a fill",
+            reason=result.reason,
+            create_order_called=False,
+        )
+        return result
 
     def poll(self, order_id: str, fallback_amount: Decimal) -> OrderResult:
         """Re-read a live order. Does not place a new order."""
