@@ -258,3 +258,57 @@ def test_cached_real_data_still_executes_after_failed_refresh(tmp_path) -> None:
         engine.process_candles(candles, state, execute=True, persist=False)
     assert state.position is not None
     assert state.position.kind == "BUY1"
+
+
+def test_explicit_synthetic_once_is_not_real_data(tmp_path) -> None:
+    c = cfg(
+        state_path=str(tmp_path / "state.json"),
+        lock_path=str(tmp_path / "bot.lock"),
+        log_dir=str(tmp_path / "logs"),
+        enable_websocket=False,
+        dry_run=True,
+        live_trading=False,
+    )
+    rest = MagicMock()
+    rest.create_order.side_effect = AssertionError("live order")
+    engine = Engine(c, client=rest)
+    assert engine.run_once(synthetic=True, skip_preflight=True) == 0
+    assert engine.market_data_real is False
+    assert engine._explicit_synthetic is True
+    rest.create_order.assert_not_called()
+
+
+def test_live_explicit_synthetic_does_not_post(tmp_path) -> None:
+    c = cfg(
+        state_path=str(tmp_path / "state.json"),
+        lock_path=str(tmp_path / "bot.lock"),
+        log_dir=str(tmp_path / "logs"),
+        enable_websocket=False,
+        enable_htf_filter=False,
+        dry_run=False,
+        live_trading=True,
+        api_key="k",
+        api_secret="s",
+        live_trading_confirm=True,
+        trading_mode="live",
+        ma_period=3,
+        short_ma_period=3,
+        long_ma_period=5,
+        poll_sec=0.01,
+    )
+    rest = MagicMock()
+    rest.get_ticker.return_value = {"last": "10000000"}
+    rest.get_spot_status.return_value = {"pair": "btc_jpy", "status": "TRADING"}
+    rest.get_assets.return_value = {"assets": []}
+    rest.free_amount.return_value = Decimal("100000")
+    rest.create_order.side_effect = AssertionError("live order")
+    engine = Engine(c, client=rest)
+    from unittest.mock import patch
+
+    with patch(
+        "bitbank_bot.strategy.Strategy.evaluate",
+        return_value=Signal("BUY1", "buy", Decimal("0.03"), "forced"),
+    ):
+        rc = engine.run_forever(synthetic=True, max_cycles=1)
+    assert rc == 0
+    rest.create_order.assert_not_called()

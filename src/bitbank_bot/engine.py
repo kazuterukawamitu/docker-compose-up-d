@@ -248,6 +248,10 @@ class Engine:
             hold = Signal.hold("not_enough_candles")
             self.last_signal = hold
             return hold
+        if candles and not self.used_synthetic_fallback and not self._explicit_synthetic:
+            # Public/cache/unit-test bars are trusted. --synthetic stays flagged
+            # so TRADE_GATE can still paper-fill via _explicit_synthetic.
+            self.market_data_real = True
         if execute and state.pending:
             self._poll_pending(state)
             if persist:
@@ -456,7 +460,8 @@ class Engine:
                 signal,
                 plan,
                 trace_id=trace_id,
-                market_data_real=self.market_data_real or self._explicit_synthetic,
+                market_data_real=self.market_data_real
+                or (self._explicit_synthetic and not self.cfg.may_place_live_orders),
                 market_data_fresh=self.market_data_fresh,
                 private_api_ok=self.cfg.has_keys or self.cfg.dry_run,
                 kill_switch=kill,
@@ -690,6 +695,9 @@ class Engine:
     def run_once(self, *, synthetic: bool = False, skip_preflight: bool = False) -> int:
         slog("BOOT", "run_once", synthetic=synthetic, dry_run=self.cfg.dry_run)
         self._explicit_synthetic = synthetic
+        if synthetic:
+            self.used_synthetic_fallback = True
+            self.market_data_real = False
         rest = self._rest()
         if not skip_preflight and not synthetic:
             result = preflight(self.cfg, rest, require_public=True)
