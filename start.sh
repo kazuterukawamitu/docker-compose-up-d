@@ -173,7 +173,7 @@ if [[ "$want_screen" -eq 1 ]]; then
   fi
 fi
 
-echo "opening Bitbank BTC/JPY 取引画面 (Ctrl-C to stop)"
+echo "LAUNCH_OK opening Bitbank BTC/JPY 取引画面 (Ctrl-C to stop)"
 echo "HOLD/WAIT is normal. JSON detail is logs/bot.log"
 echo "using $VPY"
 

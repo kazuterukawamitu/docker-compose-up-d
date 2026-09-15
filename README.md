@@ -8,21 +8,37 @@ HOLD for 15 minutes while market data and strategy are healthy is `LONG_WAIT`, n
 
 ## Start (this is the program)
 
-`python3 run.py` is a stdlib-only DRY_RUN 取引画面 and never calls `create_order`. For the full package (candle cache, LIVE_READY, BUY_GATE), check out this branch and use `start.sh` or `python3 main.py`.
+From the repository root (the folder that contains `main.py` and `closed_loop.py`):
 
-You should see `Bitbank  BTC/JPY  取引画面`. HOLD/待機 is normal. Stop with Ctrl-C.
+```bash
+python3 closed_loop.py --dry-run --skip-lock --no-screen --max-cycles 1
+```
+
+That command starts the full bot, prints `LAUNCH_OK`, runs one DRY_RUN cycle, and exits. HOLD / `no_buy_setup` is normal. Ctrl-C stops a continuous run.
+
+Continuous 取引画面 (Mac iTerm, TTY):
 
 ```bash
 bash ./start.sh --screen
 ```
 
-If this repo is already checked out on this branch:
+The same bot also starts with:
 
 ```bash
+python3 closed_loop.py
+python3 main.py
+python3 src/bitbank_bot/main.py
+python3 -m bitbank_bot
 python3 run.py
 ```
 
-`python3 main.py` also works: it uses the full package when httpx is installed, otherwise the same stdlib `run.py`.
+Checks that exit (no live orders):
+
+```bash
+python3 closed_loop.py --review
+python3 closed_loop.py --verify --no-public
+python3 closed_loop.py --verify
+```
 
 Live trading stays **off** unless `.env` has `DRY_RUN=false` **and** `LIVE_TRADING=true` **and** both API keys **and** `LIVE_TRADING_CONFIRM=YES_I_ACCEPT_REAL_MONEY_RISK`. Missing the confirm phrase stays in `LIVE_READY` (`WOULD_SUBMIT_ORDER` only). Default `RATE_MODE=fixed` keeps the README take-profit percents.
 

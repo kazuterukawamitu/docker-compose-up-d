@@ -4,6 +4,11 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
+
+_SRC = Path(__file__).resolve().parent.parent
+if _SRC.name == "src" and str(_SRC) not in sys.path:
+    sys.path.insert(0, str(_SRC))
 
 from bitbank_bot.config import ConfigError, load_config
 from bitbank_bot.engine import Engine, install_signal_handlers
@@ -85,6 +90,12 @@ def main(argv: list[str] | None = None) -> int:
         trading_mode=cfg.trading_mode,
         screen=use_screen,
     )
+    sys.stderr.write(
+        "LAUNCH_OK  Bitbank BTC/JPY bot "
+        f"mode={cfg.trading_mode} dry_run={cfg.dry_run} "
+        "HOLD/WAIT is normal. Ctrl-C to stop.\n"
+    )
+    sys.stderr.flush()
     rest = RestClient(
         public_url=cfg.public_url,
         private_url=cfg.private_url,
