@@ -2,29 +2,25 @@
 
 Bitbank-only `btc_jpy` bot. Default is a **continuous DRY_RUN loop** with an iTerm **取引画面** (trading dashboard). HOLD/WAIT on a bar is normal. JSON lines are written to `logs/bot.log`, not the dashboard.
 
-`main` on GitHub is still wiki HTML. The runnable bot is branch `cursor/bitbank-audit-unify-f5fd`.
-
 HOLD for 15 minutes while market data and strategy are healthy is `LONG_WAIT`, not a crash. Public-API fallback candles never place orders. Live UNFILLED limits are persisted and polled. New BUY is blocked when both 4h and 1d SMA slopes are down (`ENABLE_HTF_FILTER`).
 
 ## Start (this is the program)
 
-`main` on GitHub is wiki HTML. You do **not** need pip, venv, or `start.sh` for the bot to run.
-
-Paste **this one line** in iTerm. It downloads `run.py` and starts a DRY_RUN 取引画面 (no orders):
+Git login is not required. If the prompt shows `then>` or `quote>`, press Ctrl-C before pasting. Paste this one line at `~ %` and nothing else:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/kazuterukawamitu/docker-compose-up-d/cursor/bitbank-audit-unify-f5fd/run.py -o "$HOME/bitbank_run.py" && python3 "$HOME/bitbank_run.py"
+bash -lc 'curl -fsSL -o "$HOME/bitbank_launch.py" https://raw.githubusercontent.com/kazuterukawamitu/docker-compose-up-d/cursor/git-free-launcher-2b78/launch.py && python3 "$HOME/bitbank_launch.py"'
 ```
 
-You should see `Bitbank  BTC/JPY  取引画面`. HOLD/待機 is normal. Stop with Ctrl-C.
+That downloads `launch.py` over HTTPS, finds `~/docker-compose-up-d` when the bot is already there, otherwise downloads the bot into `~/bitbank-btc-jpy-bot`, installs a `.venv` when packages are missing, and opens the trading screen. HOLD/待機 is normal. Stop with Ctrl-C.
 
-If this repo is already checked out on this branch:
+Check without leaving the loop running:
 
 ```bash
-python3 run.py
+python3 "$HOME/bitbank_launch.py" --check --no-download
 ```
 
-`python3 main.py` also works: it uses the full package when httpx is installed, otherwise the same stdlib `run.py`.
+If `httpx` is not installed, `launch.py` falls back to stdlib `run.py` (DRY_RUN, no orders). `python3 main.py` does the same fallback.
 
 Live trading stays **off** unless `.env` has `DRY_RUN=false` **and** `LIVE_TRADING=true` **and** both API keys.
 

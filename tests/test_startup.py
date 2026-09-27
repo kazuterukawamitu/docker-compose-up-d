@@ -16,6 +16,7 @@ def test_compileall_src() -> None:
         py_compile.compile(str(path), doraise=True)
     py_compile.compile(str(root / "main.py"), doraise=True)
     py_compile.compile(str(root / "run.py"), doraise=True)
+    py_compile.compile(str(root / "launch.py"), doraise=True)
     diag = root / "diagnostics.py"
     if diag.is_file():
         py_compile.compile(str(diag), doraise=True)
@@ -40,20 +41,17 @@ def test_synthetic_does_not_imply_once() -> None:
     assert args.synthetic is True
 
 
-def test_start_sh_is_venv_loop_launcher() -> None:
+def test_start_sh_does_not_require_git_login() -> None:
     text = Path(__file__).resolve().parents[1].joinpath("start.sh").read_text(encoding="utf-8")
-    assert ".venv" in text
-    assert 'VPY="$VENV/bin/python"' in text
+    lowered = text.lower()
+    for banned in ("git fetch", "git clone", "git checkout", "git pull", "git push"):
+        assert banned not in lowered
+    assert "launch.py" in text
+    assert "python3" in text
     assert "exec" in text
     after_exec = text.rsplit("exec", 1)[-1]
     assert "--once" not in after_exec
-    assert "--screen" in text
-    assert "取引画面" in text
-    assert ".env.example" in text
-    assert "python3.12" in text
-    assert "python3" in text
-    assert 'BOT_BRANCH="cursor/bitbank-audit-unify-f5fd"' in text
-    assert "run.py" in text
+    assert "git login is not required" in lowered
 
 
 def test_loop_cli_exits_after_max_cycles(tmp_path, monkeypatch) -> None:
@@ -67,6 +65,53 @@ def test_loop_cli_exits_after_max_cycles(tmp_path, monkeypatch) -> None:
         ["--synthetic", "--dry-run", "--skip-lock", "--max-cycles", "2"]
     )
     assert rc == 0
+
+
+def test_launch_check_uses_local_files(tmp_path) -> None:
+    root = Path(__file__).resolve().parents[1]
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+    env["DRY_RUN"] = "true"
+    env["LIVE_TRADING"] = "false"
+    env["STATE_PATH"] = str(tmp_path / "state.json")
+    env["LOCK_PATH"] = str(tmp_path / "bot.lock")
+    env["LOG_DIR"] = str(tmp_path / "logs")
+    proc = subprocess.run(
+        [sys.executable, str(root / "launch.py"), "--check", "--no-venv"],
+        cwd=str(tmp_path),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=45,
+    )
+    assert proc.returncode == 0, proc.stderr + proc.stdout
+    assert "LAUNCH PASS local_sources" in proc.stdout
+    assert "LAUNCH PASS git_login not_required" in proc.stdout
+    assert "DRY_RUN=true" in proc.stdout
+    assert "LIVE_TRADING=false" in proc.stdout
+    assert '"may_place_live_orders": false' in proc.stdout
+
+
+def test_launch_finds_a_marked_project(tmp_path) -> None:
+    import importlib.util
+
+    root = Path(__file__).resolve().parents[1]
+    spec = importlib.util.spec_from_file_location("bitbank_launch", root / "launch.py")
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    project = tmp_path / "bot"
+    package = project / "src" / "bitbank_bot"
+    package.mkdir(parents=True)
+    for name in ("main.py", "run.py", "requirements.txt", ".env.example"):
+        (project / name).write_text("x\n", encoding="utf-8")
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "main.py").write_text("x\n", encoding="utf-8")
+    os.environ["BITBANK_BOT_ROOT"] = str(project)
+    try:
+        found = module.find_project(tmp_path / "empty")
+    finally:
+        os.environ.pop("BITBANK_BOT_ROOT", None)
+    assert found == project.resolve()
 
 
 def test_load_config_default_pair() -> None:
