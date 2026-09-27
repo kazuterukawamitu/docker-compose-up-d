@@ -91,6 +91,29 @@ def test_launch_check_uses_local_files(tmp_path) -> None:
     assert '"may_place_live_orders": false' in proc.stdout
 
 
+def test_launch_finds_a_marked_project(tmp_path) -> None:
+    import importlib.util
+
+    root = Path(__file__).resolve().parents[1]
+    spec = importlib.util.spec_from_file_location("bitbank_launch", root / "launch.py")
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    project = tmp_path / "bot"
+    package = project / "src" / "bitbank_bot"
+    package.mkdir(parents=True)
+    for name in ("main.py", "run.py", "requirements.txt", ".env.example"):
+        (project / name).write_text("x\n", encoding="utf-8")
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "main.py").write_text("x\n", encoding="utf-8")
+    os.environ["BITBANK_BOT_ROOT"] = str(project)
+    try:
+        found = module.find_project(tmp_path / "empty")
+    finally:
+        os.environ.pop("BITBANK_BOT_ROOT", None)
+    assert found == project.resolve()
+
+
 def test_load_config_default_pair() -> None:
     cfg = load_config(environ={"DRY_RUN": "true"}, load_default_dotenv=False)
     assert cfg.pair == "btc_jpy"

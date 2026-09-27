@@ -6,27 +6,19 @@ HOLD for 15 minutes while market data and strategy are healthy is `LONG_WAIT`, n
 
 ## Start (this is the program)
 
-Git login is not required. The launcher uses the files already next to it.
-
-From the project directory in iTerm:
+Git login is not required. If the prompt shows `then>` or `quote>`, press Ctrl-C before pasting. Paste this one line at `~ %` and nothing else:
 
 ```bash
-python3 launch.py
+bash -lc 'curl -fsSL -o "$HOME/bitbank_launch.py" https://raw.githubusercontent.com/kazuterukawamitu/docker-compose-up-d/cursor/git-free-launcher-2b78/launch.py && python3 "$HOME/bitbank_launch.py"'
 ```
 
-The same entry point from any directory, including a fresh shell at `~`:
+That downloads `launch.py` over HTTPS, finds `~/docker-compose-up-d` when the bot is already there, otherwise downloads the bot into `~/bitbank-btc-jpy-bot`, installs a `.venv` when packages are missing, and opens the trading screen. HOLD/待機 is normal. Stop with Ctrl-C.
+
+Check without leaving the loop running:
 
 ```bash
-python3 "$HOME/docker-compose-up-d/launch.py"
+python3 "$HOME/bitbank_launch.py" --check --no-download
 ```
-
-`bash start.sh` calls that same launcher. Check the local tree without starting the loop:
-
-```bash
-python3 launch.py --check
-```
-
-You should see `LAUNCH PASS` lines and then `Bitbank  BTC/JPY  取引画面` when stdout is a terminal. HOLD/待機 is normal. Stop with Ctrl-C.
 
 If `httpx` is not installed, `launch.py` falls back to stdlib `run.py` (DRY_RUN, no orders). `python3 main.py` does the same fallback.
 
