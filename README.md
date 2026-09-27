@@ -2,29 +2,33 @@
 
 Bitbank-only `btc_jpy` bot. Default is a **continuous DRY_RUN loop** with an iTerm **取引画面** (trading dashboard). HOLD/WAIT on a bar is normal. JSON lines are written to `logs/bot.log`, not the dashboard.
 
-`main` on GitHub is still wiki HTML. The runnable bot is branch `cursor/bitbank-audit-unify-f5fd`.
-
 HOLD for 15 minutes while market data and strategy are healthy is `LONG_WAIT`, not a crash. Public-API fallback candles never place orders. Live UNFILLED limits are persisted and polled. New BUY is blocked when both 4h and 1d SMA slopes are down (`ENABLE_HTF_FILTER`).
 
 ## Start (this is the program)
 
-`main` on GitHub is wiki HTML. You do **not** need pip, venv, or `start.sh` for the bot to run.
+Git login is not required. The launcher uses the files already next to it.
 
-Paste **this one line** in iTerm. It downloads `run.py` and starts a DRY_RUN 取引画面 (no orders):
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/kazuterukawamitu/docker-compose-up-d/cursor/bitbank-audit-unify-f5fd/run.py -o "$HOME/bitbank_run.py" && python3 "$HOME/bitbank_run.py"
-```
-
-You should see `Bitbank  BTC/JPY  取引画面`. HOLD/待機 is normal. Stop with Ctrl-C.
-
-If this repo is already checked out on this branch:
+From the project directory in iTerm:
 
 ```bash
-python3 run.py
+python3 launch.py
 ```
 
-`python3 main.py` also works: it uses the full package when httpx is installed, otherwise the same stdlib `run.py`.
+The same entry point from any directory, including a fresh shell at `~`:
+
+```bash
+python3 "$HOME/docker-compose-up-d/launch.py"
+```
+
+`bash start.sh` calls that same launcher. Check the local tree without starting the loop:
+
+```bash
+python3 launch.py --check
+```
+
+You should see `LAUNCH PASS` lines and then `Bitbank  BTC/JPY  取引画面` when stdout is a terminal. HOLD/待機 is normal. Stop with Ctrl-C.
+
+If `httpx` is not installed, `launch.py` falls back to stdlib `run.py` (DRY_RUN, no orders). `python3 main.py` does the same fallback.
 
 Live trading stays **off** unless `.env` has `DRY_RUN=false` **and** `LIVE_TRADING=true` **and** both API keys.
 
