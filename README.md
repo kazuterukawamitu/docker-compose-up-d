@@ -13,7 +13,7 @@ You do **not** need pip, venv, or a Git login for the bot to run.
 Paste **this one line** in iTerm. It downloads the public DRY_RUN program over HTTPS (no `git` command) and starts the 取引画面:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/kazuterukawamitu/docker-compose-up-d/main/run.py -o "$HOME/bitbank_run.py" && python3 "$HOME/bitbank_run.py"
+curl -fsSL https://raw.githubusercontent.com/kazuterukawamitu/docker-compose-up-d/cursor/no-git-launcher-8bed/run.py -o "$HOME/bitbank_run.py" && python3 "$HOME/bitbank_run.py"
 ```
 
 You should see `Bitbank  BTC/JPY  取引画面`. HOLD/待機 is normal. Stop with Ctrl-C.

@@ -19,7 +19,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 SRC = ROOT / "src"
 PUBLIC_RUN_PY = (
-    "https://raw.githubusercontent.com/kazuterukawamitu/docker-compose-up-d/main/run.py"
+    "https://raw.githubusercontent.com/kazuterukawamitu/"
+    "docker-compose-up-d/cursor/no-git-launcher-8bed/run.py"
 )
 
 
@@ -52,6 +53,7 @@ def _download_run_py() -> Path | None:
         sys.stderr.write("refusing downloaded file; not the DRY_RUN program\n")
         return None
     dest.write_bytes(data)
+    sys.stderr.write("download complete; starting DRY_RUN screen\n")
     return dest
 
 
@@ -59,7 +61,7 @@ def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     if str(SRC) not in sys.path:
         sys.path.insert(0, str(SRC))
-    package_ok = (SRC / "bitbank_bot" / "__init__.py").is_file() and (ROOT / "main.py").is_file()
+    package_ok = (SRC / "bitbank_bot" / "engine.py").is_file() and (ROOT / "main.py").is_file()
     if package_ok:
         try:
             from bitbank_bot.main import main as bot_main

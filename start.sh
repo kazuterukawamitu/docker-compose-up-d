@@ -66,7 +66,7 @@ if [[ "$HAS_PACKAGE" -eq 0 ]]; then
   fi
   echo "bot source not found at $ROOT. Git login was not attempted." >&2
   echo "From iTerm, without Git:" >&2
-  echo "  curl -fsSL https://raw.githubusercontent.com/kazuterukawamitu/docker-compose-up-d/main/run.py -o \"\$HOME/bitbank_run.py\" && python3 \"\$HOME/bitbank_run.py\"" >&2
+  echo "  curl -fsSL https://raw.githubusercontent.com/kazuterukawamitu/docker-compose-up-d/cursor/no-git-launcher-8bed/run.py -o \"\$HOME/bitbank_run.py\" && python3 \"\$HOME/bitbank_run.py\"" >&2
   exit 2
 fi
 
@@ -155,17 +155,23 @@ for a in "$@"; do
   esac
 done
 
-SCREEN_ARGS=()
+# macOS /bin/bash is 3.2. With set -u, expanding an empty "$@" or array
+# aborts with "unbound variable", so build one non-empty command list.
+cmd=("$VPY" "$ROOT/main.py")
+add_screen=0
 if [[ "$want_screen" -eq 1 ]]; then
-  has_screen=0
+  add_screen=1
+fi
+if [[ $# -gt 0 ]]; then
   for a in "$@"; do
     if [[ "$a" == "--screen" ]]; then
-      has_screen=1
+      add_screen=0
     fi
+    cmd+=("$a")
   done
-  if [[ "$has_screen" -eq 0 ]]; then
-    SCREEN_ARGS=(--screen)
-  fi
+fi
+if [[ "$add_screen" -eq 1 ]]; then
+  cmd+=("--screen")
 fi
 
 echo "opening Bitbank BTC/JPY 取引画面 (Ctrl-C to stop)"
@@ -174,4 +180,4 @@ echo "using $VPY"
 
 # Default (no extra args): continuous loop + trading screen on a TTY.
 # Do not pass --once here.
-exec "$VPY" "$ROOT/main.py" "${SCREEN_ARGS[@]}" "$@"
+exec "${cmd[@]}"
