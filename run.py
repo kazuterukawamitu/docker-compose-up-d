@@ -243,6 +243,8 @@ def main(argv: list[str] | None = None) -> int:
     tp = BUY1_TP
     last_error = ""
     print("Bitbank BTC/JPY DRY_RUN を起動します（実注文なし / pip不要）", flush=True)
+    if not args.synthetic:
+        print("Bitbankのローソク足を取得しています。数十秒かかることがあります。", flush=True)
     while True:
         try:
             rows = synthetic_closes() if args.synthetic else fetch_hourly_closes()
