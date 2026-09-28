@@ -16,6 +16,7 @@ def test_compileall_src() -> None:
         py_compile.compile(str(path), doraise=True)
     py_compile.compile(str(root / "main.py"), doraise=True)
     py_compile.compile(str(root / "run.py"), doraise=True)
+    py_compile.compile(str(root / "launch.py"), doraise=True)
     diag = root / "diagnostics.py"
     if diag.is_file():
         py_compile.compile(str(diag), doraise=True)
@@ -40,6 +41,38 @@ def test_synthetic_does_not_imply_once() -> None:
     assert args.synthetic is True
 
 
+def test_launch_py_does_not_call_git_and_starts(tmp_path) -> None:
+    root = Path(__file__).resolve().parents[1]
+    source = (root / "launch.py").read_text(encoding="utf-8")
+    assert "git fetch" not in source
+    assert "git clone" not in source
+    assert "subprocess" not in source
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+    env["STATE_PATH"] = str(tmp_path / "state.json")
+    env["LOCK_PATH"] = str(tmp_path / "bot.lock")
+    env["LOG_DIR"] = str(tmp_path / "logs")
+    env["DRY_RUN"] = "true"
+    env["LIVE_TRADING"] = "false"
+    env["ENABLE_WEBSOCKET"] = "false"
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(root / "launch.py"),
+            "--once",
+            "--synthetic",
+            "--skip-lock",
+            "--no-screen",
+        ],
+        cwd=str(root),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=45,
+    )
+    assert proc.returncode == 0, proc.stderr + proc.stdout
+    assert "run_once complete" in proc.stdout or "run complete" in proc.stdout
+
+
 def test_start_sh_is_venv_loop_launcher() -> None:
     text = Path(__file__).resolve().parents[1].joinpath("start.sh").read_text(encoding="utf-8")
     assert ".venv" in text
@@ -52,8 +85,11 @@ def test_start_sh_is_venv_loop_launcher() -> None:
     assert ".env.example" in text
     assert "python3.12" in text
     assert "python3" in text
-    assert 'BOT_BRANCH="cursor/bitbank-audit-unify-f5fd"' in text
     assert "run.py" in text
+    assert "git fetch" not in text
+    assert "git checkout" not in text
+    assert "git clone" not in text
+    assert "Git login was not attempted" in text
 
 
 def test_loop_cli_exits_after_max_cycles(tmp_path, monkeypatch) -> None:
