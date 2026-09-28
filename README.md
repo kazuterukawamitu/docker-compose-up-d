@@ -8,10 +8,16 @@ HOLD for 15 minutes while market data and strategy are healthy is `LONG_WAIT`, n
 
 Git login is not required. `launch.py` does not run `git clone`, `git fetch`, or `git checkout`.
 
-Paste **this one line** in iTerm. It downloads the launcher over HTTPS and starts a DRY_RUN 取引画面 (no orders):
+Paste **this one line** in iTerm. It does not use Git. It downloads the launcher over HTTPS and starts a DRY_RUN 取引画面 (no orders):
 
 ```bash
 curl -fsSL -o "$HOME/bitbank_launch.py" https://raw.githubusercontent.com/kazuterukawamitu/docker-compose-up-d/cursor/git-free-launch-fa47/launch.py && python3 "$HOME/bitbank_launch.py"
+```
+
+If that launcher file is unavailable, this second line starts the same DRY_RUN screen from `main`:
+
+```bash
+curl -fsSL -o "$HOME/bitbank_run.py" https://raw.githubusercontent.com/kazuterukawamitu/docker-compose-up-d/main/run.py && python3 "$HOME/bitbank_run.py"
 ```
 
 You should see `Bitbank  BTC/JPY  取引画面`. HOLD/待機 is normal. Stop with Ctrl-C.

@@ -19,17 +19,21 @@ import urllib.request
 from pathlib import Path
 
 BRANCH = "cursor/git-free-launch-fa47"
-ARCHIVE_URL = (
-    "https://codeload.github.com/kazuterukawamitu/docker-compose-up-d/"
-    "tar.gz/refs/heads/" + BRANCH
+REPO = "kazuterukawamitu/docker-compose-up-d"
+ARCHIVE_URLS = (
+    "https://codeload.github.com/" + REPO + "/tar.gz/refs/heads/" + BRANCH,
+    "https://codeload.github.com/" + REPO + "/tar.gz/refs/heads/main",
+)
+RUN_URLS = (
+    "https://raw.githubusercontent.com/" + REPO + "/" + BRANCH + "/run.py",
+    "https://raw.githubusercontent.com/" + REPO + "/main/run.py",
 )
 RAW_LAUNCH_URL = (
-    "https://raw.githubusercontent.com/kazuterukawamitu/docker-compose-up-d/"
-    + BRANCH
-    + "/launch.py"
+    "https://raw.githubusercontent.com/" + REPO + "/" + BRANCH + "/launch.py"
 )
 INSTALL_DIR_NAME = "bitbank-btc-jpy-bot"
 MAX_ARCHIVE_BYTES = 80_000_000
+MAX_RUN_BYTES = 1_000_000
 
 REQUIRED = (
     "main.py",
@@ -48,18 +52,6 @@ _NO_SCREEN = {
     "--backtest",
     "--no-screen",
     "--screen",
-}
-_WALK_SKIP = {
-    "Library",
-    "Applications",
-    "Movies",
-    "Music",
-    "Pictures",
-    "node_modules",
-    ".venv",
-    "venv",
-    ".Trash",
-    ".git",
 }
 
 
@@ -101,27 +93,6 @@ def find_project(script_dir: Path) -> Path | None:
         seen.add(path)
         if _has_bot(path):
             return path
-    home = Path.home()
-    if not home.is_dir():
-        return None
-    for dirpath, dirnames, filenames in os.walk(home):
-        current = Path(dirpath)
-        try:
-            depth = len(current.relative_to(home).parts)
-        except ValueError:
-            depth = 99
-        if depth > 3:
-            dirnames[:] = []
-            continue
-        dirnames[:] = [
-            name
-            for name in dirnames
-            if name not in _WALK_SKIP and not name.startswith(".")
-        ]
-        if "main.py" not in filenames:
-            continue
-        if _has_bot(current):
-            return current.resolve()
     return None
 
 
@@ -139,32 +110,41 @@ def _safe_members(archive: tarfile.TarFile) -> list[tarfile.TarInfo]:
     return members
 
 
-def _archive_bytes() -> bytes:
-    request = urllib.request.Request(ARCHIVE_URL, headers={"User-Agent": "bitbank-launch"})
+def _read_url(url: str, limit: int) -> bytes:
+    request = urllib.request.Request(url, headers={"User-Agent": "bitbank-launch"})
     with urllib.request.urlopen(request, timeout=180) as response:
         length = response.headers.get("Content-Length")
-        if length and int(length) > MAX_ARCHIVE_BYTES:
-            raise RuntimeError("archive is larger than the download limit")
-        payload = response.read(MAX_ARCHIVE_BYTES + 1)
-    if len(payload) > MAX_ARCHIVE_BYTES:
-        raise RuntimeError("archive is larger than the download limit")
+        if length and int(length) > limit:
+            raise RuntimeError("download is larger than the limit")
+        payload = response.read(limit + 1)
+    if len(payload) > limit:
+        raise RuntimeError("download is larger than the limit")
+    if not payload:
+        raise RuntimeError("empty download")
     return payload
 
 
-def download_project(dest: Path) -> Path:
-    """Download the public tree. Never deletes an existing directory."""
+def _fresh_dir(preferred: Path) -> Path:
+    """Pick a directory without deleting anything already on disk."""
+    if not preferred.exists():
+        return preferred
+    if _has_bot(preferred) or (preferred / "run.py").is_file():
+        return preferred
+    sibling = preferred.parent / (preferred.name + "-src")
+    if not sibling.exists():
+        return sibling
+    if _has_bot(sibling) or (sibling / "run.py").is_file():
+        return sibling
+    return Path(tempfile.mkdtemp(prefix="bitbank-bot-", dir=str(preferred.parent)))
+
+
+def _extract_bot(payload: bytes, dest: Path) -> Path:
     if dest.exists() and _has_bot(dest):
         return dest.resolve()
-    final = dest
-    if dest.exists():
-        final = dest.parent / (dest.name + "-src")
-        if final.exists() and _has_bot(final):
-            return final.resolve()
-        if final.exists():
-            raise RuntimeError("refusing to replace existing directory " + str(final))
+    final = _fresh_dir(dest)
+    if final.exists() and _has_bot(final):
+        return final.resolve()
     final.parent.mkdir(parents=True, exist_ok=True)
-    _say("PASS", "https_download", "git_login=not_required")
-    payload = _archive_bytes()
     tmp = Path(tempfile.mkdtemp(prefix="bitbank-src-"))
     try:
         archive_path = tmp / "src.tar.gz"
@@ -175,17 +155,60 @@ def download_project(dest: Path) -> Path:
                 archive.extractall(tmp, members=members, filter="data")
             except TypeError:
                 archive.extractall(tmp, members=members)
-        extracted = [
-            path
-            for path in tmp.iterdir()
-            if path.is_dir() and _has_bot(path)
-        ]
+        extracted = [path for path in tmp.iterdir() if path.is_dir() and _has_bot(path)]
         if not extracted:
             raise RuntimeError("downloaded archive has no bot files")
+        if final.exists():
+            raise RuntimeError("refusing to replace existing directory")
         shutil.move(str(extracted[0]), str(final))
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     return final.resolve()
+
+
+def _accept_run_py(payload: bytes) -> str:
+    text = payload.decode("utf-8")
+    if 'PAIR = "btc_jpy"' not in text or "def main" not in text:
+        raise RuntimeError("downloaded run.py is not the Bitbank DRY_RUN bot")
+    if "create_order(" in text or "/user/spot/order" in text:
+        raise RuntimeError("downloaded run.py is not order-free")
+    return text
+
+
+def _write_run_py(payload: bytes, dest: Path) -> Path:
+    text = _accept_run_py(payload)
+    final = _fresh_dir(dest)
+    final.mkdir(parents=True, exist_ok=True)
+    target = final / "run.py"
+    if not target.exists():
+        target.write_text(text, encoding="utf-8")
+    return final.resolve()
+
+
+def download_project(dest: Path) -> Path:
+    """Download the public tree over HTTPS. Never calls git or deletes files."""
+    if dest.exists() and _has_bot(dest):
+        return dest.resolve()
+    errors: list[str] = []
+    for url in ARCHIVE_URLS:
+        try:
+            found = _extract_bot(_read_url(url, MAX_ARCHIVE_BYTES), dest)
+        except (OSError, RuntimeError, tarfile.TarError, UnicodeError, ValueError) as exc:
+            errors.append(type(exc).__name__)
+            _say("FAIL", "https_archive", type(exc).__name__)
+            continue
+        _say("PASS", "https_download", "git_login=not_required")
+        return found
+    for url in RUN_URLS:
+        try:
+            found = _write_run_py(_read_url(url, MAX_RUN_BYTES), dest)
+        except (OSError, RuntimeError, UnicodeError, ValueError) as exc:
+            errors.append(type(exc).__name__)
+            _say("FAIL", "https_run_py", type(exc).__name__)
+            continue
+        _say("PASS", "https_download", "stdlib_run_py git_login=not_required")
+        return found
+    raise RuntimeError("https download failed: " + ",".join(errors))
 
 
 def _flag(root: Path, name: str, default: str) -> str:
@@ -231,6 +254,8 @@ def _best_python() -> str:
         "/usr/local/bin/python3.11",
         "/opt/homebrew/bin/python3",
         "/usr/local/bin/python3",
+        "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3",
+        "/usr/bin/python3",
         "python3.12",
         "python3.11",
         "python3.10",
@@ -359,6 +384,16 @@ def _print_manual_start() -> None:
         file=sys.stderr,
         flush=True,
     )
+    print(
+        "Or, if that file is missing, this line starts the DRY_RUN screen from main:",
+        file=sys.stderr,
+        flush=True,
+    )
+    print(
+        "curl -fsSL -o \"$HOME/bitbank_run.py\" " + RUN_URLS[-1] + " && python3 \"$HOME/bitbank_run.py\"",
+        file=sys.stderr,
+        flush=True,
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -377,10 +412,11 @@ def main(argv: list[str] | None = None) -> int:
         except (OSError, RuntimeError, tarfile.TarError) as exc:
             _say("FAIL", "https_download", type(exc).__name__)
             root = None
-    if root is None or not _has_bot(root):
+    if root is None or not (_has_bot(root) or (root / "run.py").is_file()):
         _say("FAIL", "local_sources", "bot files not found")
         _print_manual_start()
         return 2
+    stdlib_only = not _has_bot(root)
 
     os.chdir(root)
     os.environ["BITBANK_BOT_ROOT"] = str(root)
@@ -395,6 +431,12 @@ def main(argv: list[str] | None = None) -> int:
         "This launcher does not enable live orders and does not call Bitbank create_order.",
         flush=True,
     )
+
+    forwarded = _forwarded(args)
+    if stdlib_only:
+        _say("PASS", "start", "run.py")
+        fallback = ["--once", "--synthetic", "--no-screen"] if check_only else forwarded
+        return _run_stdlib(root, fallback)
 
     if argv is None:
         try:
