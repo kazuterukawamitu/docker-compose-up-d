@@ -16,6 +16,7 @@ def test_compileall_src() -> None:
         py_compile.compile(str(path), doraise=True)
     py_compile.compile(str(root / "main.py"), doraise=True)
     py_compile.compile(str(root / "run.py"), doraise=True)
+    py_compile.compile(str(root / "launch.py"), doraise=True)
     diag = root / "diagnostics.py"
     if diag.is_file():
         py_compile.compile(str(diag), doraise=True)
@@ -40,20 +41,17 @@ def test_synthetic_does_not_imply_once() -> None:
     assert args.synthetic is True
 
 
-def test_start_sh_is_venv_loop_launcher() -> None:
+def test_start_sh_does_not_require_git_login() -> None:
     text = Path(__file__).resolve().parents[1].joinpath("start.sh").read_text(encoding="utf-8")
-    assert ".venv" in text
-    assert 'VPY="$VENV/bin/python"' in text
-    assert "exec" in text
+    for forbidden in ("git clone", "git fetch", "git checkout", "git pull", "git push"):
+        assert forbidden not in text
+    assert "launch.py" in text
+    assert "git login is not required" in text
+    assert "GIT_TERMINAL_PROMPT=0" in text
+    assert "python3" in text
+    assert "exec python3" in text
     after_exec = text.rsplit("exec", 1)[-1]
     assert "--once" not in after_exec
-    assert "--screen" in text
-    assert "取引画面" in text
-    assert ".env.example" in text
-    assert "python3.12" in text
-    assert "python3" in text
-    assert 'BOT_BRANCH="cursor/bitbank-audit-unify-f5fd"' in text
-    assert "run.py" in text
 
 
 def test_loop_cli_exits_after_max_cycles(tmp_path, monkeypatch) -> None:
