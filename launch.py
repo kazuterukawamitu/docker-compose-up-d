@@ -91,7 +91,7 @@ def find_project(script_dir: Path) -> Path | None:
         if path in seen:
             continue
         seen.add(path)
-        if _has_bot(path):
+        if _has_bot(path) or (path / "run.py").is_file():
             return path
     return None
 
@@ -187,7 +187,7 @@ def _write_run_py(payload: bytes, dest: Path) -> Path:
 
 def download_project(dest: Path) -> Path:
     """Download the public tree over HTTPS. Never calls git or deletes files."""
-    if dest.exists() and _has_bot(dest):
+    if dest.exists() and (_has_bot(dest) or (dest / "run.py").is_file()):
         return dest.resolve()
     errors: list[str] = []
     for url in ARCHIVE_URLS:
