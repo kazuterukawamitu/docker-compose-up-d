@@ -136,6 +136,8 @@ fi
 
 export PYTHONPATH="$ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
 
+# macOS /bin/bash 3.2 aborts under set -u when an empty array is expanded.
+# Pass --screen as its own argument, or pass no extra argument.
 want_screen=0
 if [[ -t 1 ]]; then
   want_screen=1
@@ -151,22 +153,12 @@ for a in "$@"; do
   esac
 done
 
-SCREEN_ARGS=()
-if [[ "$want_screen" -eq 1 ]]; then
-  has_screen=0
-  for a in "$@"; do
-    if [[ "$a" == "--screen" ]]; then
-      has_screen=1
-    fi
-  done
-  if [[ "$has_screen" -eq 0 ]]; then
-    SCREEN_ARGS=(--screen)
-  fi
-fi
-
-echo "opening Bitbank BTC/JPY 取引画面 (Ctrl-C to stop)"
 echo "HOLD/WAIT is normal. JSON detail is logs/bot.log"
 echo "using $VPY"
+echo "LAUNCH_OK"
 
 # Default (no extra args): continuous loop + trading screen on a TTY.
-exec "$VPY" "$ROOT/launch.py" "${SCREEN_ARGS[@]}" "$@"
+if [[ "$want_screen" -eq 1 ]]; then
+  exec "$VPY" "$ROOT/launch.py" --screen "$@"
+fi
+exec "$VPY" "$ROOT/launch.py" "$@"

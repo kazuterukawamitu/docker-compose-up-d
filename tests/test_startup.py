@@ -55,6 +55,8 @@ def test_start_sh_is_venv_loop_launcher() -> None:
     assert "launch.py" in text
     assert "run.py" in text
     assert "does not use Git" in text
+    assert "LAUNCH_OK" in text
+    assert "SCREEN_ARGS" not in text
     for banned in ("git fetch", "git clone", "git checkout", "git pull"):
         assert banned not in text
 

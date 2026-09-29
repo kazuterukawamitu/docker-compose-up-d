@@ -8,13 +8,19 @@ HOLD for 15 minutes while market data and strategy are healthy is `LONG_WAIT`, n
 
 ## Start (this is the program)
 
-The launcher uses the files already in this folder. It does not clone, fetch, or ask for a Git login.
+The launcher uses the files already in this folder. It does not clone, fetch, or ask for a Git login. Run it from any directory, including your home folder. Do not paste the script into the iTerm prompt.
 
 ```bash
-python3 launch.py
+bash "$HOME/docker-compose-up-d/start.sh"
 ```
 
-`bash start.sh` does the same thing and creates `.venv` when pip is available. If the full package cannot be imported, both fall back to `python3 run.py` (stdlib DRY_RUN, no orders).
+One smoke cycle, then exit:
+
+```bash
+bash "$HOME/docker-compose-up-d/start.sh" --once --synthetic --skip-lock --no-screen
+```
+
+`python3 "$HOME/docker-compose-up-d/launch.py"` does the same thing when dependencies are already installed. If the full package cannot be imported, both fall back to `run.py` (stdlib DRY_RUN, no orders).
 
 You should see `Bitbank  BTC/JPY  取引画面`. HOLD/待機 is normal. Stop with Ctrl-C.
 

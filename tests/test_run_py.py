@@ -89,3 +89,61 @@ def test_launch_py_once_synthetic_no_git(tmp_path) -> None:
     assert "no Git login" in proc.stdout
     assert "may_place_live_orders" in proc.stdout
     assert "run_once complete" in proc.stdout
+
+
+def test_launch_py_from_home_directory(tmp_path) -> None:
+    root = Path(__file__).resolve().parents[1]
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+    env["STATE_PATH"] = str(tmp_path / "state.json")
+    env["LOCK_PATH"] = str(tmp_path / "bot.lock")
+    env["LOG_DIR"] = str(tmp_path / "logs")
+    env["DRY_RUN"] = "true"
+    env["LIVE_TRADING"] = "false"
+    env["ENABLE_WEBSOCKET"] = "false"
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(root / "launch.py"),
+            "--once",
+            "--synthetic",
+            "--skip-lock",
+            "--no-screen",
+        ],
+        cwd=str(tmp_path),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=45,
+    )
+    assert proc.returncode == 0, proc.stderr + proc.stdout
+    assert "run_once complete" in proc.stdout
+
+
+def test_start_sh_once_from_other_directory(tmp_path) -> None:
+    root = Path(__file__).resolve().parents[1]
+    env = {k: v for k, v in os.environ.items() if k not in {"PYTHONPATH", "VIRTUAL_ENV"}}
+    env["STATE_PATH"] = str(tmp_path / "state.json")
+    env["LOCK_PATH"] = str(tmp_path / "bot.lock")
+    env["LOG_DIR"] = str(tmp_path / "logs")
+    env["DRY_RUN"] = "true"
+    env["LIVE_TRADING"] = "false"
+    env["ENABLE_WEBSOCKET"] = "false"
+    proc = subprocess.run(
+        [
+            "bash",
+            str(root / "start.sh"),
+            "--once",
+            "--synthetic",
+            "--skip-lock",
+            "--no-screen",
+        ],
+        cwd=str(tmp_path),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=180,
+    )
+    assert proc.returncode == 0, proc.stderr + proc.stdout
+    assert "LAUNCH_OK" in proc.stdout
+    assert "SCREEN_ARGS" not in proc.stderr
+    assert "run_once complete" in proc.stdout or "run complete" in proc.stdout

@@ -11,6 +11,7 @@ LIVE_TRADING=true, and both API keys. This launcher does not set those flags.
 from __future__ import annotations
 
 import importlib.util
+import os
 import sys
 from pathlib import Path
 
@@ -40,6 +41,7 @@ def _stdlib(argv: list[str] | None) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    os.chdir(ROOT)
     sys.stdout.write(
         "Bitbank BTC/JPY launcher: local files only, no Git login. "
         "Live orders stay off unless DRY_RUN=false and LIVE_TRADING=true "
