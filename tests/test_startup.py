@@ -42,18 +42,21 @@ def test_synthetic_does_not_imply_once() -> None:
 
 def test_start_sh_is_venv_loop_launcher() -> None:
     text = Path(__file__).resolve().parents[1].joinpath("start.sh").read_text(encoding="utf-8")
-    assert ".venv" in text
-    assert 'VPY="$VENV/bin/python"' in text
+    assert ".venv/bin/python" in text
     assert "exec" in text
     after_exec = text.rsplit("exec", 1)[-1]
     assert "--once" not in after_exec
-    assert "--screen" in text
     assert "取引画面" in text
     assert ".env.example" in text
-    assert "python3.12" in text
     assert "python3" in text
-    assert 'BOT_BRANCH="cursor/bitbank-audit-unify-f5fd"' in text
+    assert "launch.py" in text
     assert "run.py" in text
+    assert "No Git login" in text
+    assert "LAUNCH_OK" in text
+    assert "SCREEN_ARGS" not in text
+    assert "set -u" not in text
+    for banned in ("git fetch", "git clone", "git checkout", "git pull"):
+        assert banned not in text
 
 
 def test_loop_cli_exits_after_max_cycles(tmp_path, monkeypatch) -> None:

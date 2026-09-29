@@ -52,4 +52,115 @@ def test_run_py_works_without_repo_src(tmp_path) -> None:
 def test_start_sh_falls_back_to_run_py() -> None:
     text = Path(__file__).resolve().parents[1].joinpath("start.sh").read_text(encoding="utf-8")
     assert "run.py" in text
-    assert "stdlib DRY_RUN" in text
+    assert "LAUNCH_OK" in text
+    assert "SCREEN_ARGS" not in text
+    for banned in ("git fetch", "git clone", "git checkout", "git pull"):
+        assert banned not in text
+
+
+def test_repair_replaces_screen_args_launcher(tmp_path) -> None:
+    from run import repair_broken_start_sh
+
+    broken = tmp_path / "start.sh"
+    broken.write_text(
+        'echo LAUNCH_OK starting\nexec "$VPY" "$ROOT/launch.py" "${SCREEN_ARGS[@]}" "$@"\n',
+        encoding="utf-8",
+    )
+    assert repair_broken_start_sh(broken) is True
+    text = broken.read_text(encoding="utf-8")
+    assert "SCREEN_ARGS" not in text
+    assert "echo LAUNCH_OK" in text
+    assert 'exec "$PY" "$ROOT/run.py" "$@"' in text
+    assert repair_broken_start_sh(broken) is False
+
+
+def test_launch_py_once_synthetic_no_git(tmp_path) -> None:
+    root = Path(__file__).resolve().parents[1]
+    source = (root / "launch.py").read_text(encoding="utf-8")
+    assert "create_order(" not in source
+    assert "git fetch" not in source
+    assert "git clone" not in source
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+    env["STATE_PATH"] = str(tmp_path / "state.json")
+    env["LOCK_PATH"] = str(tmp_path / "bot.lock")
+    env["LOG_DIR"] = str(tmp_path / "logs")
+    env["DRY_RUN"] = "true"
+    env["LIVE_TRADING"] = "false"
+    env["ENABLE_WEBSOCKET"] = "false"
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(root / "launch.py"),
+            "--once",
+            "--synthetic",
+            "--skip-lock",
+            "--no-screen",
+        ],
+        cwd=str(root),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=45,
+    )
+    assert proc.returncode == 0, proc.stderr + proc.stdout
+    assert "no Git login" in proc.stdout
+    assert "may_place_live_orders" in proc.stdout
+    assert "run_once complete" in proc.stdout
+
+
+def test_launch_py_from_home_directory(tmp_path) -> None:
+    root = Path(__file__).resolve().parents[1]
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+    env["STATE_PATH"] = str(tmp_path / "state.json")
+    env["LOCK_PATH"] = str(tmp_path / "bot.lock")
+    env["LOG_DIR"] = str(tmp_path / "logs")
+    env["DRY_RUN"] = "true"
+    env["LIVE_TRADING"] = "false"
+    env["ENABLE_WEBSOCKET"] = "false"
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(root / "launch.py"),
+            "--once",
+            "--synthetic",
+            "--skip-lock",
+            "--no-screen",
+        ],
+        cwd=str(tmp_path),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=45,
+    )
+    assert proc.returncode == 0, proc.stderr + proc.stdout
+    assert "run_once complete" in proc.stdout
+
+
+def test_start_sh_once_from_other_directory(tmp_path) -> None:
+    root = Path(__file__).resolve().parents[1]
+    env = {k: v for k, v in os.environ.items() if k not in {"PYTHONPATH", "VIRTUAL_ENV"}}
+    env["STATE_PATH"] = str(tmp_path / "state.json")
+    env["LOCK_PATH"] = str(tmp_path / "bot.lock")
+    env["LOG_DIR"] = str(tmp_path / "logs")
+    env["DRY_RUN"] = "true"
+    env["LIVE_TRADING"] = "false"
+    env["ENABLE_WEBSOCKET"] = "false"
+    proc = subprocess.run(
+        [
+            "bash",
+            str(root / "start.sh"),
+            "--once",
+            "--synthetic",
+            "--skip-lock",
+            "--no-screen",
+        ],
+        cwd=str(tmp_path),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=180,
+    )
+    assert proc.returncode == 0, proc.stderr + proc.stdout
+    assert "LAUNCH_OK" in proc.stdout
+    assert "SCREEN_ARGS" not in proc.stderr
+    assert "run_once complete" in proc.stdout or "run complete" in proc.stdout
