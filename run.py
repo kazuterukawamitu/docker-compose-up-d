@@ -20,7 +20,51 @@ import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
+from pathlib import Path
 from typing import Any
+
+SAFE_START_SH = """#!/bin/bash
+# Bitbank BTC/JPY 取引画面. No Git login. No arrays. Safe on macOS bash 3.2.
+# bash "$HOME/docker-compose-up-d/start.sh"
+set -eu
+ROOT="$(cd "$(dirname "$0")" && pwd)"
+cd "$ROOT"
+PY="$ROOT/.venv/bin/python"
+if [ ! -x "$PY" ]; then
+  PY=python3
+fi
+if [ ! -f "$ROOT/.env" ] && [ -f "$ROOT/.env.example" ]; then
+  cp "$ROOT/.env.example" "$ROOT/.env"
+fi
+export PYTHONUNBUFFERED=1
+if [ -n "${PYTHONPATH:-}" ]; then
+  export PYTHONPATH="$ROOT/src:$PYTHONPATH"
+else
+  export PYTHONPATH="$ROOT/src"
+fi
+echo LAUNCH_OK
+if [ -f "$ROOT/launch.py" ]; then
+  exec "$PY" "$ROOT/launch.py" "$@"
+fi
+exec "$PY" "$ROOT/run.py" "$@"
+"""
+
+
+def repair_broken_start_sh(path: Path | None = None) -> bool:
+    """Replace a launcher that crashes on macOS bash before Python starts."""
+    target = path if path is not None else Path(__file__).resolve().parent / "start.sh"
+    if not target.is_file():
+        return False
+    text = target.read_text(encoding="utf-8", errors="replace")
+    if "SCREEN_ARGS" not in text:
+        return False
+    target.write_text(SAFE_START_SH, encoding="utf-8")
+    try:
+        target.chmod(0o755)
+    except OSError:
+        pass
+    print("repaired start.sh removed SCREEN_ARGS", flush=True)
+    return True
 
 PAIR = "btc_jpy"
 PUBLIC = "https://public.bitbank.cc"
@@ -233,7 +277,9 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
+    repair_broken_start_sh()
     args = parse_args(argv)
+    print("LAUNCH_OK", flush=True)
     use_screen = not args.no_screen and not args.once
     started = time.monotonic()
     cycles = 0

@@ -52,9 +52,26 @@ def test_run_py_works_without_repo_src(tmp_path) -> None:
 def test_start_sh_falls_back_to_run_py() -> None:
     text = Path(__file__).resolve().parents[1].joinpath("start.sh").read_text(encoding="utf-8")
     assert "run.py" in text
-    assert "stdlib DRY_RUN" in text
+    assert "LAUNCH_OK" in text
+    assert "SCREEN_ARGS" not in text
     for banned in ("git fetch", "git clone", "git checkout", "git pull"):
         assert banned not in text
+
+
+def test_repair_replaces_screen_args_launcher(tmp_path) -> None:
+    from run import repair_broken_start_sh
+
+    broken = tmp_path / "start.sh"
+    broken.write_text(
+        'echo LAUNCH_OK starting\nexec "$VPY" "$ROOT/launch.py" "${SCREEN_ARGS[@]}" "$@"\n',
+        encoding="utf-8",
+    )
+    assert repair_broken_start_sh(broken) is True
+    text = broken.read_text(encoding="utf-8")
+    assert "SCREEN_ARGS" not in text
+    assert "echo LAUNCH_OK" in text
+    assert 'exec "$PY" "$ROOT/run.py" "$@"' in text
+    assert repair_broken_start_sh(broken) is False
 
 
 def test_launch_py_once_synthetic_no_git(tmp_path) -> None:

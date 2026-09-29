@@ -42,6 +42,14 @@ def _stdlib(argv: list[str] | None) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     os.chdir(ROOT)
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    try:
+        from run import repair_broken_start_sh
+    except ImportError:
+        repair_broken_start_sh = None
+    if repair_broken_start_sh is not None:
+        repair_broken_start_sh(ROOT / "start.sh")
     sys.stdout.write(
         "Bitbank BTC/JPY launcher: local files only, no Git login. "
         "Live orders stay off unless DRY_RUN=false and LIVE_TRADING=true "

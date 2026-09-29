@@ -1,164 +1,24 @@
-#!/usr/bin/env bash
-# Bitbank BTC/JPY launcher — opens the iTerm 取引画面 (trading screen).
-#
-# Uses only the files already in this directory. It does not clone, fetch,
-# checkout, or ask for a Git login.
-#
-#   bash start.sh
-#   python3 launch.py
-
-if [ -z "${BASH_VERSION:-}" ]; then
-  exec /usr/bin/env bash "$0" "$@"
-fi
-
-set -euo pipefail
-
-export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:${PATH:-}"
-export PYTHONUNBUFFERED=1
-export PYTHONIOENCODING=utf-8
-
+#!/bin/bash
+# Bitbank BTC/JPY 取引画面. No Git login. No arrays. Safe on macOS bash 3.2.
+# bash "$HOME/docker-compose-up-d/start.sh"
+set -eu
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT"
-
-if [[ ! -f "$ROOT/run.py" && ! -f "$ROOT/src/bitbank_bot/__init__.py" ]]; then
-  echo "bot files are not in $ROOT" >&2
-  echo "This launcher does not use Git. Run it from the folder that already contains run.py or src/bitbank_bot." >&2
-  exit 2
+PY="$ROOT/.venv/bin/python"
+if [ ! -x "$PY" ]; then
+  PY=python3
 fi
-
-pick_python() {
-  local c
-  for c in \
-    /opt/homebrew/bin/python3.12 \
-    /usr/local/bin/python3.12 \
-    python3.12 \
-    /opt/homebrew/bin/python3 \
-    /usr/local/bin/python3 \
-    python3 \
-    python
-  do
-    if command -v "$c" >/dev/null 2>&1; then
-      echo "$c"
-      return 0
-    fi
-  done
-  echo "python3 not found. On a Mac: brew install python@3.12" >&2
-  return 1
-}
-
-PY="$(pick_python)"
-PY_MAJ="$("$PY" -c 'import sys; print(sys.version_info.major)')"
-PY_MIN="$("$PY" -c 'import sys; print(sys.version_info.minor)')"
-if [[ "$PY_MAJ" -lt 3 || ( "$PY_MAJ" -eq 3 && "$PY_MIN" -lt 9 ) ]]; then
-  echo "Python 3.9+ is required (found $PY $($PY -V 2>&1))." >&2
-  echo "On a Mac: brew install python@3.12" >&2
-  exit 2
+if [ ! -f "$ROOT/.env" ] && [ -f "$ROOT/.env.example" ]; then
+  cp "$ROOT/.env.example" "$ROOT/.env"
 fi
-if [[ "$PY_MAJ" -eq 3 && "$PY_MIN" -lt 12 ]]; then
-  echo "note: $PY is $($PY -V 2>&1); 3.12 is preferred, continuing with this interpreter." >&2
+export PYTHONUNBUFFERED=1
+if [ -n "${PYTHONPATH:-}" ]; then
+  export PYTHONPATH="$ROOT/src:$PYTHONPATH"
+else
+  export PYTHONPATH="$ROOT/src"
 fi
-
-VENV="$ROOT/.venv"
-VPY="$VENV/bin/python"
-VPIP="$VENV/bin/pip"
-
-if [[ ! -x "$VPY" ]]; then
-  echo "creating venv at $VENV with $PY"
-  set +e
-  "$PY" -m venv "$VENV"
-  venv_rc=$?
-  set -e
-  if [[ ! -x "$VPY" ]]; then
-    set +e
-    "$PY" -m venv --without-pip "$VENV"
-    set -e
-  fi
-  if [[ ! -x "$VPY" ]]; then
-    echo "venv python missing; using $PY directly" >&2
-    VPY="$PY"
-    VPIP=""
-  elif [[ "$venv_rc" -ne 0 ]]; then
-    echo "note: python -m venv reported an error (often missing ensurepip); continuing."
-  fi
+echo LAUNCH_OK
+if [ -f "$ROOT/launch.py" ]; then
+  exec "$PY" "$ROOT/launch.py" "$@"
 fi
-
-install_reqs() {
-  if [[ -n "${VPIP}" && -x "$VPIP" ]]; then
-    "$VPIP" install -q -r "$ROOT/requirements.txt"
-    return
-  fi
-  if "$VPY" -m pip --version >/dev/null 2>&1; then
-    "$VPY" -m pip install -q -r "$ROOT/requirements.txt"
-    return
-  fi
-  if "$PY" -m pip --version >/dev/null 2>&1; then
-    SITE="$("$VPY" -c 'import sysconfig; print(sysconfig.get_path("purelib"))')"
-    mkdir -p "$SITE"
-    "$PY" -m pip install -q -r "$ROOT/requirements.txt" --target "$SITE"
-    return
-  fi
-  echo "pip is not available." >&2
-  echo "On a Mac with Homebrew: brew install python@3.12" >&2
-  echo "On Debian: sudo apt install python3-venv python3-pip" >&2
-  exit 2
-}
-
-start_stdlib() {
-  echo "starting stdlib DRY_RUN (python3 run.py, no orders, no git login)"
-  exec "$PY" "$ROOT/run.py" "$@"
-}
-
-if [[ ! -f "$ROOT/src/bitbank_bot/__init__.py" ]]; then
-  start_stdlib "$@"
-fi
-
-need_install=0
-if ! "$VPY" -c "import dotenv, httpx" >/dev/null 2>&1; then
-  need_install=1
-fi
-if [[ "$need_install" -eq 1 ]]; then
-  echo "installing dependencies"
-  set +e
-  install_reqs
-  set -e
-fi
-
-if ! "$VPY" -c "import dotenv, httpx" >/dev/null 2>&1; then
-  start_stdlib "$@"
-fi
-
-if [[ ! -f "$ROOT/.env" ]]; then
-  if [[ -f "$ROOT/.env.example" ]]; then
-    cp "$ROOT/.env.example" "$ROOT/.env"
-    echo "wrote $ROOT/.env from .env.example (DRY_RUN=true, keys empty)"
-  fi
-fi
-
-export PYTHONPATH="$ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
-
-# macOS /bin/bash 3.2 aborts under set -u when an empty array is expanded.
-# Pass --screen as its own argument, or pass no extra argument.
-want_screen=0
-if [[ -t 1 ]]; then
-  want_screen=1
-fi
-for a in "$@"; do
-  case "$a" in
-    --once|--check-config|--preflight|--backtest|--no-screen)
-      want_screen=0
-      ;;
-    --screen)
-      want_screen=1
-      ;;
-  esac
-done
-
-echo "HOLD/WAIT is normal. JSON detail is logs/bot.log"
-echo "using $VPY"
-echo "LAUNCH_OK"
-
-# Default (no extra args): continuous loop + trading screen on a TTY.
-if [[ "$want_screen" -eq 1 ]]; then
-  exec "$VPY" "$ROOT/launch.py" --screen "$@"
-fi
-exec "$VPY" "$ROOT/launch.py" "$@"
+exec "$PY" "$ROOT/run.py" "$@"
