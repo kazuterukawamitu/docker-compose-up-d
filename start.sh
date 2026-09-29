@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Bitbank BTC/JPY launcher — opens the iTerm 取引画面 (trading screen).
 #
-# Paste this ONE line in iTerm (zsh is fine; this wraps bash):
-#   bash -lc 'REPO="$HOME/docker-compose-up-d"; set -euo pipefail; if [ ! -d "$REPO/.git" ]; then git clone https://github.com/kazuterukawamitu/docker-compose-up-d.git "$REPO"; fi; cd "$REPO"; git fetch origin cursor/bitbank-audit-unify-f5fd; git checkout -B cursor/bitbank-audit-unify-f5fd origin/cursor/bitbank-audit-unify-f5fd; exec bash ./start.sh --screen'
+# Uses only the files already in this directory. It does not clone, fetch,
+# checkout, or ask for a Git login.
 #
-# That line clones if needed, checks out the bot branch (main is wiki HTML only),
-# then opens the trading dashboard. Do not paste python3 main.py. Do not use !.
+#   bash start.sh
+#   python3 launch.py
 
 if [ -z "${BASH_VERSION:-}" ]; then
   exec /usr/bin/env bash "$0" "$@"
@@ -20,28 +20,11 @@ export PYTHONIOENCODING=utf-8
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT"
 
-BOT_BRANCH="cursor/bitbank-audit-unify-f5fd"
-
-ensure_bot_source() {
-  if [[ -f "$ROOT/src/bitbank_bot/__init__.py" && -f "$ROOT/main.py" ]]; then
-    return 0
-  fi
-  echo "bot source not found at $ROOT (this clone is probably still on main / wiki dump)" >&2
-  if [[ ! -d "$ROOT/.git" ]]; then
-    echo "Paste this ONE line in iTerm:" >&2
-    echo "  bash -lc 'git clone https://github.com/kazuterukawamitu/docker-compose-up-d.git \"\$HOME/docker-compose-up-d\" && bash \"\$HOME/docker-compose-up-d/start.sh\" --screen'" >&2
-    exit 2
-  fi
-  echo "fetching $BOT_BRANCH so the trading screen can start" >&2
-  git fetch origin "$BOT_BRANCH"
-  git checkout -B "$BOT_BRANCH" "origin/$BOT_BRANCH"
-  if [[ ! -f "$ROOT/src/bitbank_bot/__init__.py" || ! -f "$ROOT/main.py" ]]; then
-    echo "still no bitbank_bot after checkout; branch may not be fetched" >&2
-    exit 2
-  fi
-}
-
-ensure_bot_source
+if [[ ! -f "$ROOT/run.py" && ! -f "$ROOT/src/bitbank_bot/__init__.py" ]]; then
+  echo "bot files are not in $ROOT" >&2
+  echo "This launcher does not use Git. Run it from the folder that already contains run.py or src/bitbank_bot." >&2
+  exit 2
+fi
 
 pick_python() {
   local c
@@ -120,6 +103,15 @@ install_reqs() {
   exit 2
 }
 
+start_stdlib() {
+  echo "starting stdlib DRY_RUN (python3 run.py, no orders, no git login)"
+  exec "$PY" "$ROOT/run.py" "$@"
+}
+
+if [[ ! -f "$ROOT/src/bitbank_bot/__init__.py" ]]; then
+  start_stdlib "$@"
+fi
+
 need_install=0
 if ! "$VPY" -c "import dotenv, httpx" >/dev/null 2>&1; then
   need_install=1
@@ -132,8 +124,7 @@ if [[ "$need_install" -eq 1 ]]; then
 fi
 
 if ! "$VPY" -c "import dotenv, httpx" >/dev/null 2>&1; then
-  echo "pip packages missing; starting stdlib DRY_RUN (python3 run.py, no orders)"
-  exec "$PY" "$ROOT/run.py" "$@"
+  start_stdlib "$@"
 fi
 
 if [[ ! -f "$ROOT/.env" ]]; then
@@ -178,5 +169,4 @@ echo "HOLD/WAIT is normal. JSON detail is logs/bot.log"
 echo "using $VPY"
 
 # Default (no extra args): continuous loop + trading screen on a TTY.
-# Do not pass --once here.
-exec "$VPY" "$ROOT/main.py" "${SCREEN_ARGS[@]}" "$@"
+exec "$VPY" "$ROOT/launch.py" "${SCREEN_ARGS[@]}" "$@"

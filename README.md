@@ -8,21 +8,15 @@ HOLD for 15 minutes while market data and strategy are healthy is `LONG_WAIT`, n
 
 ## Start (this is the program)
 
-`main` on GitHub is wiki HTML. You do **not** need pip, venv, or `start.sh` for the bot to run.
-
-Paste **this one line** in iTerm. It downloads `run.py` and starts a DRY_RUN 取引画面 (no orders):
+The launcher uses the files already in this folder. It does not clone, fetch, or ask for a Git login.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/kazuterukawamitu/docker-compose-up-d/cursor/bitbank-audit-unify-f5fd/run.py -o "$HOME/bitbank_run.py" && python3 "$HOME/bitbank_run.py"
+python3 launch.py
 ```
+
+`bash start.sh` does the same thing and creates `.venv` when pip is available. If the full package cannot be imported, both fall back to `python3 run.py` (stdlib DRY_RUN, no orders).
 
 You should see `Bitbank  BTC/JPY  取引画面`. HOLD/待機 is normal. Stop with Ctrl-C.
-
-If this repo is already checked out on this branch:
-
-```bash
-python3 run.py
-```
 
 `python3 main.py` also works: it uses the full package when httpx is installed, otherwise the same stdlib `run.py`.
 
