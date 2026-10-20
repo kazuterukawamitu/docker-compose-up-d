@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import math
 from decimal import Decimal
 from enum import Enum
-from typing import Sequence
+from typing import Mapping, Sequence
 
 from bitbank_bot.money import D, ONE, ZERO
 
@@ -122,3 +123,103 @@ def interpolate_crossover(
     if t < ZERO or t > ONE:
         return None
     return prev_price + t * dp
+
+
+def close_returns(closes: Sequence[Decimal]) -> list[Decimal]:
+    """Simple close-to-close returns. Caller must pass only known bars (no look-ahead)."""
+    out: list[Decimal] = []
+    for i in range(1, len(closes)):
+        prev = D(closes[i - 1])
+        if prev == ZERO:
+            continue
+        out.append((D(closes[i]) - prev) / prev)
+    return out
+
+
+def shannon_entropy(returns: Sequence[Decimal], bins: int = 8) -> Decimal:
+    """Normalized Shannon entropy of recent returns in [0, 1].
+
+    High entropy means an uncertain / choppy return distribution. This is a
+    regime reading only — it must never emit or force an order by itself.
+    """
+    if bins < 2 or len(returns) < 2:
+        return ZERO
+    values = [float(D(item)) for item in returns]
+    low = min(values)
+    high = max(values)
+    if low == high:
+        return ZERO
+    width = (high - low) / bins
+    counts = [0] * bins
+    for value in values:
+        index = min(int((value - low) / width), bins - 1)
+        counts[index] += 1
+    total = float(len(values))
+    entropy = 0.0
+    for count in counts:
+        if count == 0:
+            continue
+        prob = count / total
+        entropy -= prob * math.log(prob)
+    return D(str(round(entropy / math.log(bins), 8)))
+
+
+def entropy_regime(
+    entropy: Decimal,
+    *,
+    high: Decimal = D("0.70"),
+    low: Decimal = D("0.30"),
+) -> str:
+    if entropy >= D(high):
+        return "CHOP"
+    if entropy <= D(low):
+        return "DIRECTIONAL"
+    return "MIXED"
+
+
+def realtime_daily_pnl(
+    realized: Decimal,
+    mark: Decimal,
+    position_amount: Decimal = ZERO,
+    average_price: Decimal = ZERO,
+) -> Decimal:
+    """JST-day realized PnL plus mark-to-market on the open position."""
+    unrealized = ZERO
+    amount = D(position_amount)
+    if amount > ZERO:
+        unrealized = (D(mark) - D(average_price)) * amount
+    return D(realized) + unrealized
+
+
+def daily_pnl_score(pnl_jpy: Decimal, scale_jpy: Decimal) -> Decimal:
+    """Map real-time daily PnL to [-1, 1]. Independent of Granville/pullback."""
+    scale = D(scale_jpy)
+    if scale <= ZERO:
+        scale = D("10000")
+    raw = D(pnl_jpy) / scale
+    if raw > ONE:
+        return ONE
+    if raw < -ONE:
+        return D("-1")
+    return raw
+
+
+def clause_score(clauses: Mapping[str, bool]) -> Decimal:
+    if not clauses:
+        return ZERO
+    hits = sum(1 for ok in clauses.values() if ok)
+    return D(hits) / D(len(clauses))
+
+
+def granville_pullback_score(rule_clauses: Mapping[str, Mapping[str, bool]]) -> Decimal:
+    """Best README/Granville rule completeness in [0, 1]. Partial AND is not a fire."""
+    if not rule_clauses:
+        return ZERO
+    return max((clause_score(clauses) for clauses in rule_clauses.values()), default=ZERO)
+
+
+def paired_indicator_scores(
+    granville: Decimal, daily_pnl: Decimal
+) -> tuple[Decimal, Decimal]:
+    """Return both scores unchanged. Neither silently overrides the other."""
+    return D(granville), D(daily_pnl)
