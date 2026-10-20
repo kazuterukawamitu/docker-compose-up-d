@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import signal
 import time
 from dataclasses import dataclass
@@ -14,7 +15,9 @@ from typing import Any
 
 from bitbank_bot.amounts import AmountPlan, PositionSizer
 from bitbank_bot.config import Config
+from bitbank_bot.dual_run import DualRun
 from bitbank_bot.logging_setup import slog
+from bitbank_bot.loop_timers import LoopEvidence, ShadowGuardTimers
 from bitbank_bot.market_data import (
     Candle,
     CandleCache,
@@ -29,7 +32,7 @@ from bitbank_bot.preflight import preflight
 from bitbank_bot.rest_client import BitbankAPIError, RestClient, is_auth_error
 from bitbank_bot.risk import RiskManager
 from bitbank_bot.screen import TradingScreen, view_from_engine
-from bitbank_bot.strategy import Position, Signal, Strategy, build_snapshots
+from bitbank_bot.strategy import Position, Signal, build_snapshots
 from bitbank_bot.watchdog import classify as classify_watchdog
 from bitbank_bot.websocket_client import BitbankWebsocket
 
@@ -153,6 +156,7 @@ class Engine:
         cfg: Config,
         client: RestClient | None = None,
         screen: TradingScreen | None = None,
+        dual: DualRun | None = None,
     ) -> None:
         self.cfg = cfg
         self.client = client
@@ -162,6 +166,8 @@ class Engine:
         self.cache = CandleCache(cfg.ma_period)
         self.last_block_reason = ""
         self.strategy_evaluations = 0
+        self.oos_evaluations = 0
+        self.timer_active_cycles = 0
         self.cycles = 0
         self.used_synthetic_fallback = False
         self._explicit_synthetic = False
@@ -172,6 +178,9 @@ class Engine:
         self.last_signal = Signal.hold("starting")
         self.last_public_last: str = "-"
         self.last_error = ""
+        self.dual = dual or DualRun.discover()
+        self.loop_evidence = LoopEvidence()
+        self.timers = ShadowGuardTimers(self.loop_evidence)
 
     def request_stop(self, *_args: object) -> None:
         slog("BOOT", "shutdown requested")
@@ -240,7 +249,8 @@ class Engine:
             self._poll_pending(state)
             if persist:
                 save_state(self.cfg.state_path, state)
-        strategy = Strategy(self.cfg)
+        production = self.dual.make_production(self.cfg)
+        shadow = self.dual.make_shadow(self.cfg)
         last = snaps[-1]
         self.last_close = last.close
         self.last_ma = last.ma
@@ -253,19 +263,47 @@ class Engine:
             trend=last.ma_trend.value,
             crossed_up=last.crossed_up,
             crossed_down=last.crossed_down,
+            production=self.dual.production_name,
+            oos_shadow=self.dual.shadow_name,
         )
         signal = Signal.hold("no_eval")
+        oos_signal = Signal.hold("oos_no_eval")
         for i, snap in enumerate(snaps):
             is_last = i == len(snaps) - 1
             is_new = state.last_candle_ts > 0 and snap.timestamp_ms > state.last_candle_ts
             is_bootstrap = state.last_candle_ts <= 0 and is_last
             heartbeat = is_last and not is_new and not is_bootstrap
             if not (is_new or is_bootstrap or heartbeat):
-                strategy.observe(snap)
+                production.observe(snap)
+                try:
+                    shadow.observe(snap)
+                except Exception as exc:
+                    slog("OOS_SHADOW", "observe error", error=type(exc).__name__)
                 continue
-            signal = strategy.evaluate(snap, state.position)
+            signal = production.evaluate(snap, state.position)
             self.strategy_evaluations += 1
+            try:
+                oos_signal = shadow.evaluate(snap, state.position)
+                self.dual.note_shadow(oos_signal)
+                self.oos_evaluations = self.dual.shadow_evaluations
+            except Exception as exc:
+                slog(
+                    "OOS_SHADOW",
+                    "evaluator error; production continues",
+                    error=type(exc).__name__,
+                )
+                oos_signal = Signal.hold("oos_error")
             slog("STRATEGY", "signal", kind=signal.kind, reason=signal.reason, side=signal.side)
+            if is_last:
+                slog(
+                    "OOS_SHADOW",
+                    "evaluator only",
+                    kind=oos_signal.kind,
+                    reason=oos_signal.reason,
+                    side=oos_signal.side,
+                    execute=False,
+                    production_kind=signal.kind,
+                )
             if not execute or heartbeat:
                 if heartbeat:
                     slog("STRATEGY", "candle already processed", candle_ts=snap.timestamp_ms)
@@ -674,6 +712,11 @@ class Engine:
             state.last_candle_ts = 0
         last_ok = time.monotonic()
         timeout = float(self.cfg.no_trade_timeout_seconds)
+        self.loop_evidence.begin(
+            pid=os.getpid(),
+            poll_sec=self.cfg.poll_sec,
+            lock_path=self.cfg.lock_path,
+        )
         while not self._stop:
             try:
                 latest_only = bool(self.cache.candles) and not synthetic
@@ -711,6 +754,11 @@ class Engine:
                     market_ok=bool(candles) and not accidental_synthetic,
                 )
                 self.cycles += 1
+                self.loop_evidence.note_cycle()
+                self.timers.tick_shadow()
+                self.timers.tick_guard(self.cfg, self.dual)
+                if self.timers.shadow.active and self.timers.guard.active:
+                    self.timer_active_cycles += 1
                 self._heartbeat(state, signal, last)
                 if max_cycles is not None and self.cycles >= max_cycles:
                     slog("BOOT", "max_cycles reached", cycles=self.cycles)
@@ -741,6 +789,8 @@ class Engine:
             except KeyboardInterrupt:
                 slog("BOOT", "keyboard interrupt")
                 self._stop = True
+        self.loop_evidence.end()
+        self.timers.refresh()
         if self.ws:
             self.ws.stop()
         slog("BOOT", "stopped")
@@ -765,6 +815,16 @@ class Engine:
         slog("HEARTBEAT", "MARKET DATA OK")
         slog("HEARTBEAT", "ORDER MANAGER OK")
         slog("HEARTBEAT", "RISK MANAGER OK")
+        slog(
+            "DUAL_RUN",
+            "production+oos",
+            production=self.dual.production_name,
+            oos=self.dual.shadow_name,
+            oos_execute=False,
+            shadow_timer_active=self.timers.shadow.active,
+            guard_timer_active=self.timers.guard.active,
+            loop_alive=self.loop_evidence.loop_alive(),
+        )
         self._paint(state, signal, last)
 
     def _refresh_public_last(self, rest: RestClient) -> None:

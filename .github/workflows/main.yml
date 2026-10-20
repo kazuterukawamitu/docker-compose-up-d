@@ -17,7 +17,8 @@ jobs:
           python-version: "3.12"
       - name: Install deps
         run: pip install -r requirements-dev.txt
-      - name: Compile
-        run: python -m compileall -q src main.py diagnostics.py
-      - name: Pytest
-        run: PYTHONPATH=src pytest -q
+      - name: Quality pipeline (compileall, pytest, ruff safe)
+        env:
+          DRY_RUN: "true"
+          LIVE_TRADING: "false"
+        run: python scripts/quality_pipeline.py
