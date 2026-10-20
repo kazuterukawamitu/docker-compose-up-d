@@ -16,7 +16,7 @@ import pytest
 from bitbank_bot.config import ConfigError, load_config
 from bitbank_bot.engine import BotState, Engine, PendingOrder, load_state, save_state
 from bitbank_bot.market_data import synthetic_candles
-from bitbank_bot.money import incremental_fill_cost, realized_pnl_after_fees
+from bitbank_bot.money import incremental_fee_jpy, incremental_fill_cost, realized_pnl_after_fees
 from bitbank_bot.orders import OrderExecutor, OrderResult, extract_order_fee_jpy
 from bitbank_bot.rest_client import RestClient
 from bitbank_bot.risk import RiskManager
@@ -501,13 +501,16 @@ def test_pending_roundtrip_includes_filled_cost(tmp_path) -> None:
         amount=Decimal("0.001"),
         filled_amount=Decimal("0.0004"),
         filled_cost=Decimal("4000"),
+        filled_fee=Decimal("6"),
     )
     save_state(c.state_path, state)
     loaded = load_state(c.state_path, c)
     assert loaded.pending is not None
     assert loaded.pending.filled_cost == Decimal("4000")
+    assert loaded.pending.filled_fee == Decimal("6")
     raw = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
     assert raw["pending"]["filled_cost"] == "4000"
+    assert raw["pending"]["filled_fee"] == "6"
 
 
 def test_order_type_rejects_invented_stop_market_name() -> None:
@@ -595,3 +598,150 @@ def test_default_protective_stop_is_off() -> None:
     loaded = load_config(environ={}, load_default_dotenv=False)
     assert loaded.protective_stop_pct == Decimal("0")
     assert loaded.exchange_stop_orders is False
+
+
+def test_reconcile_adopts_existing_fill_into_position(tmp_path) -> None:
+    c = cfg(
+        state_path=str(tmp_path / "state.json"),
+        dry_run=False,
+        live_trading=True,
+        api_key="k",
+        api_secret="s",
+        enable_websocket=False,
+    )
+    rest = MagicMock()
+    rest.free_amount.side_effect = lambda asset: (
+        Decimal("96000") if asset == "jpy" else Decimal("0.0004")
+    )
+    snapshot = {
+        "order_id": "77",
+        "side": "buy",
+        "type": "limit",
+        "status": "PARTIALLY_FILLED",
+        "executed_amount": "0.0004",
+        "average_price": "10000000",
+        "start_amount": "0.001",
+        "ordered_at": 1,
+        "fee_amount_quote": "6",
+    }
+    rest.get_active_orders.return_value = [snapshot]
+    rest.get_order.return_value = snapshot
+    engine = Engine(c, client=rest)
+    state = BotState(None, RiskManager(c), 0, time.monotonic())
+    reason = engine.reconcile_startup(state)
+    assert reason == "ok"
+    assert state.position is not None
+    assert state.position.amount == Decimal("0.0004")
+    assert state.position.actual_execution_jpy == Decimal("4000")
+    assert state.pending is not None
+    assert state.pending.order_id == "77"
+    assert state.pending.filled_amount == Decimal("0.0004")
+
+
+def test_incremental_fee_is_delta_not_cumulative() -> None:
+    assert incremental_fee_jpy(Decimal("6"), Decimal("15")) == Decimal("9")
+    assert incremental_fee_jpy(Decimal("0"), None) is None
+    assert incremental_fee_jpy(Decimal("15"), Decimal("15")) == Decimal("0")
+
+
+def test_partial_poll_fees_are_incremental(tmp_path) -> None:
+    c = cfg(
+        state_path=str(tmp_path / "state.json"),
+        dry_run=False,
+        live_trading=True,
+        api_key="k",
+        api_secret="s",
+        enable_websocket=False,
+        fee_buffer=Decimal("0.0015"),
+    )
+    rest = MagicMock()
+    rest.free_amount.side_effect = lambda asset: (
+        Decimal("90000") if asset == "jpy" else Decimal("0.001")
+    )
+    rest.get_order.return_value = {
+        "order_id": "55",
+        "status": "PARTIALLY_FILLED",
+        "executed_amount": "0.001",
+        "average_price": "10600000",
+        "start_amount": "0.002",
+        "fee_amount_quote": "15",
+    }
+    engine = Engine(c, client=rest)
+    state = BotState(
+        Position(
+            amount=Decimal("0.0004"),
+            average_price=Decimal("10000000"),
+            tp_pct=Decimal("0.03"),
+            entry_candle_index=1,
+            entry_candle_ts=1,
+            actual_execution_jpy=Decimal("4000"),
+            kind="BUY1",
+            entry_fee_jpy=Decimal("6"),
+        ),
+        RiskManager(c),
+        0,
+        time.monotonic(),
+    )
+    state.pending = PendingOrder(
+        order_id="55",
+        side="buy",
+        kind="BUY1",
+        tp_pct=Decimal("0.03"),
+        index=1,
+        timestamp_ms=1,
+        amount=Decimal("0.002"),
+        filled_amount=Decimal("0.0004"),
+        filled_cost=Decimal("4000"),
+        filled_fee=Decimal("6"),
+    )
+    engine._poll_pending(state)
+    assert state.position is not None
+    assert state.position.entry_fee_jpy == Decimal("15")
+    assert state.pending is not None
+    assert state.pending.filled_fee == Decimal("15")
+
+
+def _sell_plan():
+    from bitbank_bot.amounts import AmountPlan
+
+    return AmountPlan(
+        side="sell",
+        amount=Decimal("0.001"),
+        price=Decimal("10300000"),
+        available_jpy=Decimal("0"),
+        available_btc=Decimal("0.001"),
+        target_jpy=Decimal("10300"),
+        planned_order_jpy=Decimal("10300"),
+        actual_execution_jpy=None,
+        actual_balance_jpy=Decimal("0"),
+        actual_balance_btc=Decimal("0.001"),
+        ok=True,
+        reason="ok",
+    )
+
+
+def test_live_tp_uses_market_so_it_cannot_rest(tmp_path) -> None:
+    client = MagicMock()
+    client.get_active_orders.return_value = []
+    client.create_order.return_value = {
+        "order_id": "1",
+        "status": "FULLY_FILLED",
+        "executed_amount": "0.001",
+        "average_price": "10300000",
+        "start_amount": "0.001",
+    }
+    c = cfg(
+        dry_run=False,
+        live_trading=True,
+        api_key="k",
+        api_secret="s",
+        order_type="limit",
+    )
+    result = OrderExecutor(c, client).place(
+        Signal("TP", "sell", Decimal("0.03"), "tp"), _sell_plan()
+    )
+    assert result.ok
+    kwargs = client.create_order.call_args.kwargs
+    assert kwargs["order_type"] == "market"
+    assert kwargs["price"] is None
+    assert kwargs["order_type"] != "STOP-MARKET"

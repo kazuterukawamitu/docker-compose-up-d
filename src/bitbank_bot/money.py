@@ -93,6 +93,14 @@ def pct_offset(price: Decimal, pct: Decimal) -> Decimal:
     return D(price) * (ONE + D(pct))
 
 
+def incremental_fee_jpy(prev_fee: Decimal, new_fee: Decimal | None) -> Decimal | None:
+    """Fee for the new slice when the exchange reports a cumulative quote fee."""
+    if new_fee is None:
+        return None
+    delta = D(new_fee) - D(prev_fee)
+    return delta if delta > ZERO else ZERO
+
+
 def incremental_fill_cost(
     prev_qty: Decimal,
     prev_cost: Decimal,
