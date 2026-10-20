@@ -19,7 +19,6 @@ _CANCELED_STATUSES = frozenset(
         "CANCELED_UNFILLED",
         "CANCELED_PARTIALLY_FILLED",
         "REJECTED",
-        "INACTIVE",
     }
 )
 

@@ -46,6 +46,7 @@ class PendingOrder:
     timestamp_ms: int
     amount: Decimal
     filled_amount: Decimal = ZERO
+    filled_jpy: Decimal | None = ZERO
 
 
 @dataclass
@@ -94,6 +95,15 @@ def load_state(path: str | Path, cfg: Config) -> BotState:
             pending_raw = raw.get("pending")
             if pending_raw and pending_raw.get("order_id"):
                 tp_raw = pending_raw.get("tp_pct")
+                filled_amount = D(pending_raw.get("filled_amount") or 0)
+                if pending_raw.get("filled_jpy") not in (None, ""):
+                    filled_jpy: Decimal | None = D(pending_raw.get("filled_jpy"))
+                elif filled_amount > ZERO:
+                    # Older files booked each slice at the cumulative average.
+                    # Leave the checkpoint unknown until the next poll anchors it.
+                    filled_jpy = None
+                else:
+                    filled_jpy = ZERO
                 pending = PendingOrder(
                     order_id=str(pending_raw["order_id"]),
                     side=str(pending_raw.get("side") or ""),
@@ -102,7 +112,8 @@ def load_state(path: str | Path, cfg: Config) -> BotState:
                     index=int(pending_raw.get("index") or 0),
                     timestamp_ms=int(pending_raw.get("timestamp_ms") or 0),
                     amount=D(pending_raw.get("amount") or 0),
-                    filled_amount=D(pending_raw.get("filled_amount") or 0),
+                    filled_amount=filled_amount,
+                    filled_jpy=filled_jpy,
                 )
             if raw.get("paper_jpy") not in (None, ""):
                 paper_jpy = D(raw.get("paper_jpy"))
@@ -152,6 +163,9 @@ def save_state(path: str | Path, state: BotState) -> None:
             "timestamp_ms": state.pending.timestamp_ms,
             "amount": str(state.pending.amount),
             "filled_amount": str(state.pending.filled_amount),
+            "filled_jpy": (
+                "" if state.pending.filled_jpy is None else str(state.pending.filled_jpy)
+            ),
         }
     if state.position:
         payload["position"] = {
@@ -349,7 +363,14 @@ class Engine:
         state: BotState,
     ) -> None:
         rest = self._rest()
-        if self.ws is not None and not self.ws.is_stale() and self.ws.last_price():
+        # Live size and price stay on the closed candle the rule evaluated.
+        # A fresh websocket last is paper telemetry only.
+        if (
+            not self.cfg.may_place_live_orders
+            and self.ws is not None
+            and not self.ws.is_stale()
+            and self.ws.last_price()
+        ):
             price = self.ws.last_price() or price
         try:
             jpy, btc = self._balances(rest, state)
@@ -376,7 +397,11 @@ class Engine:
         if signal.side == "buy":
             plan = sizer.plan_buy(available_jpy=jpy, available_btc=btc, price=price)
         else:
-            plan = sizer.plan_sell(available_jpy=jpy, available_btc=btc, price=price)
+            # Flatten the tracked position. Extra free BTC is not this order.
+            sell_btc = btc
+            if state.position is not None:
+                sell_btc = min(btc, state.position.amount)
+            plan = sizer.plan_sell(available_jpy=jpy, available_btc=sell_btc, price=price)
         slog(
             "RISK",
             "RISK MANAGER OK",
@@ -433,6 +458,12 @@ class Engine:
             state.pending = None
             return
         if result.executed_amount <= pending.filled_amount:
+            if (
+                pending.filled_jpy is None
+                and result.executed_amount > ZERO
+                and result.average_price > ZERO
+            ):
+                pending.filled_jpy = result.executed_amount * result.average_price
             if result.reason == "canceled_partial":
                 slog(
                     "ORDER_STATUS",
@@ -450,6 +481,24 @@ class Engine:
             return
         delta = result.executed_amount - pending.filled_amount
         avg = result.average_price
+        total_jpy = result.executed_amount * avg if avg > ZERO else ZERO
+        if pending.filled_jpy is None:
+            # One legacy slice still uses size * cumulative average. After this
+            # poll, filled_jpy tracks the exchange total.
+            delta_jpy = delta * avg if avg > ZERO else ZERO
+            booked = total_jpy - delta_jpy
+            pending.filled_jpy = booked if booked > ZERO else ZERO
+        else:
+            delta_jpy = total_jpy - pending.filled_jpy
+        if delta_jpy <= ZERO or avg <= ZERO:
+            slog(
+                "EXECUTION_BLOCKED",
+                "pending fill has no positive incremental jpy",
+                order_id=pending.order_id,
+                executed_amount=str(result.executed_amount),
+                average_price=str(avg),
+            )
+            return
         # Apply only the new fill. filled_amount stays at the previous total
         # until _apply_fill adds this delta, so a second partial is not counted twice.
         apply_reason = "partial_fill" if result.reason == "partial_fill" else "fill"
@@ -464,7 +513,7 @@ class Engine:
             result.status,
             delta,
             avg,
-            delta * avg if avg else ZERO,
+            delta_jpy,
             result.raw,
         )
         signal = Signal(pending.kind, pending.side, pending.tp_pct, "pending_fill")
@@ -608,6 +657,9 @@ class Engine:
                 state.position.actual_execution_jpy -= cost
         if result.reason == "partial_fill" and result.order_id:
             already = state.pending.filled_amount if state.pending else ZERO
+            already_jpy = state.pending.filled_jpy if state.pending else ZERO
+            if already_jpy is None:
+                already_jpy = ZERO
             state.pending = PendingOrder(
                 order_id=result.order_id,
                 side=signal.side or "",
@@ -617,6 +669,7 @@ class Engine:
                 timestamp_ms=ts,
                 amount=plan.amount,
                 filled_amount=already + result.executed_amount,
+                filled_jpy=already_jpy + actual_jpy,
             )
         elif result.reason != "partial_fill":
             state.pending = None
@@ -820,9 +873,12 @@ class Engine:
             if last not in (None, ""):
                 self.last_public_last = str(last)
                 self.last_error = ""
+            else:
+                self.last_error = "ticker_missing"
         except Exception as exc:
+            # Candles own public_ok. A ticker miss must not mark a good
+            # candle fetch as degraded, and a ticker hit must not clear it.
             self.last_error = type(exc).__name__
-            self.public_ok = False
 
     def _paint(self, state: BotState, signal: Signal, last: str = "-") -> None:
         if self.screen is None:

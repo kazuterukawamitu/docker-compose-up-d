@@ -81,6 +81,38 @@ def test_stdlib_replay_matches_package_sell3() -> None:
     assert "SELL3" in standalone
 
 
+def test_stdlib_same_entry_timestamp_matches_package() -> None:
+    closes = [Decimal("100")] * 8 + [Decimal("104")]
+    stamps = list(range(len(closes)))
+    c = cfg(ma_period=3, short_ma_period=3, long_ma_period=5)
+    snaps = build_snapshots(closes, stamps, c)
+    from bitbank_bot.strategy import Position
+
+    pos = Position(
+        amount=Decimal("0.01"),
+        average_price=Decimal("100"),
+        tp_pct=Decimal("0.03"),
+        entry_candle_index=0,
+        entry_candle_ts=snaps[-1].timestamp_ms,
+        actual_execution_jpy=Decimal("1000"),
+        kind="BUY1",
+    )
+    package = Strategy(c).evaluate(snaps[-1], pos).kind
+    standalone = stdlib_run.replay_signals(
+        closes,
+        stamps,
+        active_from_index=0,
+        entry=Decimal("100"),
+        tp=Decimal("0.03"),
+        entry_index=0,
+        entry_ts=snaps[-1].timestamp_ms,
+        ma_period=3,
+        short_period=3,
+        long_period=5,
+    )[-1][0]
+    assert package == standalone == "HOLD"
+
+
 def test_run_py_compiles() -> None:
     path = Path(__file__).resolve().parents[1] / "run.py"
     source = path.read_text(encoding="utf-8")

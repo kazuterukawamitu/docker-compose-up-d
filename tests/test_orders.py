@@ -190,6 +190,22 @@ def test_poll_partial_stays_open() -> None:
     assert result.status == "PARTIALLY_FILLED"
 
 
+def test_poll_inactive_stays_open() -> None:
+    client = MagicMock()
+    client.get_order.return_value = {
+        "order_id": "42",
+        "status": "INACTIVE",
+        "executed_amount": "0",
+        "average_price": "0",
+        "start_amount": "0.001",
+    }
+    c = cfg(dry_run=False, live_trading=True, api_key="k", api_secret="s")
+    result = OrderExecutor(c, client).poll("42", Decimal("0.001"))
+    assert result.ok
+    assert result.reason == "accepted_unfilled"
+    assert result.executed_amount == Decimal("0")
+
+
 def test_poll_canceled_unfilled() -> None:
     client = MagicMock()
     client.get_order.return_value = {

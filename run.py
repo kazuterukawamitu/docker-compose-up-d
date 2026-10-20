@@ -329,6 +329,7 @@ def replay_signals(
     entry: Decimal = Decimal("0"),
     tp: Decimal = BUY1_TP,
     entry_index: int = -1,
+    entry_ts: int = 0,
     ma_period: int = MA_PERIOD,
     short_period: int = MA_PERIOD,
     long_period: int = LONG_PERIOD,
@@ -388,7 +389,9 @@ def replay_signals(
         s2 = sell2.update(close, prev_close, down)
         s4 = sell4.update(close, ma)
         in_position = active_from_index is not None and i >= active_from_index
-        if in_position and i == entry_index:
+        bar_ts = timestamps[i] if i < len(timestamps) else 0
+        same_entry = i == entry_index or (entry_ts > 0 and bar_ts == entry_ts)
+        if in_position and same_entry:
             out.append(("HOLD", "same_entry_candle_no_sell", tp))
         elif in_position:
             if s1:
@@ -444,6 +447,7 @@ def latest_signal(
         entry=entry,
         tp=tp,
         entry_index=entry_index,
+        entry_ts=entry_ts if in_position else 0,
     )
     if not rows:
         return "HOLD", "not_enough_candles", tp

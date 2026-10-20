@@ -256,7 +256,16 @@ class Strategy:
 
     def evaluate(self, snap: MarketSnapshot, position: Position | None) -> Signal:
         self.observe(snap)
-        same_entry = position is not None and snap.index == position.entry_candle_index
+        # Index is only stable inside one candle array. After a restart or a
+        # trimmed cache the same candle keeps its timestamp.
+        same_entry = False
+        if position is not None:
+            same_entry = snap.index == position.entry_candle_index
+            if (
+                position.entry_candle_ts > 0
+                and snap.timestamp_ms == position.entry_candle_ts
+            ):
+                same_entry = True
         if position is not None and not same_entry:
             sell = self._sell_signal(snap)
             if sell.kind != "HOLD":
