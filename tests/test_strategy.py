@@ -67,6 +67,24 @@ def test_hold_in_position_same_candle() -> None:
     assert sig.reason == "same_entry_candle_no_sell"
 
 
+def test_same_entry_uses_timestamp_when_index_shifts() -> None:
+    c = cfg(ma_period=3, short_ma_period=3, long_ma_period=5)
+    closes = [D("100")] * 8 + [D("104")]
+    snaps = build_snapshots(closes, list(range(len(closes))), c)
+    pos = Position(
+        amount=D("0.01"),
+        average_price=D("100"),
+        tp_pct=D("0.03"),
+        entry_candle_index=0,
+        entry_candle_ts=snaps[-1].timestamp_ms,
+        actual_execution_jpy=D("1000"),
+        kind="BUY1",
+    )
+    sig = Strategy(c).evaluate(snaps[-1], pos)
+    assert sig.kind == "HOLD"
+    assert sig.reason == "same_entry_candle_no_sell"
+
+
 def test_take_profit_sells() -> None:
     c = cfg(ma_period=3, short_ma_period=3, long_ma_period=5)
     closes = [D("100")] * 8 + [D("104")]

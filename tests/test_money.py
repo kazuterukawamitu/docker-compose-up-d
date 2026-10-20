@@ -4,7 +4,15 @@ from decimal import Decimal, InvalidOperation
 
 import pytest
 
-from bitbank_bot.money import D, ensure_decimal, floor_btc, meets_min_amount, to_decimal, truncate
+from bitbank_bot.money import (
+    D,
+    ensure_decimal,
+    floor_btc,
+    meets_min_amount,
+    quantize_order_price,
+    to_decimal,
+    truncate,
+)
 
 
 def test_d_parses_exchange_strings() -> None:
@@ -46,6 +54,13 @@ def test_ensure_decimal_names_the_field() -> None:
 def test_invalid_string() -> None:
     with pytest.raises(InvalidOperation):
         D("not-a-number")
+
+
+def test_order_price_rounds_sell_up() -> None:
+    tick = Decimal("1")
+    price = Decimal("10000000.4")
+    assert quantize_order_price(price, tick, "buy") == Decimal("10000000")
+    assert quantize_order_price(price, tick, "sell") == Decimal("10000001")
 
 
 def test_floor_btc_min_lot() -> None:

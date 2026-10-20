@@ -1,7 +1,7 @@
 # Bitbank bot audit (this branch)
 
-This repository on `main` is still a wiki HTML dump plus a strategy README. The
-runnable bot lives in `src/bitbank_bot/`. This branch is Bitbank `btc_jpy` only.
+The runnable bot lives in `src/bitbank_bot/`. `run.py` replays the same
+README rules without third-party packages. This tree is Bitbank `btc_jpy` only.
 
 ## What exists
 
@@ -57,6 +57,11 @@ bitFlyer, Coincheck, and GMO are not imported and are not executed.
 10. **Partial fills.** `PARTIALLY_FILLED` stays in `state.pending` and is polled
     until the remainder fills.
 11. **Kill file.** `data/KILL` blocks sells as well as buys.
+12. **Canceled live orders.** `CANCELED_*` / `REJECTED` drop `state.pending` so a dead order cannot block the next signal. A later partial on the same id is applied once.
+13. **DRY_RUN sizing.** API keys do not switch DRY_RUN onto exchange balances. Paper inventory can still be flattened. Live mode reads JPY and BTC in one assets call.
+14. **State file.** Corrupt JSON starts a fresh ledger instead of crash-looping. Saves replace the file atomically.
+15. **Partial notional.** A later fill books `executed * average` minus JPY already booked, so a changed cumulative average is not applied to the whole size again. Legacy pending rows without `filled_jpy` anchor on the next poll.
+16. **Position flatten.** A sell is capped at the tracked position. Free BTC outside that position stays put. `INACTIVE` is not treated as canceled. The entry candle is recognized by timestamp when the candle index shifts. Live orders keep the closed-candle price. A ticker error does not clear a healthy candle fetch.
 
 ## What this bot does not do
 

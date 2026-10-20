@@ -9,8 +9,18 @@ from typing import Any, Protocol
 from bitbank_bot.amounts import AmountPlan
 from bitbank_bot.config import Config
 from bitbank_bot.logging_setup import slog
-from bitbank_bot.money import D, ZERO, ensure_decimal, quantize_price
+from bitbank_bot.money import D, ZERO, ensure_decimal, quantize_order_price
 from bitbank_bot.strategy import Signal
+
+
+_CANCELED_STATUSES = frozenset(
+    {
+        "CANCELED",
+        "CANCELED_UNFILLED",
+        "CANCELED_PARTIALLY_FILLED",
+        "REJECTED",
+    }
+)
 
 
 def _fill_status(raw_status: str, executed: Decimal, ordered: Decimal) -> str:
@@ -19,6 +29,25 @@ def _fill_status(raw_status: str, executed: Decimal, ordered: Decimal) -> str:
     if ordered > ZERO and executed < ordered:
         return "PARTIALLY_FILLED"
     return "FULLY_FILLED"
+
+
+def classify_execution(raw_status: str, executed: Decimal, ordered: Decimal) -> tuple[str, str]:
+    """Map a Bitbank order to a reason the engine can apply once.
+
+    Canceled and rejected orders are terminal. Leaving them pending blocks
+    every later signal.
+    """
+    status = (raw_status or "").upper()
+    if status in _CANCELED_STATUSES or status.startswith("CANCELED"):
+        if executed > ZERO:
+            return "canceled_partial", "CANCELED_PARTIALLY_FILLED"
+        return "canceled", status or "CANCELED_UNFILLED"
+    fill = _fill_status(status, executed, ordered)
+    if fill == "PARTIALLY_FILLED":
+        return "partial_fill", fill
+    if fill == "FULLY_FILLED":
+        return "fill", fill
+    return "accepted_unfilled", fill
 
 
 class OrderClient(Protocol):
@@ -189,7 +218,7 @@ class OrderExecutor:
             )
         price_str: str | None = None
         if self.cfg.order_type == "limit":
-            q = quantize_price(plan.price, self.cfg.price_tick)
+            q = quantize_order_price(plan.price, self.cfg.price_tick, plan.side)
             price_str = str(int(q)) if q == q.to_integral_value() else str(q)
         raw = self.client.create_order(
             pair=self.cfg.pair,
@@ -206,7 +235,7 @@ class OrderExecutor:
         executed = D(raw.get("executed_amount") or 0)
         avg = D(raw.get("average_price") or 0)
         amount_ordered = D(raw.get("start_amount") or plan.amount)
-        if order_id and executed <= ZERO:
+        if order_id and executed <= ZERO and not (status or "").upper().startswith("CANCELED"):
             refreshed = self._refresh_order(order_id)
             if refreshed:
                 raw = refreshed
@@ -214,24 +243,30 @@ class OrderExecutor:
                 executed = D(raw.get("executed_amount") or 0)
                 avg = D(raw.get("average_price") or 0)
                 amount_ordered = D(raw.get("start_amount") or amount_ordered)
-        status = _fill_status(status, executed, amount_ordered)
+        reason, status = classify_execution(status, executed, amount_ordered)
         slog(
             "ORDER_STATUS",
             "order status",
             order_id=order_id,
             status=status,
             executed_amount=str(executed),
+            reason=reason,
         )
-        if executed <= ZERO:
+        if reason == "canceled" or executed <= ZERO:
             slog("ORDER_STATUS", "no fill yet; not logging FILL", order_id=order_id, status=status)
             return OrderResult(
-                True, "accepted_unfilled", False, False, order_id, status, ZERO, ZERO, None, raw
+                True, reason if reason == "canceled" else "accepted_unfilled", False, False, order_id, status, ZERO, ZERO, None, raw
             )
         actual = executed * avg
-        reason = "partial_fill" if status == "PARTIALLY_FILLED" else "fill"
+        if reason == "fill":
+            fill_msg = "fill"
+        elif reason == "canceled_partial":
+            fill_msg = "canceled after partial fill"
+        else:
+            fill_msg = "partial fill; keep polling"
         slog(
             "FILL" if reason == "fill" else "ORDER_STATUS",
-            "fill" if reason == "fill" else "partial fill; keep polling",
+            fill_msg,
             order_id=order_id,
             executed_amount=str(executed),
             average_price=str(avg),
@@ -252,23 +287,38 @@ class OrderExecutor:
         executed = D(raw.get("executed_amount") or 0)
         avg = D(raw.get("average_price") or 0)
         ordered = D(raw.get("start_amount") or fallback_amount)
-        status = _fill_status(str(raw.get("status") or ""), executed, ordered)
+        reason, status = classify_execution(str(raw.get("status") or ""), executed, ordered)
         slog(
             "ORDER_STATUS",
             "pending poll",
             order_id=order_id,
             status=status,
             executed_amount=str(executed),
+            reason=reason,
         )
-        if executed <= ZERO:
+        if reason == "canceled" or executed <= ZERO:
             return OrderResult(
-                True, "accepted_unfilled", False, False, order_id, status, ZERO, ZERO, None, raw
+                True,
+                "canceled" if reason == "canceled" else "accepted_unfilled",
+                False,
+                False,
+                order_id,
+                status,
+                ZERO,
+                ZERO,
+                None,
+                raw,
             )
         actual = executed * avg
-        reason = "partial_fill" if status == "PARTIALLY_FILLED" else "fill"
+        if reason == "fill":
+            fill_msg = "fill after poll"
+        elif reason == "canceled_partial":
+            fill_msg = "canceled after partial fill"
+        else:
+            fill_msg = "partial fill after poll"
         slog(
             "FILL" if reason == "fill" else "ORDER_STATUS",
-            "fill after poll" if reason == "fill" else "partial fill after poll",
+            fill_msg,
             order_id=order_id,
             executed_amount=str(executed),
             actual_execution_jpy=str(actual),

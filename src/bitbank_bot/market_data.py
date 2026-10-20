@@ -44,6 +44,15 @@ class Candle:
     timestamp_ms: int
 
 
+def previous_calendar_year(when: datetime) -> datetime:
+    """Same calendar date one year earlier. Feb 29 falls back to Feb 28."""
+    year = when.year - 1
+    try:
+        return when.replace(year=year)
+    except ValueError:
+        return when.replace(year=year, day=28)
+
+
 def candle_date_key(candle_type: str, when: datetime) -> str:
     if candle_type in SHORT_CANDLE_TYPES:
         return when.strftime("%Y%m%d")
@@ -80,7 +89,7 @@ def fetch_candles(
     else:
         keys.append(candle_date_key(cfg.candle_type, now))
         if not latest_only:
-            keys.append(candle_date_key(cfg.candle_type, now.replace(year=now.year - 1)))
+            keys.append(candle_date_key(cfg.candle_type, previous_calendar_year(now)))
 
     seen: set[int] = set()
     candles: list[Candle] = []

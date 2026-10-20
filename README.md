@@ -2,18 +2,18 @@
 
 Bitbank-only `btc_jpy` bot. Default is a **continuous DRY_RUN loop** with an iTerm **取引画面** (trading dashboard). HOLD/WAIT on a bar is normal. JSON lines are written to `logs/bot.log`, not the dashboard.
 
-`main` on GitHub is still wiki HTML. The runnable bot is branch `cursor/bitbank-audit-unify-f5fd`.
+The runnable bot is this tree (`main.py`, `run.py`, `src/bitbank_bot`). Wiki HTML files in the repo root are not loaded.
 
 HOLD for 15 minutes while market data and strategy are healthy is `LONG_WAIT`, not a crash. Public-API fallback candles never place orders. Live UNFILLED limits are persisted and polled. New BUY is blocked when both 4h and 1d SMA slopes are down (`ENABLE_HTF_FILTER`).
 
 ## Start (this is the program)
 
-`main` on GitHub is wiki HTML. You do **not** need pip, venv, or `start.sh` for the bot to run.
+You do **not** need pip, venv, or `start.sh` for the stdlib DRY_RUN screen.
 
-Paste **this one line** in iTerm. It downloads `run.py` and starts a DRY_RUN 取引画面 (no orders):
+Paste **this one line** in iTerm over SSH (not the Sakura serial console). It downloads `run.py` and starts a DRY_RUN 取引画面 (no orders):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/kazuterukawamitu/docker-compose-up-d/cursor/bitbank-audit-unify-f5fd/run.py -o "$HOME/bitbank_run.py" && python3 "$HOME/bitbank_run.py"
+curl -fsSL https://raw.githubusercontent.com/kazuterukawamitu/docker-compose-up-d/main/run.py -o "$HOME/bitbank_run.py" && python3 "$HOME/bitbank_run.py"
 ```
 
 You should see `Bitbank  BTC/JPY  取引画面`. HOLD/待機 is normal. Stop with Ctrl-C.

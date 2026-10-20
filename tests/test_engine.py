@@ -193,8 +193,10 @@ def test_engine_skips_order_when_balance_fetch_fails(tmp_path) -> None:
         api_secret="s",
         dry_run=True,
     )
+    c.dry_run = False
+    c.live_trading = True
     rest = MagicMock()
-    rest.free_amount.side_effect = RuntimeError("boom")
+    rest.free_amounts.side_effect = RuntimeError("boom")
     engine = Engine(c, client=rest)
     from bitbank_bot.strategy import Signal
 
@@ -202,6 +204,124 @@ def test_engine_skips_order_when_balance_fetch_fails(tmp_path) -> None:
     engine._execute(Signal("BUY1", "buy", Decimal("0.03"), "t"), Decimal("10000000"), 1, 1, state)
     rest.create_order.assert_not_called()
     assert engine.last_block_reason == "balance_fetch_failed"
+
+
+def test_corrupt_state_starts_fresh(tmp_path) -> None:
+    path = tmp_path / "state.json"
+    path.write_text("{", encoding="utf-8")
+    c = cfg(state_path=str(path), dry_run_free_jpy=Decimal("100000"))
+    state = load_state(path, c)
+    assert state.position is None
+    assert state.pending is None
+    assert state.paper_jpy == Decimal("100000")
+
+
+def test_save_state_roundtrip(tmp_path) -> None:
+    from bitbank_bot.engine import BotState, save_state
+
+    path = tmp_path / "nested" / "state.json"
+    c = cfg(state_path=str(path))
+    state = BotState(None, RiskManager(c), 7, time.monotonic(), paper_jpy=Decimal("50"))
+    save_state(path, state)
+    loaded = load_state(path, c)
+    assert loaded.last_candle_ts == 7
+    assert loaded.paper_jpy == Decimal("50")
+    assert not path.with_name(path.name + ".tmp").exists()
+
+
+def test_dry_run_with_keys_sells_paper_position(tmp_path) -> None:
+    from bitbank_bot.engine import BotState
+    from bitbank_bot.strategy import Position
+
+    c = cfg(
+        state_path=str(tmp_path / "state.json"),
+        lock_path=str(tmp_path / "bot.lock"),
+        log_dir=str(tmp_path / "logs"),
+        enable_websocket=False,
+        enable_htf_filter=False,
+        dry_run=True,
+        live_trading=False,
+        api_key="k",
+        api_secret="s",
+        simulate_fill=True,
+        ma_period=3,
+        short_ma_period=3,
+        long_ma_period=5,
+    )
+    rest = MagicMock()
+    rest.free_amounts.return_value = {"jpy": Decimal("1"), "btc": Decimal("0")}
+    engine = Engine(c, client=rest)
+    state = BotState(
+        Position(
+            amount=Decimal("0.001"),
+            average_price=Decimal("10000000"),
+            tp_pct=Decimal("0.03"),
+            entry_candle_index=1,
+            entry_candle_ts=1,
+            actual_execution_jpy=Decimal("10000"),
+            kind="BUY1",
+        ),
+        RiskManager(c),
+        0,
+        time.monotonic(),
+        paper_jpy=Decimal("90000"),
+        paper_btc=Decimal("0"),
+    )
+    with patch(
+        "bitbank_bot.strategy.Strategy.evaluate",
+        return_value=Signal("SELL1", "sell", None, "forced"),
+    ):
+        engine.process_candles(synthetic_candles(40), state, execute=True, persist=False)
+    assert state.position is None
+    assert rest.free_amounts.call_count == 0
+    assert rest.create_order.call_count == 0
+
+
+def test_canceled_pending_releases(tmp_path) -> None:
+    c = cfg(
+        state_path=str(tmp_path / "state.json"),
+        lock_path=str(tmp_path / "bot.lock"),
+        log_dir=str(tmp_path / "logs"),
+        enable_websocket=False,
+        enable_htf_filter=False,
+        dry_run=False,
+        live_trading=True,
+        api_key="k",
+        api_secret="s",
+        ma_period=3,
+        short_ma_period=3,
+        long_ma_period=5,
+    )
+    rest = MagicMock()
+    rest.free_amounts.return_value = {"jpy": Decimal("100000"), "btc": Decimal("0")}
+    rest.get_order.return_value = {
+        "order_id": "42",
+        "status": "CANCELED_UNFILLED",
+        "executed_amount": "0",
+        "average_price": "0",
+        "start_amount": "0.001",
+    }
+    engine = Engine(c, client=rest)
+    from bitbank_bot.engine import BotState
+
+    state = BotState(
+        None,
+        RiskManager(c),
+        0,
+        time.monotonic(),
+        pending=PendingOrder(
+            order_id="42",
+            side="buy",
+            kind="BUY1",
+            tp_pct=Decimal("0.03"),
+            index=1,
+            timestamp_ms=1,
+            amount=Decimal("0.001"),
+        ),
+    )
+    engine.process_candles(synthetic_candles(40), state, execute=True, persist=False)
+    assert state.pending is None
+    assert state.position is None
 
 
 def test_load_state_without_file_has_no_pending(tmp_path) -> None:
@@ -280,9 +400,7 @@ def test_pending_unfilled_is_persisted_and_polled(tmp_path) -> None:
         long_ma_period=5,
     )
     rest = MagicMock()
-    rest.free_amount.side_effect = lambda asset: (
-        Decimal("100000") if asset == "jpy" else Decimal("0")
-    )
+    rest.free_amounts.return_value = {"jpy": Decimal("100000"), "btc": Decimal("0")}
     rest.get_active_orders.return_value = []
     rest.create_order.return_value = {
         "order_id": "42",
@@ -411,9 +529,7 @@ def test_partial_fill_keeps_pending(tmp_path) -> None:
         long_ma_period=5,
     )
     rest = MagicMock()
-    rest.free_amount.side_effect = lambda asset: (
-        Decimal("100000") if asset == "jpy" else Decimal("0")
-    )
+    rest.free_amounts.return_value = {"jpy": Decimal("100000"), "btc": Decimal("0")}
     rest.get_active_orders.return_value = []
     rest.create_order.return_value = {
         "order_id": "99",
@@ -436,3 +552,156 @@ def test_partial_fill_keeps_pending(tmp_path) -> None:
     assert state.pending.filled_amount == Decimal("0.0004")
     assert state.position is not None
     assert state.position.amount == Decimal("0.0004")
+
+    rest.get_order.return_value = {
+        "order_id": "99",
+        "status": "PARTIALLY_FILLED",
+        "executed_amount": "0.0008",
+        "average_price": "10000000",
+        "start_amount": "0.01",
+    }
+    engine.process_candles(synthetic_candles(40), state, execute=True, persist=True)
+    assert state.pending is not None
+    assert state.pending.filled_amount == Decimal("0.0008")
+    assert state.position.amount == Decimal("0.0008")
+
+    rest.get_order.return_value = {
+        "order_id": "99",
+        "status": "CANCELED_PARTIALLY_FILLED",
+        "executed_amount": "0.0010",
+        "average_price": "10000000",
+        "start_amount": "0.01",
+    }
+    engine.process_candles(synthetic_candles(40), state, execute=True, persist=True)
+    assert state.pending is None
+    assert state.position.amount == Decimal("0.0010")
+    assert state.position.actual_execution_jpy == Decimal("10000")
+
+
+def test_partial_fill_uses_incremental_notional(tmp_path) -> None:
+    from bitbank_bot.engine import BotState
+    from bitbank_bot.strategy import Position
+
+    c = cfg(
+        state_path=str(tmp_path / "state.json"),
+        lock_path=str(tmp_path / "bot.lock"),
+        log_dir=str(tmp_path / "logs"),
+        enable_websocket=False,
+        enable_htf_filter=False,
+        dry_run=False,
+        live_trading=True,
+        api_key="k",
+        api_secret="s",
+        ma_period=3,
+        short_ma_period=3,
+        long_ma_period=5,
+    )
+    rest = MagicMock()
+    rest.get_order.return_value = {
+        "order_id": "99",
+        "status": "PARTIALLY_FILLED",
+        "executed_amount": "2",
+        "average_price": "150",
+        "start_amount": "3",
+    }
+    engine = Engine(c, client=rest)
+    state = BotState(
+        Position(
+            amount=Decimal("1"),
+            average_price=Decimal("100"),
+            tp_pct=Decimal("0.03"),
+            entry_candle_index=1,
+            entry_candle_ts=1,
+            actual_execution_jpy=Decimal("100"),
+            kind="BUY1",
+        ),
+        RiskManager(c),
+        0,
+        time.monotonic(),
+        pending=PendingOrder(
+            order_id="99",
+            side="buy",
+            kind="BUY1",
+            tp_pct=Decimal("0.03"),
+            index=1,
+            timestamp_ms=1,
+            amount=Decimal("3"),
+            filled_amount=Decimal("1"),
+            filled_jpy=Decimal("100"),
+        ),
+    )
+    with patch(
+        "bitbank_bot.strategy.Strategy.evaluate",
+        return_value=Signal.hold("no_buy_setup"),
+    ):
+        engine.process_candles(synthetic_candles(40), state, execute=True, persist=False)
+    assert state.position is not None
+    assert state.position.amount == Decimal("2")
+    assert state.position.actual_execution_jpy == Decimal("300")
+    assert state.pending is not None
+    assert state.pending.filled_amount == Decimal("2")
+    assert state.pending.filled_jpy == Decimal("300")
+
+
+def test_sell_does_not_flatten_btc_outside_position(tmp_path) -> None:
+    from bitbank_bot.engine import BotState
+    from bitbank_bot.strategy import Position
+
+    c = cfg(
+        state_path=str(tmp_path / "state.json"),
+        lock_path=str(tmp_path / "bot.lock"),
+        log_dir=str(tmp_path / "logs"),
+        enable_websocket=False,
+        enable_htf_filter=False,
+        dry_run=True,
+        live_trading=False,
+        simulate_fill=True,
+        ma_period=3,
+        short_ma_period=3,
+        long_ma_period=5,
+    )
+    engine = Engine(c, client=FakeRest())  # type: ignore[arg-type]
+    state = BotState(
+        Position(
+            amount=Decimal("0.001"),
+            average_price=Decimal("10000000"),
+            tp_pct=Decimal("0.03"),
+            entry_candle_index=1,
+            entry_candle_ts=1,
+            actual_execution_jpy=Decimal("10000"),
+            kind="BUY1",
+        ),
+        RiskManager(c),
+        0,
+        time.monotonic(),
+        paper_jpy=Decimal("0"),
+        paper_btc=Decimal("1"),
+    )
+    with patch(
+        "bitbank_bot.strategy.Strategy.evaluate",
+        return_value=Signal("SELL1", "sell", None, "forced"),
+    ):
+        engine.process_candles(synthetic_candles(40), state, execute=True, persist=False)
+    assert state.position is None
+    assert state.paper_btc == Decimal("0.999")
+
+
+def test_ticker_failure_does_not_clear_candle_health(tmp_path) -> None:
+    c = cfg(
+        state_path=str(tmp_path / "state.json"),
+        enable_websocket=False,
+    )
+    rest = MagicMock()
+    rest.get_ticker.side_effect = RuntimeError("down")
+    engine = Engine(c, client=rest)
+    engine.public_ok = True
+    engine._refresh_public_last(rest)
+    assert engine.public_ok is True
+    assert engine.last_error == "RuntimeError"
+    rest.get_ticker.side_effect = None
+    rest.get_ticker.return_value = {"last": "13000000"}
+    engine.public_ok = False
+    engine._refresh_public_last(rest)
+    assert engine.public_ok is False
+    assert engine.last_public_last == "13000000"
+    assert engine.last_error == ""

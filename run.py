@@ -25,8 +25,17 @@ from typing import Any
 PAIR = "btc_jpy"
 PUBLIC = "https://public.bitbank.cc"
 MA_PERIOD = 20
+LONG_PERIOD = 50
 SLOPE = Decimal("0.0005")
 BUY1_TP = Decimal("0.03")
+BUY2_TP = Decimal("0.05")
+BUY2_GOLDEN_TP = Decimal("0.08")
+BUY3_TP = Decimal("0.04")
+BUY4_TP = Decimal("0.05")
+BUY3_EXTEND = Decimal("0.05")
+BUY4_DIP = Decimal("0.05")
+SELL1_EXTEND = Decimal("0.04")
+SELL4_DIP = Decimal("0.04")
 MIN_BTC = Decimal("0.0001")
 PAPER_JPY = Decimal("100000")
 POLL_SEC = 5
@@ -146,38 +155,303 @@ def trend_of(ma: Decimal, prev: Decimal) -> str:
     return "FLAT"
 
 
-def decide(
+def series_sma(values: list[Decimal], period: int) -> list[Decimal | None]:
+    out: list[Decimal | None] = [None] * len(values)
+    if period < 1:
+        return out
+    running = Decimal("0")
+    for i, value in enumerate(values):
+        running += value
+        if i >= period:
+            running -= values[i - period]
+        if i + 1 >= period:
+            out[i] = running / Decimal(period)
+    return out
+
+
+class _Buy3:
+    def __init__(self, extend: Decimal) -> None:
+        self.extend = extend
+        self.phase = "idle"
+        self.peak: Decimal | None = None
+        self.trough: Decimal | None = None
+        self.prev: Decimal | None = None
+
+    def reset(self) -> None:
+        self.phase = "idle"
+        self.peak = None
+        self.trough = None
+
+    def update(self, close: Decimal, ma: Decimal) -> bool:
+        fired = False
+        if close <= ma:
+            self.reset()
+            self.prev = close
+            return False
+        threshold = ma * (Decimal("1") + self.extend)
+        if self.phase == "idle":
+            if close >= threshold:
+                self.phase = "extended"
+                self.peak = close
+        elif self.phase == "extended":
+            if self.peak is None or close > self.peak:
+                self.peak = close
+            elif self.prev is not None and close < self.prev:
+                self.phase = "pullback"
+                self.trough = close
+        elif self.phase == "pullback":
+            if self.trough is None or close < self.trough:
+                self.trough = close
+            if self.prev is not None and close > self.prev:
+                fired = True
+                self.reset()
+        self.prev = close
+        return fired
+
+
+class _Buy4:
+    def __init__(self, dip: Decimal) -> None:
+        self.dip = dip
+        self.phase = "idle"
+        self.prev: Decimal | None = None
+        self.low: Decimal | None = None
+
+    def update(self, close: Decimal, ma: Decimal, trend: str) -> bool:
+        fired = False
+        if trend != "DOWN":
+            self.phase = "idle"
+            self.low = None
+            self.prev = close
+            return False
+        floor = ma * (Decimal("1") - self.dip)
+        if self.phase == "idle":
+            if close <= floor:
+                self.phase = "dipped"
+                self.low = close
+        elif self.phase == "dipped":
+            if self.low is None or close < self.low:
+                self.low = close
+            if self.prev is not None and close > self.prev:
+                fired = True
+                self.phase = "idle"
+                self.low = None
+        self.prev = close
+        return fired
+
+
+class _Sell1:
+    def __init__(self, extend: Decimal) -> None:
+        self.extend = extend
+        self.phase = "idle"
+        self.prev: Decimal | None = None
+        self.pivot: Decimal | None = None
+
+    def update(self, close: Decimal, ma: Decimal) -> bool:
+        fired = False
+        ceiling = ma * (Decimal("1") + self.extend)
+        if self.phase == "idle":
+            if close >= ceiling:
+                self.phase = "extended"
+                self.pivot = close
+        elif self.phase == "extended":
+            if self.pivot is None or close > self.pivot:
+                self.pivot = close
+            if self.prev is not None and close < self.prev:
+                fired = True
+                self.phase = "idle"
+            elif close < ma:
+                self.phase = "idle"
+                self.pivot = None
+        self.prev = close
+        return fired
+
+
+class _Sell2:
+    def __init__(self) -> None:
+        self.phase = "idle"
+
+    def update(self, close: Decimal, prev_close: Decimal, crossed_dn: bool) -> bool:
+        fired = False
+        falling = close < prev_close
+        if self.phase == "idle":
+            if falling:
+                self.phase = "crossed" if crossed_dn else "falling"
+        elif self.phase == "falling":
+            if crossed_dn and falling:
+                self.phase = "crossed"
+            elif not falling:
+                self.phase = "idle"
+        elif self.phase == "crossed":
+            if falling:
+                fired = True
+            self.phase = "idle"
+        return fired
+
+
+class _Sell4:
+    def __init__(self, dip: Decimal) -> None:
+        self.dip = dip
+        self.phase = "idle"
+        self.peak: Decimal | None = None
+        self.prev: Decimal | None = None
+
+    def update(self, close: Decimal, ma: Decimal) -> bool:
+        fired = False
+        floor = ma * (Decimal("1") - self.dip)
+        if close >= ma:
+            self.phase = "idle"
+            self.peak = None
+            self.prev = close
+            return False
+        if self.phase == "idle":
+            if close <= floor:
+                self.phase = "dipped"
+        elif self.phase == "dipped":
+            if self.prev is not None and close > self.prev:
+                self.phase = "recovery"
+                self.peak = close
+        elif self.phase == "recovery":
+            if self.peak is None or close > self.peak:
+                self.peak = close
+            elif self.prev is not None and close < self.prev:
+                fired = True
+                self.phase = "idle"
+                self.peak = None
+        self.prev = close
+        return fired
+
+
+def replay_signals(
     closes: list[Decimal],
+    timestamps: list[int],
+    *,
+    active_from_index: int | None = None,
+    entry: Decimal = Decimal("0"),
+    tp: Decimal = BUY1_TP,
+    entry_index: int = -1,
+    entry_ts: int = 0,
+    ma_period: int = MA_PERIOD,
+    short_period: int = MA_PERIOD,
+    long_period: int = LONG_PERIOD,
+    slope: Decimal = SLOPE,
+    buy1_tp: Decimal = BUY1_TP,
+    buy2_tp: Decimal = BUY2_TP,
+    buy2_golden_tp: Decimal = BUY2_GOLDEN_TP,
+    buy3_tp: Decimal = BUY3_TP,
+    buy4_tp: Decimal = BUY4_TP,
+    buy3_extend: Decimal = BUY3_EXTEND,
+    buy4_dip: Decimal = BUY4_DIP,
+    sell1_extend: Decimal = SELL1_EXTEND,
+    sell4_dip: Decimal = SELL4_DIP,
+) -> list[tuple[str, str, Decimal]]:
+    """Replay README rules. Same priority as the package: SELL, then TP, then BUY."""
+    primary = series_sma(closes, ma_period)
+    short = series_sma(closes, short_period)
+    long = series_sma(closes, long_period)
+    buy3 = _Buy3(buy3_extend)
+    buy4 = _Buy4(buy4_dip)
+    sell1 = _Sell1(sell1_extend)
+    sell2 = _Sell2()
+    sell4 = _Sell4(sell4_dip)
+    out: list[tuple[str, str, Decimal]] = []
+    prev_trend = "FLAT"
+    start = max(ma_period, short_period, long_period)
+    for i in range(start, len(closes)):
+        ma = primary[i]
+        prev_ma = primary[i - 1]
+        s_ma = short[i]
+        s_prev = short[i - 1]
+        l_ma = long[i]
+        l_prev = long[i - 1]
+        if None in (ma, prev_ma, s_ma, s_prev, l_ma, l_prev):
+            continue
+        assert ma is not None and prev_ma is not None
+        assert s_ma is not None and s_prev is not None
+        assert l_ma is not None and l_prev is not None
+        if prev_ma == 0:
+            trend = "FLAT"
+        else:
+            delta = (ma - prev_ma) / prev_ma
+            if delta > slope:
+                trend = "UP"
+            elif delta < -slope:
+                trend = "DOWN"
+            else:
+                trend = "FLAT"
+        close = closes[i]
+        prev_close = closes[i - 1]
+        up = prev_close <= prev_ma and close > ma
+        down = prev_close >= prev_ma and close < ma
+        golden = s_prev <= l_prev and s_ma > l_ma
+        b3 = buy3.update(close, ma)
+        b4 = buy4.update(close, ma, trend)
+        s1 = sell1.update(close, ma)
+        s2 = sell2.update(close, prev_close, down)
+        s4 = sell4.update(close, ma)
+        in_position = active_from_index is not None and i >= active_from_index
+        bar_ts = timestamps[i] if i < len(timestamps) else 0
+        same_entry = i == entry_index or (entry_ts > 0 and bar_ts == entry_ts)
+        if in_position and same_entry:
+            out.append(("HOLD", "same_entry_candle_no_sell", tp))
+        elif in_position:
+            if s1:
+                out.append(("SELL1", "price >=4% above MA then turned down", tp))
+            elif trend == "DOWN" and up:
+                out.append(("SELL3", "downtrend_ma_cross_up", tp))
+            elif s2:
+                out.append(("SELL2", "cross_down_and_falling", tp))
+            elif s4:
+                out.append(("SELL4", "failed recovery below MA", tp))
+            elif close >= entry * (Decimal("1") + tp):
+                out.append(("TP", "take_profit", tp))
+            else:
+                out.append(("HOLD", "in_position_no_sell_or_tp", tp))
+        elif prev_trend == "DOWN" and trend in {"FLAT", "UP"} and up:
+            out.append(("BUY1", "ma_left_downtrend_cross_up", buy1_tp))
+        elif trend == "UP" and down:
+            chosen = buy2_golden_tp if golden else buy2_tp
+            out.append(("BUY2", "uptrend_cross_down", chosen))
+        elif b3:
+            out.append(("BUY3", "pullback then bounce above MA", buy3_tp))
+        elif b4:
+            out.append(("BUY4", "downtrend dip then rise", buy4_tp))
+        else:
+            out.append(("HOLD", "no_buy_setup", tp))
+        prev_trend = trend
+    return out
+
+
+def latest_signal(
+    closes: list[Decimal],
+    timestamps: list[int],
+    *,
     in_position: bool,
     entry: Decimal,
     tp: Decimal,
-) -> tuple[str, str]:
+    entry_ts: int,
+) -> tuple[str, str, Decimal]:
     if len(closes) < MA_PERIOD + 1:
-        return "HOLD", "not_enough_candles"
-    ma = sma(closes, MA_PERIOD)
-    prev_ma = sma(closes[:-1], MA_PERIOD)
-    if ma is None or prev_ma is None:
-        return "HOLD", "not_enough_candles"
-    close = closes[-1]
-    prev_close = closes[-2]
-    prev_trend = trend_of(prev_ma, sma(closes[:-2], MA_PERIOD) or prev_ma)
-    trend = trend_of(ma, prev_ma)
-    crossed_up = prev_close <= prev_ma and close > ma
-    crossed_down = prev_close >= prev_ma and close < ma
+        return "HOLD", "not_enough_candles", tp
+    entry_index = -1
+    active_from: int | None = None
     if in_position:
-        target = entry * (Decimal("1") + tp)
-        if close >= target:
-            return "TP", f"take_profit {commas(close)} >= {commas(target)}"
-        if trend == "DOWN" and crossed_up:
-            return "SELL3", "downtrend_ma_cross_up"
-        if crossed_down and close < prev_close:
-            return "SELL2", "cross_down_and_falling"
-        return "HOLD", "in_position_no_sell_or_tp"
-    if prev_trend == "DOWN" and trend in {"FLAT", "UP"} and crossed_up:
-        return "BUY1", "ma_left_downtrend_cross_up"
-    if trend == "UP" and crossed_down:
-        return "BUY2", "uptrend_cross_down"
-    return "HOLD", "no_buy_setup"
+        for i, ts in enumerate(timestamps):
+            if ts == entry_ts:
+                entry_index = i
+                break
+        active_from = entry_index if entry_index >= 0 else 0
+    rows = replay_signals(
+        closes,
+        timestamps,
+        active_from_index=active_from,
+        entry=entry,
+        tp=tp,
+        entry_index=entry_index,
+        entry_ts=entry_ts if in_position else 0,
+    )
+    if not rows:
+        return "HOLD", "not_enough_candles", tp
+    return rows[-1]
 
 
 def screen(
@@ -239,6 +513,7 @@ def main(argv: list[str] | None = None) -> int:
     cycles = 0
     in_position = False
     entry = Decimal("0")
+    entry_ts = 0
     amount = Decimal("0")
     tp = BUY1_TP
     last_error = ""
@@ -247,15 +522,23 @@ def main(argv: list[str] | None = None) -> int:
         try:
             rows = synthetic_closes() if args.synthetic else fetch_hourly_closes()
             closes = [c for _, c in rows]
+            stamps = [ts for ts, _ in rows]
             ticker = {"last": str(closes[-1]) if closes else ""}
             if not args.synthetic:
                 ticker = fetch_ticker()
             ma = sma(closes, MA_PERIOD)
             prev_ma = sma(closes[:-1], MA_PERIOD) if len(closes) > MA_PERIOD else None
             trend = trend_of(ma, prev_ma) if ma is not None and prev_ma is not None else "-"
-            signal, reason = decide(closes, in_position, entry, tp)
+            signal, reason, signal_tp = latest_signal(
+                closes,
+                stamps,
+                in_position=in_position,
+                entry=entry,
+                tp=tp,
+                entry_ts=entry_ts,
+            )
             last = ticker.get("last") or (str(closes[-1]) if closes else "-")
-            if signal == "BUY1" or signal == "BUY2":
+            if signal in {"BUY1", "BUY2", "BUY3", "BUY4"}:
                 price = D(last)
                 if price > 0:
                     raw = (PAPER_JPY * Decimal("0.95")) / price
@@ -263,13 +546,14 @@ def main(argv: list[str] | None = None) -> int:
                     if amount >= MIN_BTC:
                         in_position = True
                         entry = price
-                        tp = BUY1_TP
+                        entry_ts = stamps[-1] if stamps else 0
+                        tp = signal_tp
                         print(
                             f"ORDER_INTENT paper {signal} {amount} BTC @ {commas(price)} "
                             "(DRY_RUN: Bitbank create_order は呼ばない)",
                             flush=True,
                         )
-            elif signal in {"SELL2", "SELL3", "TP"} and in_position:
+            elif signal in {"SELL1", "SELL2", "SELL3", "SELL4", "TP"} and in_position:
                 print(
                     f"ORDER_INTENT paper {signal} flatten {amount} BTC "
                     "(DRY_RUN: Bitbank create_order は呼ばない)",
@@ -277,6 +561,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 in_position = False
                 amount = Decimal("0")
+                entry_ts = 0
             uptime = int(time.monotonic() - started)
             watchdog = "LONG_WAIT" if uptime >= LONG_WAIT_SEC else "NORMAL WAIT"
             text = screen(

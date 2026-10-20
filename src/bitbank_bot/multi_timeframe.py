@@ -13,7 +13,13 @@ from decimal import Decimal
 from bitbank_bot.config import Config, LONG_CANDLE_TYPES, SHORT_CANDLE_TYPES
 from bitbank_bot.indicators import Trend, ma_trend, moving_average
 from bitbank_bot.logging_setup import slog
-from bitbank_bot.market_data import CANDLE_MS, Candle, candle_date_key, parse_ohlcv
+from bitbank_bot.market_data import (
+    CANDLE_MS,
+    Candle,
+    candle_date_key,
+    parse_ohlcv,
+    previous_calendar_year,
+)
 from bitbank_bot.rest_client import RestClient
 
 JST = timezone(timedelta(hours=9))
@@ -37,7 +43,7 @@ def _fetch_type(client: RestClient, pair: str, candle_type: str) -> list[Candle]
             keys.append(candle_date_key(candle_type, now - timedelta(days=i)))
     elif candle_type in LONG_CANDLE_TYPES:
         keys.append(candle_date_key(candle_type, now))
-        keys.append(candle_date_key(candle_type, now.replace(year=now.year - 1)))
+        keys.append(candle_date_key(candle_type, previous_calendar_year(now)))
     else:
         return []
     seen: set[int] = set()
