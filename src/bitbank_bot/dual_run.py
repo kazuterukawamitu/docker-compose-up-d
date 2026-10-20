@@ -121,6 +121,26 @@ class CallableEvaluator:
         return self._fn(snap, position)
 
 
+class PluginAdapter:
+    """Wrap a plugin instance so missing ``observe`` cannot abort the loop."""
+
+    def __init__(self, inner: object, name: str) -> None:
+        self._inner = inner
+        self.name = name
+
+    def observe(self, snap: MarketSnapshot) -> None:
+        obs = getattr(self._inner, "observe", None)
+        if callable(obs):
+            obs(snap)
+
+    def evaluate(self, snap: MarketSnapshot, position: Position | None) -> Signal:
+        return self._inner.evaluate(snap, position)  # type: ignore[attr-defined]
+
+
+def _defined_in_plugin(obj: object, module: ModuleType) -> bool:
+    return getattr(obj, "__module__", None) == module.__name__
+
+
 class ShadowStrategy:
     """No-order evaluator using README Strategy when oos.py is Not Detected."""
 
@@ -170,16 +190,27 @@ def _evaluator_from_plugin(hit: PluginHit, cfg: Config, role: str) -> SignalEval
     if module is None or not hit.safe or hit.status != "loaded":
         return None
     strat_cls = getattr(module, "Strategy", None)
-    if isinstance(strat_cls, type):
+    plugin_cls = (
+        isinstance(strat_cls, type)
+        and strat_cls is not Strategy
+        and _defined_in_plugin(strat_cls, module)
+    )
+    if plugin_cls:
+        inst: object | None
         try:
-            inst = strat_cls(cfg)  # type: ignore[call-arg]
+            inst = strat_cls(cfg)  # type: ignore[misc]
         except TypeError:
-            inst = strat_cls()  # type: ignore[call-arg]
-        if hasattr(inst, "evaluate"):
+            try:
+                inst = strat_cls()  # type: ignore[misc]
+            except Exception:
+                inst = None
+        except Exception:
+            inst = None
+        if inst is not None and callable(getattr(inst, "evaluate", None)):
             slog("DUAL_RUN", f"{role} using plugin Strategy", kind=hit.kind)
-            return inst  # type: ignore[return-value]
+            return PluginAdapter(inst, f"{hit.kind}_strategy")
     fn = getattr(module, "evaluate", None)
-    if callable(fn):
+    if callable(fn) and _defined_in_plugin(fn, module):
         slog("DUAL_RUN", f"{role} using plugin evaluate()", kind=hit.kind)
         return CallableEvaluator(fn, f"{hit.kind}_evaluate")
     slog("DUAL_RUN", f"{hit.kind} loaded but incompatible; not wired", role=role)
@@ -196,40 +227,44 @@ class DualRun:
     shadow_evaluations: int = 0
     oos_tuning_applied: bool = False
     oos_proposals: list[str] = field(default_factory=list)
+    v31_wired: bool = False
+    oos_wired: bool = False
+    _probed: bool = False
 
     @classmethod
     def discover(cls, root: Path | None = None) -> "DualRun":
         v31 = discover_plugin("v31", root)
         oos = discover_plugin("oos", root)
-        production_name = "v31" if v31.status == "loaded" and v31.safe else "strategy"
-        if oos.status == "loaded" and oos.safe:
-            shadow_name = "oos"
-        else:
-            shadow_name = "strategy_shadow"
         slog(
             "DUAL_RUN",
             "discover",
             v31=v31.status,
             oos=oos.status,
-            production=production_name,
-            shadow=shadow_name,
+            production="strategy",
+            shadow="strategy_shadow",
             oos_execute=False,
+            wired=False,
         )
-        return cls(
-            v31=v31,
-            oos=oos,
-            production_name=production_name,
-            shadow_name=shadow_name,
-        )
+        return cls(v31=v31, oos=oos)
+
+    def probe(self, cfg: Config) -> "DualRun":
+        """Instantiate evaluators so evidence reflects wiring, not import alone."""
+        if not self._probed:
+            self.make_production(cfg)
+            self.make_shadow(cfg)
+            self._probed = True
+        return self
 
     def make_production(self, cfg: Config) -> SignalEvaluator:
         if self.v31.status == "loaded" and self.v31.safe:
             wired = _evaluator_from_plugin(self.v31, cfg, "production")
             if wired is not None:
                 self.production_name = getattr(wired, "name", "v31")
+                self.v31_wired = True
                 return wired
-            self.production_name = "strategy"
             slog("DUAL_RUN", "V31 not wired; production stays Strategy")
+        self.production_name = "strategy"
+        self.v31_wired = False
         return Strategy(cfg)
 
     def make_shadow(self, cfg: Config) -> SignalEvaluator:
@@ -237,8 +272,10 @@ class DualRun:
             wired = _evaluator_from_plugin(self.oos, cfg, "shadow")
             if wired is not None:
                 self.shadow_name = getattr(wired, "name", "oos")
+                self.oos_wired = True
                 return wired
         self.shadow_name = "strategy_shadow"
+        self.oos_wired = False
         return ShadowStrategy(cfg)
 
     def note_shadow(self, signal: Signal) -> None:
@@ -263,6 +300,8 @@ class DualRun:
             "oos": self.oos.safe_dict(),
             "production": self.production_name,
             "shadow": self.shadow_name,
+            "v31_wired": self.v31_wired,
+            "oos_wired": self.oos_wired,
             "oos_execute": False,
             "oos_create_order": False,
             "oos_tuning_applied": self.oos_tuning_applied,

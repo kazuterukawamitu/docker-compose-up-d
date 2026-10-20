@@ -63,6 +63,7 @@ def report_flags(
     root: Path | None = None,
 ) -> dict[str, object]:
     dual = dual or DualRun.discover(root)
+    dual.probe(cfg)
     loop = loop or LoopEvidence()
     timers = timers or ShadowGuardTimers(loop)
     timers.refresh()
@@ -136,10 +137,16 @@ def report_flags(
     v31_status = dual.v31.status
     if v31_status == "Not Detected":
         v31_flag = Flag("v31_module", "NOT_VERIFIED", "v31.py Not Detected; production=Strategy")
-    elif v31_status == "loaded" and dual.production_name != "strategy":
+    elif dual.v31_wired:
         v31_flag = Flag("v31_module", "YES", f"wired production={dual.production_name}")
     elif v31_status == "unsafe":
         v31_flag = Flag("v31_module", "FAIL", f"refused:{dual.v31.reasons}")
+    elif v31_status == "loaded":
+        v31_flag = Flag(
+            "v31_module",
+            "PARTIAL",
+            f"loaded but not wired; production={dual.production_name}",
+        )
     else:
         v31_flag = Flag("v31_module", "PARTIAL", f"status={v31_status} production={dual.production_name}")
 
@@ -149,10 +156,16 @@ def report_flags(
             "NOT_VERIFIED",
             "oos.py Not Detected; shadow evaluator=strategy_shadow (no orders)",
         )
-    elif dual.oos.status == "loaded":
+    elif dual.oos_wired:
         oos_flag = Flag("oos_module", "YES", f"shadow={dual.shadow_name} execute=false")
     elif dual.oos.status == "unsafe":
         oos_flag = Flag("oos_module", "FAIL", f"refused:{dual.oos.reasons}")
+    elif dual.oos.status == "loaded":
+        oos_flag = Flag(
+            "oos_module",
+            "PARTIAL",
+            f"loaded but not wired; shadow={dual.shadow_name}",
+        )
     else:
         oos_flag = Flag("oos_module", "PARTIAL", dual.oos.status)
 

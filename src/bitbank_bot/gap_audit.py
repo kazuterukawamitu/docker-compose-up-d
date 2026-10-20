@@ -113,6 +113,7 @@ def run_gap_audit(root: Path | None = None) -> GapReport:
         load_default_dotenv=False,
     )
     dual = DualRun.discover(base)
+    dual.probe(cfg)
     loop = LoopEvidence()
     timers = ShadowGuardTimers(
         loop,
@@ -153,10 +154,16 @@ def run_gap_audit(root: Path | None = None) -> GapReport:
     v31_st = dual.v31.status
     if v31_st == "Not Detected":
         add("v31_plugin", "NOT_VERIFIED", "v31.py Not Detected; production stays Strategy")
-    elif v31_st == "loaded":
+    elif dual.v31_wired:
         add("v31_plugin", "PASS", f"wired production={dual.production_name}")
     elif v31_st == "unsafe":
         add("v31_plugin", "FAIL", f"refused {dual.v31.reasons}")
+    elif v31_st == "loaded":
+        add(
+            "v31_plugin",
+            "PARTIAL",
+            f"loaded but not wired; production={dual.production_name}",
+        )
     else:
         add("v31_plugin", "PARTIAL", v31_st)
 
@@ -167,10 +174,16 @@ def run_gap_audit(root: Path | None = None) -> GapReport:
             "NOT_VERIFIED",
             "oos.py Not Detected; strategy_shadow evaluator only (no orders)",
         )
-    elif oos_st == "loaded":
+    elif dual.oos_wired:
         add("oos_plugin", "PASS", f"shadow={dual.shadow_name} execute=false")
     elif oos_st == "unsafe":
         add("oos_plugin", "FAIL", f"refused {dual.oos.reasons}")
+    elif oos_st == "loaded":
+        add(
+            "oos_plugin",
+            "PARTIAL",
+            f"loaded but not wired; shadow={dual.shadow_name}",
+        )
     else:
         add("oos_plugin", "PARTIAL", oos_st)
 
