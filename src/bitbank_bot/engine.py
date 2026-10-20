@@ -481,6 +481,7 @@ class Engine:
                 oid = str(first.get("order_id") or "")
                 if oid:
                     slog("RECONCILE", "adopting unmatched open order as pending", order_id=oid)
+                    existing_filled = D(first.get("executed_amount") or 0)
                     state.pending = PendingOrder(
                         order_id=oid,
                         side=str(first.get("side") or ""),
@@ -489,12 +490,11 @@ class Engine:
                         index=0,
                         timestamp_ms=int(first.get("ordered_at") or 0),
                         amount=D(first.get("start_amount") or 0),
-                        filled_amount=D(first.get("executed_amount") or 0),
-                        filled_cost=(
-                            D(first.get("executed_amount") or 0)
-                            * D(first.get("average_price") or 0)
-                        ),
+                        filled_amount=ZERO,
+                        filled_cost=ZERO,
                     )
+                    if existing_filled > ZERO:
+                        slog("RECONCILE", "adopted order has existing fills; will apply immediately", filled=str(existing_filled))
                     self._poll_pending(state)
             return "ok"
         except Exception as exc:
@@ -533,6 +533,7 @@ class Engine:
             )
             return
         incremental = ZERO
+        incremental_fee = None
         if delta > ZERO and result.average_price:
             incremental = incremental_fill_cost(
                 pending.filled_amount,
@@ -540,6 +541,11 @@ class Engine:
                 result.executed_amount,
                 result.average_price,
             )
+            if result.fee_jpy is not None:
+                prev_fee = ZERO
+                if pending.filled_amount > ZERO and result.executed_amount > ZERO:
+                    prev_fee = result.fee_jpy * (pending.filled_amount / result.executed_amount)
+                incremental_fee = result.fee_jpy - prev_fee
         if delta > ZERO:
             apply_reason = "partial_fill" if result.reason == "partial_fill" and not ended else (
                 "fill" if not ended else result.reason
@@ -555,7 +561,7 @@ class Engine:
                 result.average_price,
                 incremental,
                 result.raw,
-                result.fee_jpy,
+                incremental_fee,
             )
             signal = Signal(pending.kind, pending.side, pending.tp_pct, "pending_fill")
             plan = AmountPlan(
