@@ -22,9 +22,9 @@ from bitbank_bot.market_data import (
     fetch_candles,
     synthetic_candles,
 )
-from bitbank_bot.money import D, ZERO
+from bitbank_bot.money import D, ZERO, incremental_fill_cost, realized_pnl_after_fees
 from bitbank_bot.multi_timeframe import evaluate_htf
-from bitbank_bot.orders import OrderExecutor, OrderResult
+from bitbank_bot.orders import OrderExecutor, OrderResult, terminal_reason
 from bitbank_bot.preflight import preflight
 from bitbank_bot.rest_client import BitbankAPIError, RestClient, is_auth_error
 from bitbank_bot.risk import RiskManager
@@ -46,6 +46,7 @@ class PendingOrder:
     timestamp_ms: int
     amount: Decimal
     filled_amount: Decimal = ZERO
+    filled_cost: Decimal = ZERO
 
 
 @dataclass
@@ -79,6 +80,11 @@ def load_state(path: str | Path, cfg: Config) -> BotState:
                 entry_candle_ts=int(pos.get("entry_candle_ts") or 0),
                 actual_execution_jpy=D(pos["actual_execution_jpy"]),
                 kind=str(pos.get("kind") or ""),
+                entry_fee_jpy=(
+                    D(pos["entry_fee_jpy"])
+                    if pos.get("entry_fee_jpy") not in (None, "")
+                    else None
+                ),
             )
         operator_killed = bool(raw.get("operator_killed", False))
         risk = RiskManager(
@@ -100,6 +106,7 @@ def load_state(path: str | Path, cfg: Config) -> BotState:
                 timestamp_ms=int(pending_raw.get("timestamp_ms") or 0),
                 amount=D(pending_raw.get("amount") or 0),
                 filled_amount=D(pending_raw.get("filled_amount") or 0),
+                filled_cost=D(pending_raw.get("filled_cost") or 0),
             )
         if raw.get("paper_jpy") not in (None, ""):
             paper_jpy = D(raw.get("paper_jpy"))
@@ -133,6 +140,7 @@ def save_state(path: str | Path, state: BotState) -> None:
             "timestamp_ms": state.pending.timestamp_ms,
             "amount": str(state.pending.amount),
             "filled_amount": str(state.pending.filled_amount),
+            "filled_cost": str(state.pending.filled_cost),
         }
     if state.position:
         payload["position"] = {
@@ -143,6 +151,11 @@ def save_state(path: str | Path, state: BotState) -> None:
             "entry_candle_ts": state.position.entry_candle_ts,
             "actual_execution_jpy": str(state.position.actual_execution_jpy),
             "kind": state.position.kind,
+            "entry_fee_jpy": (
+                str(state.position.entry_fee_jpy)
+                if state.position.entry_fee_jpy is not None
+                else ""
+            ),
         }
     p.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
@@ -269,6 +282,12 @@ class Engine:
             if not execute or heartbeat:
                 if heartbeat:
                     slog("STRATEGY", "candle already processed", candle_ts=snap.timestamp_ms)
+                    if execute and state.position and not state.pending:
+                        exit_sig = self._maybe_intrabar_exit(snap, state)
+                        if persist:
+                            save_state(self.cfg.state_path, state)
+                        if exit_sig is not None:
+                            signal = exit_sig
                 continue
             if signal.side in {"buy", "sell"}:
                 if not is_last:
@@ -384,6 +403,109 @@ class Engine:
         )
         self._apply_fill(signal, plan, result, index, ts, state, jpy, btc)
 
+    def _fresh_ticker_price(self) -> Decimal | None:
+        if self.ws is not None and not self.ws.is_stale() and self.ws.last_price():
+            return self.ws.last_price()
+        rest = self.client
+        if rest is not None and hasattr(rest, "get_ticker"):
+            try:
+                raw = rest.get_ticker(self.cfg.pair)
+                last = raw.get("last") if isinstance(raw, dict) else None
+                if last not in (None, ""):
+                    price = D(last)
+                    self.last_public_last = str(price)
+                    return price
+            except Exception as exc:
+                slog("ERROR", "ticker fetch failed for intrabar exit", error=type(exc).__name__)
+        if self.last_public_last not in {"-", ""}:
+            try:
+                return D(self.last_public_last)
+            except Exception:
+                return None
+        return None
+
+    def _maybe_intrabar_exit(self, snap: Any, state: BotState) -> Signal | None:
+        pos = state.position
+        if pos is None or state.pending:
+            return None
+        if self.ws is not None and self.cfg.enable_websocket and self.ws.is_stale():
+            slog("WEBSOCKET", "stale data; skipping intrabar exit")
+            return None
+        ticker = self._fresh_ticker_price()
+        if ticker is None:
+            slog("STRATEGY", "intrabar exit skipped; no fresh ticker")
+            return None
+        same_entry = snap.index == pos.entry_candle_index
+        signal = Strategy(self.cfg).protective_exit(pos, ticker, same_entry=same_entry)
+        if signal.side != "sell":
+            return None
+        slog(
+            "STRATEGY",
+            "intrabar protective exit",
+            kind=signal.kind,
+            reason=signal.reason,
+            ticker=str(ticker),
+        )
+        self._execute(signal, ticker, snap.index, snap.timestamp_ms, state)
+        return signal
+
+    def reconcile_startup(self, state: BotState) -> str:
+        if self.cfg.exchange_stop_orders:
+            slog(
+                "RECONCILE",
+                "exchange resting stop not auto-armed",
+                reason="active_orders_would_block_tp",
+            )
+        rest = self.client
+        if rest is None or not self.cfg.has_keys:
+            slog("RECONCILE", "NOT_VERIFIED", reason="no_private_client")
+            return "NOT_VERIFIED"
+        if not hasattr(rest, "get_active_orders"):
+            slog("RECONCILE", "NOT_VERIFIED", reason="no_active_orders_path")
+            return "NOT_VERIFIED"
+        try:
+            active = rest.get_active_orders(self.cfg.pair)
+            jpy = rest.free_amount("jpy") if hasattr(rest, "free_amount") else None
+            btc = rest.free_amount("btc") if hasattr(rest, "free_amount") else None
+            slog(
+                "RECONCILE",
+                "exchange snapshot",
+                active=len(active or []),
+                jpy=str(jpy) if jpy is not None else "",
+                btc=str(btc) if btc is not None else "",
+            )
+            if state.pending:
+                self._poll_pending(state)
+            elif active:
+                first = active[0]
+                oid = str(first.get("order_id") or "")
+                if oid:
+                    slog("RECONCILE", "adopting unmatched open order as pending", order_id=oid)
+                    state.pending = PendingOrder(
+                        order_id=oid,
+                        side=str(first.get("side") or ""),
+                        kind=str(first.get("type") or ""),
+                        tp_pct=None,
+                        index=0,
+                        timestamp_ms=int(first.get("ordered_at") or 0),
+                        amount=D(first.get("start_amount") or 0),
+                        filled_amount=D(first.get("executed_amount") or 0),
+                        filled_cost=(
+                            D(first.get("executed_amount") or 0)
+                            * D(first.get("average_price") or 0)
+                        ),
+                    )
+                    self._poll_pending(state)
+            return "ok"
+        except Exception as exc:
+            slog(
+                "RECONCILE",
+                "NOT_VERIFIED",
+                reason="private_get_failed",
+                error=type(exc).__name__,
+            )
+            return "NOT_VERIFIED"
+
     def _poll_pending(self, state: BotState) -> None:
         pending = state.pending
         if pending is None:
@@ -398,54 +520,82 @@ class Engine:
                 order_id=pending.order_id,
             )
             return
-        if result.executed_amount <= pending.filled_amount:
+        ended = terminal_reason(result.status) or (
+            result.reason if result.reason in {"canceled", "rejected", "expired"} else None
+        )
+        delta = result.executed_amount - pending.filled_amount
+        if delta <= ZERO and not ended:
             slog(
                 "ORDER_STATUS",
                 "pending still unfilled; skip new orders",
                 order_id=pending.order_id,
+                status=result.status,
             )
             return
-        delta = result.executed_amount - pending.filled_amount
-        avg = result.average_price
-        delta_result = OrderResult(
-            True,
-            result.reason,
-            False,
-            False,
-            pending.order_id,
-            result.status,
-            delta,
-            avg,
-            delta * avg if avg else ZERO,
-            result.raw,
-        )
-        signal = Signal(pending.kind, pending.side, pending.tp_pct, "pending_fill")
-        plan = AmountPlan(
-            side=pending.side,
-            amount=pending.amount,
-            price=result.average_price,
-            available_jpy=ZERO,
-            available_btc=ZERO,
-            target_jpy=ZERO,
-            planned_order_jpy=ZERO,
-            actual_execution_jpy=None,
-            actual_balance_jpy=ZERO,
-            actual_balance_btc=ZERO,
-            ok=True,
-            reason="pending_poll",
-        )
-        try:
-            jpy, btc = self._balances(rest, state)
-        except Exception:
-            jpy, btc = ZERO, ZERO
-        pending.filled_amount = result.executed_amount
-        if result.reason != "partial_fill":
+        incremental = ZERO
+        if delta > ZERO and result.average_price:
+            incremental = incremental_fill_cost(
+                pending.filled_amount,
+                pending.filled_cost,
+                result.executed_amount,
+                result.average_price,
+            )
+        if delta > ZERO:
+            apply_reason = "partial_fill" if result.reason == "partial_fill" and not ended else (
+                "fill" if not ended else result.reason
+            )
+            delta_result = OrderResult(
+                True,
+                apply_reason,
+                False,
+                False,
+                pending.order_id,
+                result.status,
+                delta,
+                result.average_price,
+                incremental,
+                result.raw,
+                result.fee_jpy,
+            )
+            signal = Signal(pending.kind, pending.side, pending.tp_pct, "pending_fill")
+            plan = AmountPlan(
+                side=pending.side,
+                amount=pending.amount,
+                price=result.average_price,
+                available_jpy=ZERO,
+                available_btc=ZERO,
+                target_jpy=ZERO,
+                planned_order_jpy=ZERO,
+                actual_execution_jpy=None,
+                actual_balance_jpy=ZERO,
+                actual_balance_btc=ZERO,
+                ok=True,
+                reason="pending_poll",
+            )
+            try:
+                jpy, btc = self._balances(rest, state)
+            except Exception:
+                jpy, btc = ZERO, ZERO
+            still_open = result.reason == "partial_fill" and not ended
+            if not still_open:
+                state.pending = None
+            self._apply_fill(
+                signal, plan, delta_result, pending.index, pending.timestamp_ms, state, jpy, btc
+            )
+            if still_open:
+                pending.filled_amount = result.executed_amount
+                pending.filled_cost += incremental
+                state.pending = pending
+            return
+        if ended:
+            slog(
+                "ORDER_STATUS",
+                "pending cleared; order ended without new fill",
+                order_id=pending.order_id,
+                status=result.status,
+                reason=ended,
+            )
             state.pending = None
-        self._apply_fill(
-            signal, plan, delta_result, pending.index, pending.timestamp_ms, state, jpy, btc
-        )
-        if result.reason == "partial_fill":
-            state.pending = pending
 
     def _set_watchdog(
         self,
@@ -493,6 +643,7 @@ class Engine:
                 timestamp_ms=ts,
                 amount=plan.amount,
                 filled_amount=ZERO,
+                filled_cost=ZERO,
             )
             slog(
                 "ORDER_STATUS",
@@ -528,12 +679,16 @@ class Engine:
             elif signal.side == "sell":
                 state.paper_btc = max(ZERO, state.paper_btc - result.executed_amount)
                 state.paper_jpy += actual_jpy
+        fill_fee = result.fee_jpy
         if signal.side == "buy":
+            slice_fee = fill_fee if fill_fee is not None else actual_jpy * self.cfg.fee_buffer
             tp = signal.tp_pct if signal.tp_pct is not None else self.cfg.buy1_tp
             if state.position:
                 total_amt = state.position.amount + result.executed_amount
                 total_jpy = state.position.actual_execution_jpy + actual_jpy
                 avg = (total_jpy / total_amt) if total_amt > ZERO else result.average_price
+                prev_fee = state.position.entry_fee_jpy
+                total_fee = (prev_fee + slice_fee) if prev_fee is not None else slice_fee
                 state.position = Position(
                     amount=total_amt,
                     average_price=avg,
@@ -542,6 +697,7 @@ class Engine:
                     entry_candle_ts=state.position.entry_candle_ts,
                     actual_execution_jpy=total_jpy,
                     kind=state.position.kind,
+                    entry_fee_jpy=total_fee,
                 )
             else:
                 state.position = Position(
@@ -552,19 +708,38 @@ class Engine:
                     entry_candle_ts=ts,
                     actual_execution_jpy=actual_jpy,
                     kind=signal.kind,
+                    entry_fee_jpy=slice_fee,
                 )
         elif signal.side == "sell" and state.position:
             pos_amt = state.position.amount
-            if pos_amt <= ZERO or result.executed_amount >= pos_amt:
-                state.risk.record_realized_pnl(actual_jpy - state.position.actual_execution_jpy)
+            full_exit = pos_amt <= ZERO or result.executed_amount >= pos_amt
+            sold = pos_amt if full_exit else result.executed_amount
+            cost = (
+                state.position.actual_execution_jpy
+                if full_exit
+                else state.position.actual_execution_jpy * (sold / pos_amt)
+            )
+            buy_fee = None
+            if state.position.entry_fee_jpy is not None and pos_amt > ZERO:
+                buy_fee = state.position.entry_fee_jpy * (sold / pos_amt)
+            pnl = realized_pnl_after_fees(
+                actual_jpy,
+                cost,
+                self.cfg.fee_buffer,
+                buy_fee=buy_fee,
+                sell_fee=fill_fee,
+            )
+            state.risk.record_realized_pnl(pnl)
+            if full_exit:
                 state.position = None
             else:
-                cost = state.position.actual_execution_jpy * (result.executed_amount / pos_amt)
-                state.risk.record_realized_pnl(actual_jpy - cost)
-                state.position.amount = pos_amt - result.executed_amount
+                state.position.amount = pos_amt - sold
                 state.position.actual_execution_jpy -= cost
+                if state.position.entry_fee_jpy is not None and buy_fee is not None:
+                    state.position.entry_fee_jpy -= buy_fee
         if result.reason == "partial_fill" and result.order_id:
             already = state.pending.filled_amount if state.pending else ZERO
+            already_cost = state.pending.filled_cost if state.pending else ZERO
             state.pending = PendingOrder(
                 order_id=result.order_id,
                 side=signal.side or "",
@@ -574,6 +749,7 @@ class Engine:
                 timestamp_ms=ts,
                 amount=plan.amount,
                 filled_amount=already + result.executed_amount,
+                filled_cost=already_cost + actual_jpy,
             )
         elif result.reason != "partial_fill":
             state.pending = None
@@ -601,6 +777,8 @@ class Engine:
         else:
             candles = self.cache.merge(candles)
             state = load_state(self.cfg.state_path, self.cfg)
+            self.reconcile_startup(state)
+            save_state(self.cfg.state_path, state)
         signal = self.process_candles(
             candles, state, execute=True, persist=not synthetic
         )
@@ -670,6 +848,9 @@ class Engine:
         if self.cfg.enable_websocket:
             self._maybe_ws()
         state = load_state(self.cfg.state_path, self.cfg)
+        if not synthetic:
+            self.reconcile_startup(state)
+            save_state(self.cfg.state_path, state)
         if synthetic:
             state.last_candle_ts = 0
         last_ok = time.monotonic()

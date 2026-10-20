@@ -21,6 +21,12 @@ from bitbank_bot.money import D
 JSON_SEPARATORS = (",", ":")
 AUTH_ERROR_CODES = frozenset({20001, 20002, 20003, 20011})
 
+# Official Bitbank spot types from rest-api.md. Do not invent names
+# such as STOP-MARKET. ``stop`` is the documented triggered-market type.
+BITBANK_SPOT_ORDER_TYPES = frozenset(
+    {"limit", "market", "stop", "stop_limit", "take_profit", "stop_loss", "losscut"}
+)
+
 
 class BitbankAPIError(RuntimeError):
     def __init__(
@@ -305,11 +311,14 @@ class RestClient:
         order_type: str,
         price: str | None = None,
         post_only: bool | None = None,
+        trigger_price: str | None = None,
         *,
         live_confirmed: bool = False,
     ) -> dict[str, Any]:
         if not live_confirmed:
             raise BitbankAPIError("refusing create_order without live_confirmed")
+        if order_type not in BITBANK_SPOT_ORDER_TYPES:
+            raise BitbankAPIError(f"unsupported Bitbank order type {order_type}")
         body: dict[str, Any] = {
             "pair": pair,
             "amount": amount,
@@ -320,6 +329,8 @@ class RestClient:
             body["price"] = price
         if post_only is not None:
             body["post_only"] = post_only
+        if trigger_price is not None:
+            body["trigger_price"] = trigger_price
         return self.private_post("/user/spot/order", body, update=True)
 
     def get_active_orders(self, pair: str) -> list[dict[str, Any]]:

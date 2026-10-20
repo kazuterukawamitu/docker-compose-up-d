@@ -91,3 +91,34 @@ def meets_min_amount(amount: Decimal, min_amount: Decimal) -> bool:
 
 def pct_offset(price: Decimal, pct: Decimal) -> Decimal:
     return D(price) * (ONE + D(pct))
+
+
+def incremental_fill_cost(
+    prev_qty: Decimal,
+    prev_cost: Decimal,
+    new_qty: Decimal,
+    new_avg: Decimal,
+) -> Decimal:
+    """JPY for the new slice: cumulative_cost - previous_cost.
+
+    Bitbank ``average_price`` is cumulative. ``new_avg * (new_qty - prev_qty)``
+    understates a rising book.
+    """
+    total = D(new_qty) * D(new_avg)
+    return total - D(prev_cost)
+
+
+def realized_pnl_after_fees(
+    proceeds: Decimal,
+    cost: Decimal,
+    fee_buffer: Decimal,
+    buy_fee: Decimal | None = None,
+    sell_fee: Decimal | None = None,
+) -> Decimal:
+    """Realized JPY after fees on both legs.
+
+    Uses the actual fee when the caller has one; otherwise ``FEE_BUFFER``.
+    """
+    buy = D(buy_fee) if buy_fee is not None else D(cost) * D(fee_buffer)
+    sell = D(sell_fee) if sell_fee is not None else D(proceeds) * D(fee_buffer)
+    return D(proceeds) - D(cost) - buy - sell
