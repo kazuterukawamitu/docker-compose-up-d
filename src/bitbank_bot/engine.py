@@ -753,6 +753,14 @@ class Engine:
             )
         slice_fee = incremental_fee_jpy(pending.filled_fee, result.fee_jpy)
         if delta > ZERO:
+            # _apply_fill falls back to FEE_BUFFER when the exchange fee is
+            # missing. Persist that same booked amount so a later actual fee
+            # is incremental, not added on top of the estimate.
+            booked_fee = (
+                slice_fee
+                if slice_fee is not None
+                else incremental * self.cfg.fee_buffer
+            )
             apply_reason = "partial_fill" if result.reason == "partial_fill" and not ended else (
                 "fill" if not ended else result.reason
             )
@@ -767,7 +775,7 @@ class Engine:
                 result.average_price,
                 incremental,
                 result.raw,
-                slice_fee,
+                booked_fee,
             )
             signal = Signal(pending.kind, pending.side, pending.tp_pct, "pending_fill")
             plan = AmountPlan(
@@ -797,10 +805,7 @@ class Engine:
             if still_open:
                 pending.filled_amount = result.executed_amount
                 pending.filled_cost += incremental
-                if slice_fee is not None:
-                    pending.filled_fee += slice_fee
-                else:
-                    pending.filled_fee += incremental * self.cfg.fee_buffer
+                pending.filled_fee += booked_fee
                 state.pending = pending
             return
         if ended:

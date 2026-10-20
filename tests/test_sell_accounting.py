@@ -701,6 +701,65 @@ def test_partial_poll_fees_are_incremental(tmp_path) -> None:
     assert state.pending.filled_fee == Decimal("15")
 
 
+def test_missing_poll_fee_estimate_is_not_double_counted(tmp_path) -> None:
+    """Estimate on a fee-less poll, then incremental actual — not estimate+full."""
+    c = cfg(
+        state_path=str(tmp_path / "state.json"),
+        dry_run=False,
+        live_trading=True,
+        api_key="k",
+        api_secret="s",
+        enable_websocket=False,
+        fee_buffer=Decimal("0.0015"),
+    )
+    rest = MagicMock()
+    rest.free_amount.side_effect = lambda asset: (
+        Decimal("90000") if asset == "jpy" else Decimal("0.001")
+    )
+    rest.create_order.side_effect = AssertionError("live order")
+    rest.get_order.return_value = {
+        "order_id": "88",
+        "status": "PARTIALLY_FILLED",
+        "executed_amount": "0.0004",
+        "average_price": "10000000",
+        "start_amount": "0.002",
+    }
+    engine = Engine(c, client=rest)
+    state = BotState(None, RiskManager(c), 0, time.monotonic())
+    state.pending = PendingOrder(
+        order_id="88",
+        side="buy",
+        kind="BUY1",
+        tp_pct=Decimal("0.03"),
+        index=1,
+        timestamp_ms=1,
+        amount=Decimal("0.002"),
+        filled_amount=Decimal("0"),
+        filled_cost=Decimal("0"),
+        filled_fee=Decimal("0"),
+    )
+    engine._poll_pending(state)
+    estimate = Decimal("4000") * Decimal("0.0015")
+    assert state.position is not None
+    assert state.position.entry_fee_jpy == estimate
+    assert state.pending is not None
+    assert state.pending.filled_fee == estimate
+    rest.get_order.return_value = {
+        "order_id": "88",
+        "status": "PARTIALLY_FILLED",
+        "executed_amount": "0.0008",
+        "average_price": "10000000",
+        "start_amount": "0.002",
+        "fee_amount_quote": "12",
+    }
+    engine._poll_pending(state)
+    assert state.position is not None
+    assert state.position.entry_fee_jpy == Decimal("12")
+    assert state.pending is not None
+    assert state.pending.filled_fee == Decimal("12")
+    rest.create_order.assert_not_called()
+
+
 def _sell_plan():
     from bitbank_bot.amounts import AmountPlan
 
