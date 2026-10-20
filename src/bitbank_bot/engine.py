@@ -18,7 +18,6 @@ from bitbank_bot.buy_funnel import (
     buy_setup_clauses,
     log_buy_funnel,
     measure_buy_funnel,
-    paper_balances,
 )
 from bitbank_bot.config import Config
 from bitbank_bot.indicators import (
@@ -433,7 +432,15 @@ class Engine:
             htf_down=verdict.reason == "htf_downtrend",
             returns=returns,
         )
-        jpy, btc = paper_balances(self.cfg, state.paper_jpy, state.paper_btc, pos)
+        size_error: str | None = None
+        try:
+            jpy, btc = self._balances(self._rest(), state)
+        except BitbankAPIError as exc:
+            size_error = "auth_failure" if is_auth_error(exc) else "balance_fetch_failed"
+            jpy, btc = ZERO, ZERO
+        except Exception:
+            size_error = "balance_fetch_failed"
+            jpy, btc = ZERO, ZERO
         ws_stale = bool(
             self.ws is not None and self.cfg.enable_websocket and self.ws.is_stale()
         )
@@ -453,6 +460,7 @@ class Engine:
             price=snap.close,
             ky_veto=hazard.veto,
             ky_reason="ky_veto" if hazard.veto else "ok",
+            size_error=size_error,
         )
         log_buy_funnel(report)
         slog(

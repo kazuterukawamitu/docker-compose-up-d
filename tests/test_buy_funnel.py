@@ -146,3 +146,81 @@ def test_funnel_in_position_fails_flat_gate() -> None:
     assert report.gate("executable").passed is False
     assert report.gate("ky").passed is False
     assert report.first_fail == "in_position"
+
+
+def test_buy4_same_bar_dip_and_rise_is_not_complete() -> None:
+    c = cfg()
+    strat = Strategy(c)
+    snap = _snap(
+        close=D("94"),
+        prev_close=D("93"),
+        ma=D("100"),
+        prev_ma=D("100.2"),
+        ma_trend=Trend.DOWN,
+        prev_ma_trend=Trend.DOWN,
+    )
+    strat.observe(snap)
+    assert strat._buy4 is False
+    assert strat.buy4.phase == "dipped"
+    clauses = buy_setup_clauses(snap, strat)
+    fired, name = setup_fired(clauses)
+    assert fired is False
+    assert name == "no_buy_setup"
+    assert clauses["BUY4"]["ma_downtrend"] is True
+    assert clauses["BUY4"]["held_dip"] is True
+    assert clauses["BUY4"]["bounce_after_dip"] is False
+
+
+def test_buy4_funnel_fires_only_on_later_bar_after_dip() -> None:
+    c = cfg()
+    strat = Strategy(c)
+    dip = _snap(
+        close=D("94"),
+        prev_close=D("100"),
+        ma=D("100"),
+        prev_ma=D("100.2"),
+        ma_trend=Trend.DOWN,
+        prev_ma_trend=Trend.DOWN,
+    )
+    strat.observe(dip)
+    assert strat._buy4 is False
+    bounce = _snap(
+        index=11,
+        timestamp_ms=11,
+        close=D("96"),
+        prev_close=D("94"),
+        ma=D("100"),
+        prev_ma=D("100.1"),
+        ma_trend=Trend.DOWN,
+        prev_ma_trend=Trend.DOWN,
+    )
+    strat.observe(bounce)
+    assert strat._buy4 is True
+    fired, name = setup_fired(buy_setup_clauses(bounce, strat))
+    assert fired is True
+    assert name == "BUY4"
+
+
+def test_funnel_size_error_matches_execute_path_failure() -> None:
+    c = cfg()
+    report = measure_buy_funnel(
+        snap=_snap(),
+        strategy=Strategy(c),
+        cfg=c,
+        risk=RiskManager(c),
+        position=None,
+        pending=False,
+        htf_allow=True,
+        htf_reason="htf_ok",
+        ws_stale=False,
+        executable=True,
+        available_jpy=Decimal("100000"),
+        available_btc=Decimal("0"),
+        price=Decimal("10000000"),
+        ky_veto=False,
+        ky_reason="ok",
+        size_error="balance_fetch_failed",
+    )
+    assert report.gate("size") is not None
+    assert report.gate("size").passed is False
+    assert report.gate("size").reason == "balance_fetch_failed"
