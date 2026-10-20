@@ -224,10 +224,10 @@ class OrderExecutor:
                 None,
                 None,
             )
-        # Emergency flatten uses documented ``market``. Do not send invented
-        # STOP-MARKET. Resting ``stop`` + trigger_price is not auto-armed.
-        # Intrabar TP also uses market to avoid blocking protective stops.
-        order_type = "market" if signal.kind in ("STOP", "TP") else self.cfg.order_type
+        # Protective exits use documented ``market`` so a TP cannot rest as
+        # an unfilled limit and block later STOP. Do not send STOP-MARKET.
+        # Resting ``stop`` + trigger_price is not auto-armed.
+        order_type = "market" if signal.kind in {"STOP", "TP"} else self.cfg.order_type
         price_str: str | None = None
         if order_type == "limit":
             q = quantize_price(plan.price, self.cfg.price_tick)

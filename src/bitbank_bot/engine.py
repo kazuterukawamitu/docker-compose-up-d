@@ -22,7 +22,13 @@ from bitbank_bot.market_data import (
     fetch_candles,
     synthetic_candles,
 )
-from bitbank_bot.money import D, ZERO, incremental_fill_cost, realized_pnl_after_fees
+from bitbank_bot.money import (
+    D,
+    ZERO,
+    incremental_fee_jpy,
+    incremental_fill_cost,
+    realized_pnl_after_fees,
+)
 from bitbank_bot.multi_timeframe import evaluate_htf
 from bitbank_bot.orders import OrderExecutor, OrderResult, terminal_reason
 from bitbank_bot.preflight import preflight
@@ -47,6 +53,7 @@ class PendingOrder:
     amount: Decimal
     filled_amount: Decimal = ZERO
     filled_cost: Decimal = ZERO
+    filled_fee: Decimal = ZERO
 
 
 @dataclass
@@ -107,6 +114,7 @@ def load_state(path: str | Path, cfg: Config) -> BotState:
                 amount=D(pending_raw.get("amount") or 0),
                 filled_amount=D(pending_raw.get("filled_amount") or 0),
                 filled_cost=D(pending_raw.get("filled_cost") or 0),
+                filled_fee=D(pending_raw.get("filled_fee") or 0),
             )
         if raw.get("paper_jpy") not in (None, ""):
             paper_jpy = D(raw.get("paper_jpy"))
@@ -141,6 +149,7 @@ def save_state(path: str | Path, state: BotState) -> None:
             "amount": str(state.pending.amount),
             "filled_amount": str(state.pending.filled_amount),
             "filled_cost": str(state.pending.filled_cost),
+            "filled_fee": str(state.pending.filled_fee),
         }
     if state.position:
         payload["position"] = {
@@ -482,6 +491,8 @@ class Engine:
                 if oid:
                     slog("RECONCILE", "adopting unmatched open order as pending", order_id=oid)
                     existing_filled = D(first.get("executed_amount") or 0)
+                    # Booked qty stays 0 so the first poll's delta includes
+                    # fills that already exist on the exchange.
                     state.pending = PendingOrder(
                         order_id=oid,
                         side=str(first.get("side") or ""),
@@ -492,9 +503,14 @@ class Engine:
                         amount=D(first.get("start_amount") or 0),
                         filled_amount=ZERO,
                         filled_cost=ZERO,
+                        filled_fee=ZERO,
                     )
                     if existing_filled > ZERO:
-                        slog("RECONCILE", "adopted order has existing fills; will apply immediately", filled=str(existing_filled))
+                        slog(
+                            "RECONCILE",
+                            "adopted order has existing fills; will apply immediately",
+                            filled=str(existing_filled),
+                        )
                     self._poll_pending(state)
             return "ok"
         except Exception as exc:
@@ -533,7 +549,6 @@ class Engine:
             )
             return
         incremental = ZERO
-        incremental_fee = None
         if delta > ZERO and result.average_price:
             incremental = incremental_fill_cost(
                 pending.filled_amount,
@@ -541,11 +556,7 @@ class Engine:
                 result.executed_amount,
                 result.average_price,
             )
-            if result.fee_jpy is not None:
-                prev_fee = ZERO
-                if pending.filled_amount > ZERO and result.executed_amount > ZERO:
-                    prev_fee = result.fee_jpy * (pending.filled_amount / result.executed_amount)
-                incremental_fee = result.fee_jpy - prev_fee
+        slice_fee = incremental_fee_jpy(pending.filled_fee, result.fee_jpy)
         if delta > ZERO:
             apply_reason = "partial_fill" if result.reason == "partial_fill" and not ended else (
                 "fill" if not ended else result.reason
@@ -561,7 +572,7 @@ class Engine:
                 result.average_price,
                 incremental,
                 result.raw,
-                incremental_fee,
+                slice_fee,
             )
             signal = Signal(pending.kind, pending.side, pending.tp_pct, "pending_fill")
             plan = AmountPlan(
@@ -591,6 +602,8 @@ class Engine:
             if still_open:
                 pending.filled_amount = result.executed_amount
                 pending.filled_cost += incremental
+                if slice_fee is not None:
+                    pending.filled_fee += slice_fee
                 state.pending = pending
             return
         if ended:
@@ -650,6 +663,7 @@ class Engine:
                 amount=plan.amount,
                 filled_amount=ZERO,
                 filled_cost=ZERO,
+                filled_fee=ZERO,
             )
             slog(
                 "ORDER_STATUS",
@@ -685,9 +699,10 @@ class Engine:
             elif signal.side == "sell":
                 state.paper_btc = max(ZERO, state.paper_btc - result.executed_amount)
                 state.paper_jpy += actual_jpy
-        fill_fee = result.fee_jpy
+        slice_fee = (
+            result.fee_jpy if result.fee_jpy is not None else actual_jpy * self.cfg.fee_buffer
+        )
         if signal.side == "buy":
-            slice_fee = fill_fee if fill_fee is not None else actual_jpy * self.cfg.fee_buffer
             tp = signal.tp_pct if signal.tp_pct is not None else self.cfg.buy1_tp
             if state.position:
                 total_amt = state.position.amount + result.executed_amount
@@ -733,7 +748,7 @@ class Engine:
                 cost,
                 self.cfg.fee_buffer,
                 buy_fee=buy_fee,
-                sell_fee=fill_fee,
+                sell_fee=result.fee_jpy,
             )
             state.risk.record_realized_pnl(pnl)
             if full_exit:
@@ -746,6 +761,7 @@ class Engine:
         if result.reason == "partial_fill" and result.order_id:
             already = state.pending.filled_amount if state.pending else ZERO
             already_cost = state.pending.filled_cost if state.pending else ZERO
+            already_fee = state.pending.filled_fee if state.pending else ZERO
             state.pending = PendingOrder(
                 order_id=result.order_id,
                 side=signal.side or "",
@@ -756,6 +772,7 @@ class Engine:
                 amount=plan.amount,
                 filled_amount=already + result.executed_amount,
                 filled_cost=already_cost + actual_jpy,
+                filled_fee=already_fee + slice_fee,
             )
         elif result.reason != "partial_fill":
             state.pending = None
