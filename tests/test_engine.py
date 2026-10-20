@@ -96,6 +96,10 @@ def test_engine_synthetic_once_dry_run(tmp_path) -> None:
     assert rc == 0
     assert fake.create_order_calls == 0
     assert engine.strategy_evaluations >= 1
+    assert engine.oos_evaluations >= 1
+    assert engine.timer_active_cycles == 0
+    assert engine.timers.shadow.active is False
+    assert engine.timers.guard.active is False
 
 
 def test_engine_loop_continues_after_hold(tmp_path) -> None:
@@ -114,8 +118,12 @@ def test_engine_loop_continues_after_hold(tmp_path) -> None:
     assert rc == 0
     assert engine.cycles == 3
     assert engine.strategy_evaluations >= 2
+    assert engine.oos_evaluations >= 2
+    assert engine.timer_active_cycles == 3
     assert engine.last_watchdog == "NORMAL WAIT"
     assert fake.create_order_calls == 0
+    assert engine.loop_evidence.running is False
+    assert engine.timers.shadow.active is False
 
 
 def test_dry_run_loop_without_api_keys_when_public_fails(tmp_path) -> None:
