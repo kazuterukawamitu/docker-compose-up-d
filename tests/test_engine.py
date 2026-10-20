@@ -489,6 +489,9 @@ def test_funnel_size_gate_uses_live_free_amount(tmp_path) -> None:
         live_trading=False,
         api_key="k",
         api_secret="s",
+        ma_period=3,
+        short_ma_period=3,
+        long_ma_period=5,
     )
     rest = MagicMock()
     rest.free_amount.side_effect = lambda asset: (
