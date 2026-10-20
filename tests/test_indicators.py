@@ -40,18 +40,18 @@ def test_shannon_entropy_high_when_spread_across_bins() -> None:
 
 
 def test_high_entropy_is_not_a_buy_signal() -> None:
-    closes = []
-    price = D("10000")
-    for i in range(40):
-        step = D("80") if i % 2 == 0 else D("-75")
-        price = price + step
-        closes.append(price)
-    stamps = list(range(len(closes)))
-    c = cfg(ma_period=3, short_ma_period=3, long_ma_period=5)
-    snaps = build_snapshots(closes, stamps, c)
-    strat = Strategy(c)
-    entropy = shannon_entropy(close_returns(closes), bins=8)
+    import inspect
+
+    returns = [D(str((i - 7) / 100)) for i in range(16)]
+    entropy = shannon_entropy(returns, bins=8)
     assert entropy > D("0.70")
+    source = inspect.getsource(Strategy._buy_signal)
+    assert "entropy" not in source
+    assert "shannon" not in source
+    closes = [D("100")] * 20
+    c = cfg(ma_period=3, short_ma_period=3, long_ma_period=5)
+    snaps = build_snapshots(closes, list(range(len(closes))), c)
+    strat = Strategy(c)
     last = None
     for snap in snaps:
         last = strat.evaluate(snap, None)
