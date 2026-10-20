@@ -190,6 +190,41 @@ def test_poll_partial_stays_open() -> None:
     assert result.status == "PARTIALLY_FILLED"
 
 
+def test_poll_canceled_unfilled() -> None:
+    client = MagicMock()
+    client.get_order.return_value = {
+        "order_id": "42",
+        "status": "CANCELED_UNFILLED",
+        "executed_amount": "0",
+        "average_price": "0",
+        "start_amount": "0.001",
+    }
+    c = cfg(dry_run=False, live_trading=True, api_key="k", api_secret="s")
+    result = OrderExecutor(c, client).poll("42", Decimal("0.001"))
+    assert result.ok
+    assert result.reason == "canceled"
+    assert result.executed_amount == Decimal("0")
+
+
+def test_limit_sell_price_rounds_up() -> None:
+    client = MagicMock()
+    client.get_active_orders.return_value = []
+    client.create_order.return_value = {
+        "order_id": "1",
+        "status": "UNFILLED",
+        "executed_amount": "0",
+        "average_price": "0",
+        "start_amount": "0.001",
+    }
+    client.get_order.return_value = client.create_order.return_value
+    c = cfg(dry_run=False, live_trading=True, api_key="k", api_secret="s")
+    plan = _plan()
+    plan.side = "sell"
+    plan.price = Decimal("10000000.2")
+    OrderExecutor(c, client).place(Signal("SELL1", "sell", None, "test"), plan)
+    assert client.create_order.call_args.kwargs["price"] == "10000001"
+
+
 def test_poll_failed() -> None:
     client = MagicMock()
     client.get_order.side_effect = RuntimeError("offline")

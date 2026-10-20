@@ -8,7 +8,7 @@ import signal
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
@@ -68,43 +68,62 @@ def load_state(path: str | Path, cfg: Config) -> BotState:
     paper_btc = cfg.dry_run_free_btc
     p = Path(path)
     if p.exists():
-        raw = json.loads(p.read_text(encoding="utf-8"))
-        pos = raw.get("position")
-        if pos:
-            position = Position(
-                amount=D(pos["amount"]),
-                average_price=D(pos["average_price"]),
-                tp_pct=D(pos["tp_pct"]),
-                entry_candle_index=int(pos["entry_candle_index"]),
-                entry_candle_ts=int(pos.get("entry_candle_ts") or 0),
-                actual_execution_jpy=D(pos["actual_execution_jpy"]),
-                kind=str(pos.get("kind") or ""),
+        try:
+            raw = json.loads(p.read_text(encoding="utf-8"))
+            if not isinstance(raw, dict):
+                raise ValueError("state is not an object")
+            pos = raw.get("position")
+            if pos:
+                position = Position(
+                    amount=D(pos["amount"]),
+                    average_price=D(pos["average_price"]),
+                    tp_pct=D(pos["tp_pct"]),
+                    entry_candle_index=int(pos["entry_candle_index"]),
+                    entry_candle_ts=int(pos.get("entry_candle_ts") or 0),
+                    actual_execution_jpy=D(pos["actual_execution_jpy"]),
+                    kind=str(pos.get("kind") or ""),
+                )
+            operator_killed = bool(raw.get("operator_killed", False))
+            risk = RiskManager(
+                cfg,
+                daily_pnl=D(raw.get("daily_pnl") or 0),
+                daily_pnl_date=raw.get("daily_pnl_date"),
+                killed=operator_killed or cfg.kill_switch,
             )
-        operator_killed = bool(raw.get("operator_killed", False))
-        risk = RiskManager(
-            cfg,
-            daily_pnl=D(raw.get("daily_pnl") or 0),
-            daily_pnl_date=raw.get("daily_pnl_date"),
-            killed=operator_killed or cfg.kill_switch,
-        )
-        last_ts = int(raw.get("last_candle_ts") or 0)
-        pending_raw = raw.get("pending")
-        if pending_raw and pending_raw.get("order_id"):
-            tp_raw = pending_raw.get("tp_pct")
-            pending = PendingOrder(
-                order_id=str(pending_raw["order_id"]),
-                side=str(pending_raw.get("side") or ""),
-                kind=str(pending_raw.get("kind") or ""),
-                tp_pct=D(tp_raw) if tp_raw not in (None, "") else None,
-                index=int(pending_raw.get("index") or 0),
-                timestamp_ms=int(pending_raw.get("timestamp_ms") or 0),
-                amount=D(pending_raw.get("amount") or 0),
-                filled_amount=D(pending_raw.get("filled_amount") or 0),
-            )
-        if raw.get("paper_jpy") not in (None, ""):
-            paper_jpy = D(raw.get("paper_jpy"))
-        if raw.get("paper_btc") not in (None, ""):
-            paper_btc = D(raw.get("paper_btc"))
+            last_ts = int(raw.get("last_candle_ts") or 0)
+            pending_raw = raw.get("pending")
+            if pending_raw and pending_raw.get("order_id"):
+                tp_raw = pending_raw.get("tp_pct")
+                pending = PendingOrder(
+                    order_id=str(pending_raw["order_id"]),
+                    side=str(pending_raw.get("side") or ""),
+                    kind=str(pending_raw.get("kind") or ""),
+                    tp_pct=D(tp_raw) if tp_raw not in (None, "") else None,
+                    index=int(pending_raw.get("index") or 0),
+                    timestamp_ms=int(pending_raw.get("timestamp_ms") or 0),
+                    amount=D(pending_raw.get("amount") or 0),
+                    filled_amount=D(pending_raw.get("filled_amount") or 0),
+                )
+            if raw.get("paper_jpy") not in (None, ""):
+                paper_jpy = D(raw.get("paper_jpy"))
+            if raw.get("paper_btc") not in (None, ""):
+                paper_btc = D(raw.get("paper_btc"))
+        except (
+            OSError,
+            json.JSONDecodeError,
+            UnicodeError,
+            KeyError,
+            TypeError,
+            ValueError,
+            InvalidOperation,
+        ) as exc:
+            slog("ERROR", "state file ignored; starting fresh", error=type(exc).__name__)
+            position = None
+            risk = RiskManager(cfg)
+            last_ts = 0
+            pending = None
+            paper_jpy = cfg.dry_run_free_jpy
+            paper_btc = cfg.dry_run_free_btc
     return BotState(
         position, risk, last_ts, time.monotonic(), pending, paper_jpy, paper_btc
     )
@@ -144,7 +163,9 @@ def save_state(path: str | Path, state: BotState) -> None:
             "actual_execution_jpy": str(state.position.actual_execution_jpy),
             "kind": state.position.kind,
         }
-    p.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    tmp = p.with_name(p.name + ".tmp")
+    tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    tmp.replace(p)
 
 
 class Engine:
@@ -172,6 +193,7 @@ class Engine:
         self.last_signal = Signal.hold("starting")
         self.last_public_last: str = "-"
         self.last_error = ""
+        self.public_ok = True
 
     def request_stop(self, *_args: object) -> None:
         slog("BOOT", "shutdown requested")
@@ -193,9 +215,12 @@ class Engine:
         return self.client
 
     def _balances(self, rest: RestClient, state: BotState | None = None) -> tuple[Decimal, Decimal]:
-        if self.cfg.has_keys:
-            jpy = rest.free_amount("jpy")
-            btc = rest.free_amount("btc")
+        # Live sizing uses one assets snapshot. DRY_RUN keeps the paper ledger
+        # even when API keys are present, so a simulated position can still be flattened.
+        if self.cfg.has_keys and not self.cfg.dry_run:
+            amounts = rest.free_amounts("jpy", "btc")
+            jpy = amounts["jpy"]
+            btc = amounts["btc"]
             slog("ASSET", "free_amount", jpy=str(jpy), btc=str(btc))
             return jpy, btc
         jpy = self.cfg.dry_run_free_jpy
@@ -398,7 +423,25 @@ class Engine:
                 order_id=pending.order_id,
             )
             return
+        if result.reason == "canceled":
+            slog(
+                "ORDER_STATUS",
+                "pending order canceled; releasing",
+                order_id=pending.order_id,
+                status=result.status,
+            )
+            state.pending = None
+            return
         if result.executed_amount <= pending.filled_amount:
+            if result.reason == "canceled_partial":
+                slog(
+                    "ORDER_STATUS",
+                    "pending order canceled; releasing",
+                    order_id=pending.order_id,
+                    status=result.status,
+                )
+                state.pending = None
+                return
             slog(
                 "ORDER_STATUS",
                 "pending still unfilled; skip new orders",
@@ -407,9 +450,14 @@ class Engine:
             return
         delta = result.executed_amount - pending.filled_amount
         avg = result.average_price
+        # Apply only the new fill. filled_amount stays at the previous total
+        # until _apply_fill adds this delta, so a second partial is not counted twice.
+        apply_reason = "partial_fill" if result.reason == "partial_fill" else "fill"
+        if result.reason == "canceled_partial":
+            apply_reason = "canceled_partial"
         delta_result = OrderResult(
             True,
-            result.reason,
+            apply_reason,
             False,
             False,
             pending.order_id,
@@ -438,14 +486,9 @@ class Engine:
             jpy, btc = self._balances(rest, state)
         except Exception:
             jpy, btc = ZERO, ZERO
-        pending.filled_amount = result.executed_amount
-        if result.reason != "partial_fill":
-            state.pending = None
         self._apply_fill(
             signal, plan, delta_result, pending.index, pending.timestamp_ms, state, jpy, btc
         )
-        if result.reason == "partial_fill":
-            state.pending = pending
 
     def _set_watchdog(
         self,
@@ -627,7 +670,9 @@ class Engine:
                 self.used_synthetic_fallback = False
                 return incoming
             slog("MARKET", "empty public candles; synthetic fallback without orders")
+            self.public_ok = False
         except Exception as exc:
+            self.public_ok = False
             slog(
                 "WATCHDOG",
                 "FAIL",
@@ -761,7 +806,7 @@ class Engine:
             utc=datetime.now(timezone.utc).isoformat(),
         )
         slog("HEARTBEAT", "WebSocket CONNECTED" if ws_ok else "WebSocket DISCONNECTED")
-        slog("HEARTBEAT", "REST API OK")
+        slog("HEARTBEAT", "REST API OK" if self.public_ok else "REST API DEGRADED")
         slog("HEARTBEAT", "MARKET DATA OK")
         slog("HEARTBEAT", "ORDER MANAGER OK")
         slog("HEARTBEAT", "RISK MANAGER OK")
@@ -774,8 +819,10 @@ class Engine:
             if last not in (None, ""):
                 self.last_public_last = str(last)
                 self.last_error = ""
+                self.public_ok = True
         except Exception as exc:
             self.last_error = type(exc).__name__
+            self.public_ok = False
 
     def _paint(self, state: BotState, signal: Signal, last: str = "-") -> None:
         if self.screen is None:

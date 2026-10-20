@@ -15,6 +15,11 @@ from bitbank_bot.money import D
 OnMessage = Callable[[str, dict[str, Any]], None]
 
 
+def recv_timed_out(last_rx: float, now: float, ping_interval: float) -> bool:
+    """True when nothing has arrived for four ping intervals."""
+    return (now - last_rx) > max(ping_interval, 1.0) * 4
+
+
 class BitbankWebsocket:
     def __init__(
         self,
@@ -101,15 +106,16 @@ class BitbankWebsocket:
         slog("WEBSOCKET", "connecting", url=self.url.split("?")[0])
         with connect(self.url, open_timeout=15, close_timeout=5) as ws:
             ping_interval = 25.0
-            opened = time.monotonic()
+            last_rx = time.monotonic()
             while not self._stop.is_set():
                 timeout = max(1.0, ping_interval)
                 try:
                     raw = ws.recv(timeout=timeout)
                 except TimeoutError:
-                    if time.monotonic() - opened > ping_interval * 4:
+                    if recv_timed_out(last_rx, time.monotonic(), ping_interval):
                         raise RuntimeError("websocket recv timeout")
                     continue
+                last_rx = time.monotonic()
                 if isinstance(raw, bytes):
                     raw = raw.decode("utf-8")
                 if not raw:

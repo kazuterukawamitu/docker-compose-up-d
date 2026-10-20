@@ -2,7 +2,15 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from bitbank_bot.market_data import CandleCache, drop_incomplete_candle, parse_ohlcv, synthetic_candles
+from datetime import datetime, timezone
+
+from bitbank_bot.market_data import (
+    CandleCache,
+    drop_incomplete_candle,
+    parse_ohlcv,
+    previous_calendar_year,
+    synthetic_candles,
+)
 
 
 def test_cache_merge_by_timestamp() -> None:
@@ -22,6 +30,14 @@ def test_drop_incomplete() -> None:
     assert len(out) == 4
     complete = drop_incomplete_candle(list(candles), "1hour", now_ms=last.timestamp_ms + 3_600_000)
     assert len(complete) == 5
+
+
+def test_previous_year_on_leap_day() -> None:
+    leap = datetime(2024, 2, 29, 12, 0, tzinfo=timezone.utc)
+    prior = previous_calendar_year(leap)
+    assert prior.year == 2023
+    assert prior.month == 2
+    assert prior.day == 28
 
 
 def test_parse_uses_decimal() -> None:

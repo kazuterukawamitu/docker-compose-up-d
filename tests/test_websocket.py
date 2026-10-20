@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-from bitbank_bot.websocket_client import BitbankWebsocket
+from bitbank_bot.websocket_client import BitbankWebsocket, recv_timed_out
+
+
+def test_recv_timeout_uses_last_message_not_connect_time() -> None:
+    assert not recv_timed_out(100.0, 120.0, 25.0)
+    assert recv_timed_out(0.0, 101.0, 25.0)
 
 
 def test_ws_not_stale_before_first_event() -> None:

@@ -3,7 +3,82 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+from decimal import Decimal
 from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+import run as stdlib_run  # noqa: E402
+
+from bitbank_bot.strategy import Strategy, build_snapshots  # noqa: E402
+from tests.helpers import cfg  # noqa: E402
+
+
+def test_stdlib_replay_matches_package_buy1() -> None:
+    closes = [Decimal(200 - i) for i in range(25)]
+    closes.extend([Decimal("176"), Decimal("177")])
+    c = cfg(ma_period=3, short_ma_period=3, long_ma_period=5, ma_slope_threshold=Decimal("0.0001"))
+    snaps = build_snapshots(closes, list(range(len(closes))), c)
+    strat = Strategy(c)
+    package = [strat.evaluate(snap, None).kind for snap in snaps]
+    standalone = [
+        kind
+        for kind, _reason, _tp in stdlib_run.replay_signals(
+            closes,
+            list(range(len(closes))),
+            ma_period=3,
+            short_period=3,
+            long_period=5,
+            slope=Decimal("0.0001"),
+        )
+    ]
+    assert package == standalone
+    assert "BUY1" in standalone
+
+
+def test_stdlib_replay_matches_package_sell3() -> None:
+    closes = [Decimal(200 - i) for i in range(30)] + [Decimal("168"), Decimal("172")]
+    c = cfg(
+        ma_period=5,
+        short_ma_period=5,
+        long_ma_period=8,
+        ma_slope_threshold=Decimal("0.0001"),
+    )
+    snaps = build_snapshots(closes, list(range(len(closes))), c)
+    from bitbank_bot.strategy import Position
+
+    pos = Position(
+        amount=Decimal("0.01"),
+        average_price=Decimal("180"),
+        tp_pct=Decimal("0.03"),
+        entry_candle_index=0,
+        entry_candle_ts=0,
+        actual_execution_jpy=Decimal("1800"),
+        kind="BUY4",
+    )
+    strat = Strategy(c)
+    package = [
+        strat.evaluate(snap, pos if snap.index != 0 else None).kind for snap in snaps
+    ]
+    standalone = [
+        kind
+        for kind, _reason, _tp in stdlib_run.replay_signals(
+            closes,
+            list(range(len(closes))),
+            active_from_index=1,
+            entry=Decimal("180"),
+            tp=Decimal("0.03"),
+            entry_index=0,
+            ma_period=5,
+            short_period=5,
+            long_period=8,
+            slope=Decimal("0.0001"),
+        )
+    ]
+    assert package == standalone
+    assert "SELL3" in standalone
 
 
 def test_run_py_compiles() -> None:

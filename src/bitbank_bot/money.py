@@ -78,6 +78,17 @@ def quantize_price(price: Decimal, tick: Decimal) -> Decimal:
     return truncate(D(price), D(tick))
 
 
+def quantize_order_price(price: Decimal, tick: Decimal, side: str) -> Decimal:
+    """Buy limits round down to the tick. Sell limits round up so the floor does not underprice the exit."""
+    price = D(price)
+    step = D(tick)
+    if step <= ZERO:
+        raise ValueError("tick must be positive")
+    units = price / step
+    rounding = ROUND_CEILING if str(side).lower() == "sell" else ROUND_DOWN
+    return units.to_integral_value(rounding=rounding) * step
+
+
 def jpy_tick(price: Decimal | str | int, *, side: str | None = None) -> Decimal:
     price = D(price)
     if side and side.lower() == "sell":
