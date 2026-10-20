@@ -21,6 +21,10 @@ def test_compileall_src() -> None:
         py_compile.compile(str(diag), doraise=True)
     for path in (root / "scripts").rglob("*.py"):
         py_compile.compile(str(path), doraise=True)
+    docker = root / "docker"
+    if docker.is_dir():
+        for path in docker.rglob("*.py"):
+            py_compile.compile(str(path), doraise=True)
 
 
 def test_check_config_exit_zero() -> None:
