@@ -56,6 +56,14 @@ class ScreenView:
     error: str
     candle_type: str
     note: str = "HOLD/待機は正常です。Ctrl-C で停止"
+    daily_pnl: str = "-"
+    granville: str = "-"
+    entropy: str = "-"
+    entropy_regime: str = "-"
+    ky_prob: str = "-"
+    ky_conf: str = "-"
+    ky_veto: str = "-"
+    buy_gate: str = ""
 
 
 def format_screen(view: ScreenView) -> str:
@@ -80,6 +88,12 @@ def format_screen(view: ScreenView) -> str:
         f"  戦略価格     {_commas(view.price)} JPY    足 {view.candle_type}",
         f"  移動平均     {_commas(view.ma)}    トレンド {view.trend}",
         f"  シグナル     {view.signal_kind}    {view.signal_reason}",
+        (
+            f"  指標         PnL {view.daily_pnl}  G {view.granville}  "
+            f"H {view.entropy} {view.entropy_regime}  "
+            f"KY {view.ky_prob}/{view.ky_conf}{(' ' + view.ky_veto) if view.ky_veto else ''}"
+        ),
+        f"  BUYゲート    {view.buy_gate or 'なし'}",
         f"  建玉         {pos}",
         f"  監視         {view.watchdog}    WS {ws}",
         f"  ブロック     {block}",
@@ -151,6 +165,14 @@ def view_from_engine(
     block_reason: str = "",
     error: str = "",
     candle_type: str = "1hour",
+    daily_pnl: object = "-",
+    granville: object = "-",
+    entropy: object = "-",
+    entropy_regime: str = "-",
+    ky_prob: object = "-",
+    ky_conf: object = "-",
+    ky_veto: str = "",
+    buy_gate: str = "",
 ) -> ScreenView:
     return ScreenView(
         pair=pair,
@@ -173,6 +195,14 @@ def view_from_engine(
         block_reason=block_reason,
         error=error,
         candle_type=candle_type,
+        daily_pnl=str(daily_pnl),
+        granville=str(granville),
+        entropy=str(entropy),
+        entropy_regime=entropy_regime or "-",
+        ky_prob=str(ky_prob),
+        ky_conf=str(ky_conf),
+        ky_veto=ky_veto or "",
+        buy_gate=buy_gate or "",
     )
 
 

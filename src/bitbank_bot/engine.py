@@ -13,7 +13,23 @@ from pathlib import Path
 from typing import Any
 
 from bitbank_bot.amounts import AmountPlan, PositionSizer
+from bitbank_bot.anticipation import HazardAssessment, anticipate_hazard, log_hazard
+from bitbank_bot.buy_funnel import (
+    buy_setup_clauses,
+    log_buy_funnel,
+    measure_buy_funnel,
+    paper_balances,
+)
 from bitbank_bot.config import Config
+from bitbank_bot.indicators import (
+    close_returns,
+    daily_pnl_score,
+    entropy_regime,
+    granville_pullback_score,
+    paired_indicator_scores,
+    realtime_daily_pnl,
+    shannon_entropy,
+)
 from bitbank_bot.logging_setup import slog
 from bitbank_bot.market_data import (
     Candle,
@@ -23,13 +39,13 @@ from bitbank_bot.market_data import (
     synthetic_candles,
 )
 from bitbank_bot.money import D, ZERO
-from bitbank_bot.multi_timeframe import evaluate_htf
+from bitbank_bot.multi_timeframe import HtfVerdict, evaluate_htf, synthetic_htf_ok
 from bitbank_bot.orders import OrderExecutor, OrderResult
 from bitbank_bot.preflight import preflight
 from bitbank_bot.rest_client import BitbankAPIError, RestClient, is_auth_error
 from bitbank_bot.risk import RiskManager
 from bitbank_bot.screen import TradingScreen, view_from_engine
-from bitbank_bot.strategy import Position, Signal, Strategy, build_snapshots
+from bitbank_bot.strategy import MarketSnapshot, Position, Signal, Strategy, build_snapshots
 from bitbank_bot.watchdog import classify as classify_watchdog
 from bitbank_bot.websocket_client import BitbankWebsocket
 
@@ -172,6 +188,16 @@ class Engine:
         self.last_signal = Signal.hold("starting")
         self.last_public_last: str = "-"
         self.last_error = ""
+        self.last_daily_pnl: Decimal | str = "-"
+        self.last_granville: Decimal | str = "-"
+        self.last_entropy: Decimal | str = "-"
+        self.last_entropy_regime = "-"
+        self.last_ky_prob: Decimal | str = "-"
+        self.last_ky_conf: Decimal | str = "-"
+        self.last_ky_veto = ""
+        self.last_buy_gate = ""
+        self._htf_verdict: HtfVerdict | None = None
+        self._last_hazard: HazardAssessment | None = None
 
     def request_stop(self, *_args: object) -> None:
         slog("BOOT", "shutdown requested")
@@ -266,6 +292,15 @@ class Engine:
             signal = strategy.evaluate(snap, state.position)
             self.strategy_evaluations += 1
             slog("STRATEGY", "signal", kind=signal.kind, reason=signal.reason, side=signal.side)
+            if is_last:
+                self._measure_last_bar(
+                    snap,
+                    strategy,
+                    state,
+                    closes,
+                    executable=bool(execute) and not heartbeat,
+                    refresh_htf=is_new or is_bootstrap,
+                )
             if not execute or heartbeat:
                 if heartbeat:
                     slog("STRATEGY", "candle already processed", candle_ts=snap.timestamp_ms)
@@ -283,6 +318,7 @@ class Engine:
                     continue
                 if state.pending:
                     slog("ORDER_STATUS", "pending live order; skip new signal")
+                    slog("BUY_GATE", "fail", gate="pending", passed=False, reason="pending_order")
                     self.last_block_reason = "pending_order"
                     signal = Signal.hold("pending_order")
                     state.last_candle_ts = snap.timestamp_ms
@@ -294,10 +330,12 @@ class Engine:
                     and self.cfg.enable_htf_filter
                     and not self._explicit_synthetic
                 ):
-                    verdict = evaluate_htf(self._rest(), self.cfg)
+                    verdict = self._htf_verdict or evaluate_htf(self._rest(), self.cfg)
+                    self._htf_verdict = verdict
                     if not verdict.allow_buy:
                         self.last_block_reason = verdict.reason
                         slog("STRATEGY", "BUY blocked by HTF", reason=verdict.reason)
+                        slog("BUY_GATE", "fail", gate="htf", passed=False, reason=verdict.reason)
                         signal = Signal.hold(verdict.reason)
                         state.last_candle_ts = snap.timestamp_ms
                         if persist:
@@ -314,6 +352,100 @@ class Engine:
                 save_state(self.cfg.state_path, state)
         self.last_signal = signal
         return signal
+
+    def _measure_last_bar(
+        self,
+        snap: MarketSnapshot,
+        strategy: Strategy,
+        state: BotState,
+        closes: list[Decimal],
+        *,
+        executable: bool,
+        refresh_htf: bool,
+    ) -> None:
+        if self._explicit_synthetic or not self.cfg.enable_htf_filter:
+            verdict = synthetic_htf_ok()
+            self._htf_verdict = verdict
+        elif refresh_htf or self._htf_verdict is None:
+            if executable or refresh_htf:
+                try:
+                    verdict = evaluate_htf(self._rest(), self.cfg)
+                except Exception:
+                    verdict = HtfVerdict(False, "htf_unavailable", "unknown", "unknown")
+                self._htf_verdict = verdict
+            else:
+                verdict = self._htf_verdict or HtfVerdict(
+                    True, "htf_unevaluated", "unknown", "unknown"
+                )
+        else:
+            verdict = self._htf_verdict
+        known = closes[: snap.index + 1]
+        window = max(2, int(self.cfg.entropy_window))
+        returns = close_returns(known[-window:])
+        entropy = shannon_entropy(returns, int(self.cfg.entropy_bins))
+        regime = entropy_regime(
+            entropy, high=self.cfg.entropy_high, low=self.cfg.entropy_low
+        )
+        pos = state.position
+        rt_pnl = realtime_daily_pnl(
+            state.risk.daily_pnl,
+            snap.close,
+            pos.amount if pos else ZERO,
+            pos.average_price if pos else ZERO,
+        )
+        granville = granville_pullback_score(buy_setup_clauses(snap, strategy))
+        g_score, pnl_score = paired_indicator_scores(
+            granville, daily_pnl_score(rt_pnl, self.cfg.pnl_score_scale_jpy)
+        )
+        hazard = anticipate_hazard(
+            snap,
+            cfg=self.cfg,
+            entropy=entropy,
+            daily_pnl=rt_pnl,
+            htf_down=verdict.reason == "htf_downtrend",
+            returns=returns,
+        )
+        jpy, btc = paper_balances(self.cfg, state.paper_jpy, state.paper_btc, pos)
+        ws_stale = bool(
+            self.ws is not None and self.cfg.enable_websocket and self.ws.is_stale()
+        )
+        report = measure_buy_funnel(
+            snap=snap,
+            strategy=strategy,
+            cfg=self.cfg,
+            risk=state.risk,
+            position=pos,
+            pending=state.pending is not None,
+            htf_allow=verdict.allow_buy,
+            htf_reason=verdict.reason,
+            ws_stale=ws_stale,
+            executable=executable,
+            available_jpy=jpy,
+            available_btc=btc,
+            price=snap.close,
+            ky_veto=hazard.veto,
+            ky_reason="ky_veto" if hazard.veto else "ok",
+        )
+        log_buy_funnel(report)
+        slog(
+            "INDICATOR",
+            "context",
+            granville=str(g_score),
+            daily_pnl=str(pnl_score),
+            daily_pnl_jpy=str(rt_pnl),
+            entropy=str(entropy),
+            regime=regime,
+        )
+        log_hazard(hazard)
+        self.last_daily_pnl = rt_pnl
+        self.last_granville = g_score
+        self.last_entropy = entropy
+        self.last_entropy_regime = regime
+        self.last_ky_prob = hazard.probability
+        self.last_ky_conf = hazard.confidence
+        self.last_ky_veto = "veto" if hazard.veto else ""
+        self.last_buy_gate = report.first_fail
+        self._last_hazard = hazard
 
     def _execute(
         self,
@@ -347,6 +479,19 @@ class Engine:
             return
         state.risk.note_api_ok()
         state.risk.update_equity(jpy, btc, price)
+        if signal.side == "buy":
+            hazard = self._last_hazard
+            if hazard is not None and hazard.veto:
+                self.last_block_reason = "ky_veto"
+                slog(
+                    "BUY_GATE",
+                    "fail",
+                    gate="ky",
+                    passed=False,
+                    reason="ky_veto",
+                    **hazard.as_log(),
+                )
+                return
         sizer = PositionSizer(self.cfg, state.risk)
         if signal.side == "buy":
             plan = sizer.plan_buy(available_jpy=jpy, available_btc=btc, price=price)
@@ -364,6 +509,8 @@ class Engine:
         if not plan.ok:
             self.last_block_reason = plan.reason
             slog("RISK", "order blocked", reason=plan.reason, side=signal.side)
+            if signal.side == "buy":
+                slog("BUY_GATE", "fail", gate="size", passed=False, reason=plan.reason)
             return
         self.last_block_reason = ""
         order_client = rest if self.cfg.has_keys else None
@@ -802,6 +949,14 @@ class Engine:
             block_reason=self.last_block_reason,
             error=self.last_error,
             candle_type=self.cfg.candle_type,
+            daily_pnl=self.last_daily_pnl,
+            granville=self.last_granville,
+            entropy=self.last_entropy,
+            entropy_regime=self.last_entropy_regime,
+            ky_prob=self.last_ky_prob,
+            ky_conf=self.last_ky_conf,
+            ky_veto=self.last_ky_veto,
+            buy_gate=self.last_buy_gate,
         )
         self.screen.render(view)
 
