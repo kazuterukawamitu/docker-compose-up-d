@@ -668,6 +668,7 @@ class Engine:
             incoming = fetch_candles(rest, self.cfg, latest_only=latest_only)
             if incoming:
                 self.used_synthetic_fallback = False
+                self.public_ok = True
                 return incoming
             slog("MARKET", "empty public candles; synthetic fallback without orders")
             self.public_ok = False
@@ -819,7 +820,6 @@ class Engine:
             if last not in (None, ""):
                 self.last_public_last = str(last)
                 self.last_error = ""
-                self.public_ok = True
         except Exception as exc:
             self.last_error = type(exc).__name__
             self.public_ok = False
