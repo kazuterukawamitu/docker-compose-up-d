@@ -436,3 +436,41 @@ def test_partial_fill_keeps_pending(tmp_path) -> None:
     assert state.pending.filled_amount == Decimal("0.0004")
     assert state.position is not None
     assert state.position.amount == Decimal("0.0004")
+
+
+def test_engine_logs_buy_funnel_and_indicators(tmp_path) -> None:
+    c = cfg(
+        state_path=str(tmp_path / "state.json"),
+        lock_path=str(tmp_path / "bot.lock"),
+        log_dir=str(tmp_path / "logs"),
+        enable_websocket=False,
+        dry_run=True,
+        live_trading=False,
+    )
+    fake = FakeRest()
+    engine = Engine(c, client=fake)  # type: ignore[arg-type]
+    recorded: list[tuple[str, str, dict[str, Any]]] = []
+
+    def grab(stage: str, message: str, **fields: Any) -> None:
+        recorded.append((stage, message, fields))
+
+    with (
+        patch("bitbank_bot.buy_funnel.slog", side_effect=grab),
+        patch("bitbank_bot.anticipation.slog", side_effect=grab),
+        patch("bitbank_bot.engine.slog", side_effect=grab),
+    ):
+        rc = engine.run_once(synthetic=True, skip_preflight=True)
+    assert rc == 0
+    stages = {stage for stage, _message, _fields in recorded}
+    assert "BUY_GATE" in stages
+    assert "BUY_CHECK" in stages
+    assert "INDICATOR" in stages
+    assert "KY" in stages
+    gates = {fields["gate"] for stage, _m, fields in recorded if stage == "BUY_GATE"}
+    assert {"flat", "pending", "setup", "htf", "websocket", "executable", "risk", "size", "ky"} <= gates
+    assert engine.last_entropy != "-"
+    assert engine.last_granville != "-"
+    assert engine.last_daily_pnl != "-"
+    assert engine.last_ky_prob != "-"
+    assert fake.create_order_calls == 0
+    assert engine.last_signal.side != "buy" or engine.last_buy_gate != ""
