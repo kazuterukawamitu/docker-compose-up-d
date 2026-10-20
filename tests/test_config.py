@@ -15,6 +15,9 @@ def test_default_is_dry_run() -> None:
     assert cfg.daily_pnl_floor == Decimal("0")
     assert cfg.pair == PAIR
     assert cfg.enable_htf_filter is True
+    assert cfg.base_order_btc == Decimal("0.001")
+    assert cfg.amount_value == 1
+    assert cfg.ky_veto_probability == Decimal("0.85")
     assert "secret" not in cfg.safe_dict()
     assert cfg.safe_dict()["has_api_secret"] is False
     assert cfg.safe_dict()["enable_htf_filter"] is True
@@ -55,6 +58,11 @@ def test_balance_usage_alias() -> None:
         environ={"BALANCE_USAGE_RATIO": "0.8"}, load_default_dotenv=False
     )
     assert str(cfg.max_balance_usage) == "0.8"
+
+
+def test_base_order_btc_must_be_positive() -> None:
+    with pytest.raises(ConfigError, match="BASE_ORDER_BTC"):
+        load_config(environ={"BASE_ORDER_BTC": "0"}, load_default_dotenv=False)
 
 
 def test_repr_hides_secret() -> None:
