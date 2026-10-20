@@ -17,10 +17,45 @@ def test_buy_from_free_jpy_floors_to_lot() -> None:
         risk=r,
     )
     assert plan.ok
-    assert plan.amount == Decimal("0.0094")  # 100000*0.95*0.9985 / 10_000_000 floored
+    assert plan.amount == Decimal("0.001")
+    assert plan.amount_value == 1
+    assert plan.unit_btc == Decimal("0.001")
+    assert plan.max_buyable_units == 9
     assert plan.target_jpy > 0
     assert plan.planned_order_jpy == plan.amount * plan.price
     assert plan.actual_execution_jpy is None
+
+
+def test_max_buyable_is_integer_units_not_full_cash() -> None:
+    c = cfg(amount_value=0)
+    plan = plan_buy(
+        available_jpy=Decimal("100000"),
+        available_btc=Decimal("0"),
+        price=Decimal("10000000"),
+        cfg=c,
+        risk=risk(c),
+    )
+    assert plan.ok
+    assert plan.amount == Decimal("0.009")
+    assert plan.amount_value == 9
+    assert plan.max_buyable_units == 9
+    full_cash = Decimal("100000") / Decimal("10000000")
+    assert plan.amount < full_cash
+    assert plan.planned_order_jpy < Decimal("100000") * c.max_balance_usage
+
+
+def test_amount_value_clamped_by_max_order() -> None:
+    c = cfg(amount_value=100, max_order_btc=Decimal("0.003"))
+    plan = plan_buy(
+        available_jpy=Decimal("1000000"),
+        available_btc=Decimal("0"),
+        price=Decimal("10000000"),
+        cfg=c,
+        risk=risk(c),
+    )
+    assert plan.ok
+    assert plan.amount == Decimal("0.003")
+    assert plan.amount_value == 3
 
 
 def test_buy_insufficient_jpy() -> None:

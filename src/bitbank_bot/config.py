@@ -42,6 +42,15 @@ DEFAULT_SELL_SAFETY = "0.999"
 DEFAULT_FEE_BUFFER = "0.0015"
 DEFAULT_MIN_AMOUNT = "0.0001"
 DEFAULT_AMOUNT_PRECISION = "0.0001"
+DEFAULT_BASE_ORDER_BTC = "0.001"
+DEFAULT_AMOUNT_VALUE = 1
+DEFAULT_ENTROPY_WINDOW = 20
+DEFAULT_ENTROPY_BINS = 8
+DEFAULT_ENTROPY_HIGH = "0.70"
+DEFAULT_ENTROPY_LOW = "0.30"
+DEFAULT_KY_VETO_PROB = "0.85"
+DEFAULT_KY_MIN_CONFIDENCE = "0.50"
+DEFAULT_PNL_SCORE_SCALE = "10000"
 DEFAULT_PRICE_TICK = "1"
 DEFAULT_MAX_POSITION = "1"
 DEFAULT_MAX_ORDER = "10"
@@ -60,6 +69,7 @@ DEFAULT_LOOKBACK_DAYS = 14
 DEFAULT_ACCESS_WINDOW_MS = 5000
 DEFAULT_CIRCUIT_BREAKER_ERRORS = 5
 DEFAULT_MAX_DRAWDOWN_JPY = "0"
+DEFAULT_PROTECTIVE_STOP = "0"
 
 SHORT_CANDLE_TYPES = frozenset({"1min", "5min", "15min", "30min", "1hour"})
 LONG_CANDLE_TYPES = frozenset({"4hour", "8hour", "12hour", "1day", "1week", "1month"})
@@ -144,6 +154,15 @@ class Config:
     fee_buffer: Decimal = D(DEFAULT_FEE_BUFFER)
     min_amount_btc: Decimal = D(DEFAULT_MIN_AMOUNT)
     amount_precision: Decimal = D(DEFAULT_AMOUNT_PRECISION)
+    base_order_btc: Decimal = D(DEFAULT_BASE_ORDER_BTC)
+    amount_value: int = DEFAULT_AMOUNT_VALUE
+    entropy_window: int = DEFAULT_ENTROPY_WINDOW
+    entropy_bins: int = DEFAULT_ENTROPY_BINS
+    entropy_high: Decimal = D(DEFAULT_ENTROPY_HIGH)
+    entropy_low: Decimal = D(DEFAULT_ENTROPY_LOW)
+    ky_veto_probability: Decimal = D(DEFAULT_KY_VETO_PROB)
+    ky_min_confidence: Decimal = D(DEFAULT_KY_MIN_CONFIDENCE)
+    pnl_score_scale_jpy: Decimal = D(DEFAULT_PNL_SCORE_SCALE)
     price_tick: Decimal = D(DEFAULT_PRICE_TICK)
     order_type: str = "limit"
     max_position_btc: Decimal = D(DEFAULT_MAX_POSITION)
@@ -172,6 +191,8 @@ class Config:
     candle_lookback_days: int = DEFAULT_LOOKBACK_DAYS
     circuit_breaker_errors: int = DEFAULT_CIRCUIT_BREAKER_ERRORS
     max_drawdown_jpy: Decimal = D(DEFAULT_MAX_DRAWDOWN_JPY)
+    protective_stop_pct: Decimal = D(DEFAULT_PROTECTIVE_STOP)
+    exchange_stop_orders: bool = False
     ws_rooms: tuple[str, ...] = ("ticker_btc_jpy",)
 
     def __str__(self) -> str:
@@ -212,8 +233,14 @@ class Config:
             "log_level": self.log_level,
             "max_balance_usage": str(self.max_balance_usage),
             "min_amount_btc": str(self.min_amount_btc),
+            "base_order_btc": str(self.base_order_btc),
+            "amount_value": self.amount_value,
+            "entropy_window": self.entropy_window,
+            "ky_veto_probability": str(self.ky_veto_probability),
             "circuit_breaker_errors": self.circuit_breaker_errors,
             "max_drawdown_jpy": str(self.max_drawdown_jpy),
+            "protective_stop_pct": str(self.protective_stop_pct),
+            "exchange_stop_orders": self.exchange_stop_orders,
         }
 
 
@@ -301,6 +328,15 @@ def load_config(
         fee_buffer=_dec(env, "FEE_BUFFER", DEFAULT_FEE_BUFFER),
         min_amount_btc=_dec(env, "MIN_AMOUNT_BTC", DEFAULT_MIN_AMOUNT),
         amount_precision=_dec(env, "AMOUNT_PRECISION", DEFAULT_AMOUNT_PRECISION),
+        base_order_btc=_dec(env, "BASE_ORDER_BTC", DEFAULT_BASE_ORDER_BTC),
+        amount_value=_int(env, "AMOUNT_VALUE", DEFAULT_AMOUNT_VALUE),
+        entropy_window=_int(env, "ENTROPY_WINDOW", DEFAULT_ENTROPY_WINDOW),
+        entropy_bins=_int(env, "ENTROPY_BINS", DEFAULT_ENTROPY_BINS),
+        entropy_high=_dec(env, "ENTROPY_HIGH", DEFAULT_ENTROPY_HIGH),
+        entropy_low=_dec(env, "ENTROPY_LOW", DEFAULT_ENTROPY_LOW),
+        ky_veto_probability=_dec(env, "KY_VETO_PROBABILITY", DEFAULT_KY_VETO_PROB),
+        ky_min_confidence=_dec(env, "KY_MIN_CONFIDENCE", DEFAULT_KY_MIN_CONFIDENCE),
+        pnl_score_scale_jpy=_dec(env, "PNL_SCORE_SCALE_JPY", DEFAULT_PNL_SCORE_SCALE),
         price_tick=_dec(env, "PRICE_TICK", DEFAULT_PRICE_TICK),
         order_type=order_type,
         max_position_btc=_dec(env, "MAX_POSITION_BTC", DEFAULT_MAX_POSITION),
@@ -335,6 +371,8 @@ def load_config(
             env, "CIRCUIT_BREAKER_ERRORS", DEFAULT_CIRCUIT_BREAKER_ERRORS
         ),
         max_drawdown_jpy=_dec(env, "MAX_DRAWDOWN_JPY", DEFAULT_MAX_DRAWDOWN_JPY),
+        protective_stop_pct=_dec(env, "PROTECTIVE_STOP_PCT", DEFAULT_PROTECTIVE_STOP),
+        exchange_stop_orders=_bool(env, "EXCHANGE_STOP_ORDERS", False),
     )
     if live_trading and not cfg.has_keys:
         raise ConfigError("LIVE_TRADING requires BITBANK_API_KEY and BITBANK_API_SECRET")
@@ -342,4 +380,10 @@ def load_config(
         raise ConfigError("MA periods must be >= 2")
     if cfg.long_ma_period < cfg.short_ma_period:
         raise ConfigError("LONG_MA_PERIOD must be >= SHORT_MA_PERIOD")
+    if cfg.base_order_btc <= 0:
+        raise ConfigError("BASE_ORDER_BTC must be > 0")
+    if cfg.amount_value < 0:
+        raise ConfigError("AMOUNT_VALUE must be >= 0")
+    if cfg.entropy_window < 2 or cfg.entropy_bins < 2:
+        raise ConfigError("ENTROPY_WINDOW and ENTROPY_BINS must be >= 2")
     return cfg
