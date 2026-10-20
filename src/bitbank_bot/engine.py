@@ -799,6 +799,8 @@ class Engine:
                 pending.filled_cost += incremental
                 if slice_fee is not None:
                     pending.filled_fee += slice_fee
+                else:
+                    pending.filled_fee += incremental * self.cfg.fee_buffer
                 state.pending = pending
             return
         if ended:
