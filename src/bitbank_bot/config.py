@@ -60,6 +60,7 @@ DEFAULT_LOOKBACK_DAYS = 14
 DEFAULT_ACCESS_WINDOW_MS = 5000
 DEFAULT_CIRCUIT_BREAKER_ERRORS = 5
 DEFAULT_MAX_DRAWDOWN_JPY = "0"
+DEFAULT_PROTECTIVE_STOP = "0"
 
 SHORT_CANDLE_TYPES = frozenset({"1min", "5min", "15min", "30min", "1hour"})
 LONG_CANDLE_TYPES = frozenset({"4hour", "8hour", "12hour", "1day", "1week", "1month"})
@@ -172,6 +173,8 @@ class Config:
     candle_lookback_days: int = DEFAULT_LOOKBACK_DAYS
     circuit_breaker_errors: int = DEFAULT_CIRCUIT_BREAKER_ERRORS
     max_drawdown_jpy: Decimal = D(DEFAULT_MAX_DRAWDOWN_JPY)
+    protective_stop_pct: Decimal = D(DEFAULT_PROTECTIVE_STOP)
+    exchange_stop_orders: bool = False
     ws_rooms: tuple[str, ...] = ("ticker_btc_jpy",)
 
     def __str__(self) -> str:
@@ -214,6 +217,8 @@ class Config:
             "min_amount_btc": str(self.min_amount_btc),
             "circuit_breaker_errors": self.circuit_breaker_errors,
             "max_drawdown_jpy": str(self.max_drawdown_jpy),
+            "protective_stop_pct": str(self.protective_stop_pct),
+            "exchange_stop_orders": self.exchange_stop_orders,
         }
 
 
@@ -335,6 +340,8 @@ def load_config(
             env, "CIRCUIT_BREAKER_ERRORS", DEFAULT_CIRCUIT_BREAKER_ERRORS
         ),
         max_drawdown_jpy=_dec(env, "MAX_DRAWDOWN_JPY", DEFAULT_MAX_DRAWDOWN_JPY),
+        protective_stop_pct=_dec(env, "PROTECTIVE_STOP_PCT", DEFAULT_PROTECTIVE_STOP),
+        exchange_stop_orders=_bool(env, "EXCHANGE_STOP_ORDERS", False),
     )
     if live_trading and not cfg.has_keys:
         raise ConfigError("LIVE_TRADING requires BITBANK_API_KEY and BITBANK_API_SECRET")

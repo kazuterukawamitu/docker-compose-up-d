@@ -12,13 +12,48 @@ from bitbank_bot.logging_setup import slog
 from bitbank_bot.money import D, ZERO, ensure_decimal, quantize_price
 from bitbank_bot.strategy import Signal
 
+# Bitbank GET /user/spot/order status enum (rest-api.md).
+TERMINAL_ORDER_STATUSES = frozenset(
+    {
+        "CANCELED_UNFILLED",
+        "CANCELED_PARTIALLY_FILLED",
+        "CANCELED",
+        "REJECTED",
+        "EXPIRED",
+    }
+)
+
+
+def extract_order_fee_jpy(raw: dict[str, Any] | None) -> Decimal | None:
+    if not raw:
+        return None
+    for key in ("fee_amount_quote", "fee_occurred_amount_quote", "fee"):
+        value = raw.get(key)
+        if value not in (None, ""):
+            return D(value)
+    return None
+
 
 def _fill_status(raw_status: str, executed: Decimal, ordered: Decimal) -> str:
+    status = (raw_status or "").upper()
+    if status in TERMINAL_ORDER_STATUSES:
+        return status
     if executed <= ZERO:
         return "UNFILLED"
     if ordered > ZERO and executed < ordered:
         return "PARTIALLY_FILLED"
     return "FULLY_FILLED"
+
+
+def terminal_reason(status: str | None) -> str | None:
+    status = (status or "").upper()
+    if status == "REJECTED":
+        return "rejected"
+    if status == "EXPIRED":
+        return "expired"
+    if status in TERMINAL_ORDER_STATUSES:
+        return "canceled"
+    return None
 
 
 class OrderClient(Protocol):
@@ -34,6 +69,7 @@ class OrderClient(Protocol):
         order_type: str,
         price: str | None = None,
         post_only: bool | None = None,
+        trigger_price: str | None = None,
         *,
         live_confirmed: bool = False,
     ) -> dict[str, Any]: ...
@@ -51,6 +87,7 @@ class OrderResult:
     average_price: Decimal
     actual_execution_jpy: Decimal | None
     raw: dict[str, Any] | None
+    fee_jpy: Decimal | None = None
 
 
 class OrderExecutor:
@@ -187,17 +224,21 @@ class OrderExecutor:
                 None,
                 None,
             )
+        # Protective exits use documented ``market`` so a TP cannot rest as
+        # an unfilled limit and block later STOP. Do not send STOP-MARKET.
+        # Resting ``stop`` + trigger_price is not auto-armed.
+        order_type = "market" if signal.kind in {"STOP", "TP"} else self.cfg.order_type
         price_str: str | None = None
-        if self.cfg.order_type == "limit":
+        if order_type == "limit":
             q = quantize_price(plan.price, self.cfg.price_tick)
             price_str = str(int(q)) if q == q.to_integral_value() else str(q)
         raw = self.client.create_order(
             pair=self.cfg.pair,
             amount=str(plan.amount),
             side=plan.side,
-            order_type=self.cfg.order_type,
+            order_type=order_type,
             price=price_str,
-            post_only=self.cfg.post_only if self.cfg.order_type == "limit" else None,
+            post_only=self.cfg.post_only if order_type == "limit" else None,
             live_confirmed=True,
         )
         order_id = str(raw.get("order_id") or "")
@@ -215,6 +256,7 @@ class OrderExecutor:
                 avg = D(raw.get("average_price") or 0)
                 amount_ordered = D(raw.get("start_amount") or amount_ordered)
         status = _fill_status(status, executed, amount_ordered)
+        fee = extract_order_fee_jpy(raw)
         slog(
             "ORDER_STATUS",
             "order status",
@@ -222,13 +264,27 @@ class OrderExecutor:
             status=status,
             executed_amount=str(executed),
         )
+        ended = terminal_reason(status)
         if executed <= ZERO:
             slog("ORDER_STATUS", "no fill yet; not logging FILL", order_id=order_id, status=status)
             return OrderResult(
-                True, "accepted_unfilled", False, False, order_id, status, ZERO, ZERO, None, raw
+                True,
+                ended or "accepted_unfilled",
+                False,
+                False,
+                order_id,
+                status,
+                ZERO,
+                ZERO,
+                None,
+                raw,
+                fee,
             )
         actual = executed * avg
-        reason = "partial_fill" if status == "PARTIALLY_FILLED" else "fill"
+        if ended:
+            reason = ended
+        else:
+            reason = "partial_fill" if status == "PARTIALLY_FILLED" else "fill"
         slog(
             "FILL" if reason == "fill" else "ORDER_STATUS",
             "fill" if reason == "fill" else "partial fill; keep polling",
@@ -239,7 +295,7 @@ class OrderExecutor:
             status=status,
         )
         return OrderResult(
-            True, reason, False, False, order_id, status, executed, avg, actual, raw
+            True, reason, False, False, order_id, status, executed, avg, actual, raw, fee
         )
 
     def poll(self, order_id: str, fallback_amount: Decimal) -> OrderResult:
@@ -253,6 +309,7 @@ class OrderExecutor:
         avg = D(raw.get("average_price") or 0)
         ordered = D(raw.get("start_amount") or fallback_amount)
         status = _fill_status(str(raw.get("status") or ""), executed, ordered)
+        fee = extract_order_fee_jpy(raw)
         slog(
             "ORDER_STATUS",
             "pending poll",
@@ -260,12 +317,26 @@ class OrderExecutor:
             status=status,
             executed_amount=str(executed),
         )
+        ended = terminal_reason(status)
         if executed <= ZERO:
             return OrderResult(
-                True, "accepted_unfilled", False, False, order_id, status, ZERO, ZERO, None, raw
+                True,
+                ended or "accepted_unfilled",
+                False,
+                False,
+                order_id,
+                status,
+                ZERO,
+                ZERO,
+                None,
+                raw,
+                fee,
             )
         actual = executed * avg
-        reason = "partial_fill" if status == "PARTIALLY_FILLED" else "fill"
+        if ended:
+            reason = ended
+        else:
+            reason = "partial_fill" if status == "PARTIALLY_FILLED" else "fill"
         slog(
             "FILL" if reason == "fill" else "ORDER_STATUS",
             "fill after poll" if reason == "fill" else "partial fill after poll",
@@ -274,4 +345,6 @@ class OrderExecutor:
             actual_execution_jpy=str(actual),
             status=status,
         )
-        return OrderResult(True, reason, False, False, order_id, status, executed, avg, actual, raw)
+        return OrderResult(
+            True, reason, False, False, order_id, status, executed, avg, actual, raw, fee
+        )
