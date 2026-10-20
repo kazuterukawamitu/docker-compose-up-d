@@ -43,11 +43,9 @@ def buy_setup_clauses(
 ) -> dict[str, dict[str, bool]]:
     """Per-rule AND clauses. A rule fires only when every clause is true."""
     extend = strategy.cfg.buy3_extend
-    dip = strategy.cfg.buy4_dip
     buy3 = strategy.buy3
     buy4 = strategy.buy4
     extended_now = snap.close >= snap.ma * (ONE + extend)
-    dipped_now = snap.close <= snap.ma * (ONE - dip)
     return {
         "BUY1": {
             "prev_ma_down": snap.prev_ma_trend == Trend.DOWN,
@@ -67,9 +65,11 @@ def buy_setup_clauses(
             "rising": snap.close > snap.prev_close or strategy._buy3,
         },
         "BUY4": {
+            # Buy4Machine enters `dipped` on the first 5% dip, then fires only
+            # on a later bar that rises. Same-bar dip+rise is not a setup.
             "ma_downtrend": snap.ma_trend == Trend.DOWN or strategy._buy4,
-            "dipped": dipped_now or buy4.phase == "dipped" or strategy._buy4,
-            "rising": snap.close > snap.prev_close or strategy._buy4,
+            "held_dip": buy4.phase == "dipped" or strategy._buy4,
+            "bounce_after_dip": strategy._buy4,
         },
     }
 
@@ -98,6 +98,7 @@ def measure_buy_funnel(
     price: Decimal,
     ky_veto: bool,
     ky_reason: str,
+    size_error: str | None = None,
 ) -> BuyFunnelReport:
     clauses = buy_setup_clauses(snap, strategy)
     setup_ok, setup_name = setup_fired(clauses)
@@ -150,14 +151,17 @@ def measure_buy_funnel(
             "ok" if not ky_veto else (ky_reason or "ky_veto"),
         ),
     ]
-    plan = plan_buy(
-        available_jpy=available_jpy,
-        available_btc=available_btc,
-        price=price,
-        cfg=cfg,
-        risk=risk,
-    )
-    gates[7] = GateResult("size", plan.ok, plan.reason)
+    if size_error:
+        gates[7] = GateResult("size", False, size_error)
+    else:
+        plan = plan_buy(
+            available_jpy=available_jpy,
+            available_btc=available_btc,
+            price=price,
+            cfg=cfg,
+            risk=risk,
+        )
+        gates[7] = GateResult("size", plan.ok, plan.reason)
     first_fail = ""
     for gate in gates:
         if not gate.passed:
@@ -199,8 +203,12 @@ def paper_balances(
     paper_btc: Decimal,
     position: Position | None,
 ) -> tuple[Decimal, Decimal]:
-    jpy = paper_jpy if paper_jpy > ZERO else cfg.dry_run_free_jpy
-    btc = paper_btc if paper_btc > ZERO else cfg.dry_run_free_btc
+    """No-key path only. Matches Engine._balances when keys are absent."""
+    jpy = cfg.dry_run_free_jpy
+    btc = cfg.dry_run_free_btc
+    if paper_jpy > ZERO or paper_btc > ZERO or position is not None:
+        jpy = paper_jpy
+        btc = paper_btc
     if position is not None:
         btc = max(btc, position.amount)
     return D(jpy), D(btc)

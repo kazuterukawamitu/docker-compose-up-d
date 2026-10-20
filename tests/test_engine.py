@@ -474,3 +474,50 @@ def test_engine_logs_buy_funnel_and_indicators(tmp_path) -> None:
     assert engine.last_ky_prob != "-"
     assert fake.create_order_calls == 0
     assert engine.last_signal.side != "buy" or engine.last_buy_gate != ""
+
+
+def test_funnel_size_gate_uses_live_free_amount(tmp_path) -> None:
+    from bitbank_bot.engine import BotState
+
+    c = cfg(
+        state_path=str(tmp_path / "state.json"),
+        lock_path=str(tmp_path / "bot.lock"),
+        log_dir=str(tmp_path / "logs"),
+        enable_websocket=False,
+        enable_htf_filter=False,
+        dry_run=True,
+        live_trading=False,
+        api_key="k",
+        api_secret="s",
+    )
+    rest = MagicMock()
+    rest.free_amount.side_effect = lambda asset: (
+        Decimal("50") if asset == "jpy" else Decimal("0")
+    )
+    rest.create_order.side_effect = AssertionError("live order")
+    engine = Engine(c, client=rest)
+    state = BotState(
+        None,
+        RiskManager(c),
+        0,
+        time.monotonic(),
+        paper_jpy=Decimal("100000"),
+        paper_btc=Decimal("0"),
+    )
+    recorded: list[tuple[str, str, dict[str, Any]]] = []
+
+    def grab(stage: str, message: str, **fields: Any) -> None:
+        recorded.append((stage, message, fields))
+
+    with patch("bitbank_bot.buy_funnel.slog", side_effect=grab):
+        engine.process_candles(synthetic_candles(40), state, execute=False, persist=False)
+    size = [
+        fields
+        for stage, _msg, fields in recorded
+        if stage == "BUY_GATE" and fields.get("gate") == "size"
+    ]
+    assert size
+    assert size[-1]["passed"] is False
+    assert size[-1]["reason"] == "insufficient"
+    rest.free_amount.assert_called()
+    rest.create_order.assert_not_called()
