@@ -100,6 +100,7 @@ def main(argv: list[str] | None = None) -> int:
         from bitbank_bot.loop_timers import LoopEvidence, ShadowGuardTimers
 
         dual = DualRun.discover()
+        dual.probe(cfg)
         loop = LoopEvidence()
         timers = ShadowGuardTimers(loop)
         slog("DUAL_RUN", "check", **dual.safe_status())
