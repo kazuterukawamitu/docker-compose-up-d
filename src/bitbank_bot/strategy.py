@@ -18,7 +18,7 @@ from bitbank_bot.indicators import (
     ma_trend,
     moving_average,
 )
-from bitbank_bot.money import ONE, pct_offset
+from bitbank_bot.money import ONE, ZERO, pct_offset
 
 
 @dataclass
@@ -52,6 +52,7 @@ class Position:
     entry_candle_ts: int
     actual_execution_jpy: Decimal
     kind: str
+    entry_fee_jpy: Decimal | None = None
 
 
 @dataclass
@@ -271,6 +272,42 @@ class Strategy:
         if buy.kind != "HOLD":
             return buy
         return Signal.hold("no_buy_setup")
+
+    def protective_exit(
+        self,
+        position: Position,
+        ticker: Decimal,
+        *,
+        same_entry: bool,
+    ) -> Signal:
+        """Intrabar TP / optional software STOP against a live ticker.
+
+        Same-entry-candle exits stay blocked. SELL1–4 stay on closed bars.
+        """
+        if same_entry:
+            return Signal.hold("same_entry_candle_no_sell")
+        stop_pct = self.cfg.protective_stop_pct
+        if stop_pct > ZERO:
+            stop = position.average_price * (ONE - stop_pct)
+            if ticker <= stop:
+                return Signal(
+                    kind="STOP",
+                    side="sell",
+                    tp_pct=None,
+                    reason=f"protective stop ticker={ticker} <= {stop}",
+                )
+        target = pct_offset(position.average_price, position.tp_pct)
+        if ticker >= target:
+            return Signal(
+                kind="TP",
+                side="sell",
+                tp_pct=position.tp_pct,
+                reason=(
+                    f"take profit ticker={ticker} >= "
+                    f"{target} (fill_avg={position.average_price} + {position.tp_pct})"
+                ),
+            )
+        return Signal.hold("intrabar_no_exit")
 
     def _tp_signal(self, snap: MarketSnapshot, position: Position) -> Signal:
         target = pct_offset(position.average_price, position.tp_pct)
