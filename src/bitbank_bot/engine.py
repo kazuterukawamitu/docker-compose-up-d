@@ -29,6 +29,7 @@ from bitbank_bot.orders import (
     OrderResult,
     coerce_active_orders,
     incremental_notional,
+    order_fee_jpy,
 )
 from bitbank_bot.preflight import preflight
 from bitbank_bot.rest_client import BitbankAPIError, RestClient, is_auth_error
@@ -615,7 +616,9 @@ class Engine:
             if state.position:
                 total_amt = state.position.amount + result.executed_amount
                 total_jpy = state.position.actual_execution_jpy + actual_jpy
-                avg = (total_jpy / total_amt) if total_amt > ZERO else result.average_price
+                prev_notional_no_fee = state.position.average_price * state.position.amount
+                new_notional_no_fee = result.average_price * result.executed_amount
+                avg = (prev_notional_no_fee + new_notional_no_fee) / total_amt if total_amt > ZERO else result.average_price
                 state.position = Position(
                     amount=total_amt,
                     average_price=avg,
@@ -715,15 +718,56 @@ class Engine:
             self._poll_pending(state)
         elif state.pending is None and len(active) == 1:
             row = active[0]
+            executed = D(row.get("executed_amount") or 0)
+            avg = D(row.get("average_price") or 0)
+            side = str(row.get("side") or "")
+            if executed > ZERO and avg > ZERO and side == "buy":
+                fee_jpy = order_fee_jpy(row, executed, avg, self.cfg.fee_rate)
+                notional = executed * avg
+                cost = notional + fee_jpy
+                if state.position:
+                    prev_notional_no_fee = state.position.average_price * state.position.amount
+                    new_notional_no_fee = avg * executed
+                    total_amt = state.position.amount + executed
+                    new_avg = (prev_notional_no_fee + new_notional_no_fee) / total_amt if total_amt > ZERO else avg
+                    state.position = Position(
+                        amount=total_amt,
+                        average_price=new_avg,
+                        tp_pct=state.position.tp_pct,
+                        entry_candle_index=state.position.entry_candle_index,
+                        entry_candle_ts=state.position.entry_candle_ts,
+                        actual_execution_jpy=state.position.actual_execution_jpy + cost,
+                        kind=state.position.kind,
+                    )
+                else:
+                    tp = self.cfg.buy1_tp
+                    state.position = Position(
+                        amount=executed,
+                        average_price=avg,
+                        tp_pct=tp,
+                        entry_candle_index=0,
+                        entry_candle_ts=0,
+                        actual_execution_jpy=cost,
+                        kind="RECONCILE",
+                    )
+                slog(
+                    "ORDER_STATUS",
+                    "applied adopted fills to position",
+                    executed=str(executed),
+                    average_price=str(avg),
+                    fee_jpy=str(fee_jpy),
+                )
             state.pending = PendingOrder(
                 order_id=str(row.get("order_id")),
-                side=str(row.get("side") or ""),
+                side=side,
                 kind="RECONCILE",
                 tp_pct=None,
                 index=0,
                 timestamp_ms=0,
                 amount=D(row.get("start_amount") or row.get("remaining_amount") or 0),
-                filled_amount=D(row.get("executed_amount") or 0),
+                filled_amount=executed,
+                filled_notional_jpy=executed * avg if avg > ZERO else ZERO,
+                filled_fee_jpy=order_fee_jpy(row, executed, avg, self.cfg.fee_rate),
             )
             slog(
                 "ORDER_STATUS",
