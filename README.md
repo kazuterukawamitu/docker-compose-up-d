@@ -9,12 +9,15 @@ HOLD for 15 minutes while market data and strategy are healthy is `LONG_WAIT`, n
 Git is not required. Do not run `/run.sh` (that path is the filesystem root). From any directory:
 
 ```bash
-bash /path/to/this/repo/run.sh help
-bash /path/to/this/repo/run.sh check
-bash /path/to/this/repo/run.sh dry
-bash /path/to/this/repo/run.sh once
-bash /path/to/this/repo/run.sh live-ready
+bash ./run.sh help
+bash ./run.sh check
+bash ./run.sh dry
+bash ./run.sh once
+bash ./run.sh live-ready
+bash ./start.sh
 ```
+
+Do not paste `run.sh`, `start.sh`, or Python source into zsh. zsh treats `!` as history and `(` as syntax, which prints `event not found` and `parse error`.
 
 `dry` and `once` force `DRY_RUN` and do not call Bitbank `create_order`. `live-ready` only prints whether `.env` would allow live orders. `scripts/pack_source.sh` builds a tar on this machine and does not SSH.
 

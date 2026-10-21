@@ -4,11 +4,12 @@
 # From any directory, including ~. Do not run `/run.sh` — that path is the
 # filesystem root and is the wrong file.
 #
-#   bash /path/to/this/repo/run.sh help
-#   bash /path/to/this/repo/run.sh check
-#   bash /path/to/this/repo/run.sh dry
-#   bash /path/to/this/repo/run.sh once
-#   bash /path/to/this/repo/run.sh live-ready
+# From the folder that contains this file. Do not paste the script into zsh.
+#   bash ./run.sh help
+#   bash ./run.sh check
+#   bash ./run.sh dry
+#   bash ./run.sh once
+#   bash ./run.sh live-ready
 #
 # On a Mac checkout the path may look like:
 #   /Users/kazuterukawamitsu/btc-jpy-trading-bot/iterm13/iterm15-2/iterm13/5841/run.sh dry

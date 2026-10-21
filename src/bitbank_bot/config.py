@@ -223,6 +223,11 @@ class Config:
         }
 
 
+def _project_env_file() -> Path:
+    """`.env` next to `main.py`. Do not walk up to a home-directory dotenv."""
+    return Path(__file__).resolve().parents[2] / ".env"
+
+
 def load_config(
     env_file: str | Path | None = None,
     environ: Mapping[str, str] | None = None,
@@ -231,7 +236,9 @@ def load_config(
     if env_file:
         load_dotenv(env_file, override=False)
     elif load_default_dotenv:
-        load_dotenv(override=False)
+        project_env = _project_env_file()
+        if project_env.is_file():
+            load_dotenv(project_env, override=False)
     env: Mapping[str, str] = environ if environ is not None else os.environ
     pair = normalize_pair(_env(env, "BITBANK_PAIR", PAIR) or PAIR)
     if pair in REJECTED_PAIR_ALIASES:

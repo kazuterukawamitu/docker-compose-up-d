@@ -56,6 +56,8 @@ def test_start_sh_is_venv_loop_launcher() -> None:
     assert "git clone" not in text
     assert "run.sh" in text
     assert "run.py" in text
+    assert '"${SCREEN_ARGS[@]}"' not in text
+    assert "bash ./" in text
 
 
 def test_loop_cli_exits_after_max_cycles(tmp_path, monkeypatch) -> None:

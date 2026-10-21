@@ -965,7 +965,6 @@ class Engine:
         return 0
 
     def _heartbeat(self, state: BotState, signal: Signal, last: str = "-") -> None:
-        ws_ok = bool(self.ws and self.ws.is_connected())
         slog(
             "HEARTBEAT",
             "BOT ALIVE",
@@ -978,7 +977,15 @@ class Engine:
             bitbank_jpy_unchanged=self.cfg.dry_run,
             utc=datetime.now(timezone.utc).isoformat(),
         )
-        slog("HEARTBEAT", "WebSocket CONNECTED" if ws_ok else "WebSocket DISCONNECTED")
+        if self.ws is None:
+            ws_msg = "WebSocket OFF"
+        else:
+            ws_msg = {
+                "connected": "WebSocket CONNECTED",
+                "starting": "WebSocket STARTING",
+                "disconnected": "WebSocket DISCONNECTED",
+            }[self.ws.link_state()]
+        slog("HEARTBEAT", ws_msg)
         slog("HEARTBEAT", "REST API OK")
         slog("HEARTBEAT", "MARKET DATA OK")
         slog("HEARTBEAT", "ORDER MANAGER OK")

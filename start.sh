@@ -4,11 +4,13 @@
 # Git login is not required. From any directory, call this file by its real path.
 # `/start.sh` and `/run.sh` are the filesystem root and will not work.
 #
-#   bash /path/to/this/repo/run.sh help
-#   bash /path/to/this/repo/run.sh check
-#   bash /path/to/this/repo/run.sh dry
-#   bash /path/to/this/repo/run.sh once
-#   bash /path/to/this/repo/run.sh live-ready
+# From the folder that contains this file. Do not paste the script into zsh.
+#   bash ./run.sh help
+#   bash ./run.sh check
+#   bash ./run.sh dry
+#   bash ./run.sh once
+#   bash ./run.sh live-ready
+#   bash ./start.sh
 
 if [ -z "${BASH_VERSION:-}" ]; then
   exec /usr/bin/env bash "$0" "$@"
@@ -144,34 +146,46 @@ want_screen=0
 if [[ -t 1 ]]; then
   want_screen=1
 fi
-for a in "$@"; do
-  case "$a" in
-    --once|--check-config|--preflight|--backtest|--no-screen)
-      want_screen=0
-      ;;
-    --screen)
-      want_screen=1
-      ;;
-  esac
-done
-
-SCREEN_ARGS=()
-if [[ "$want_screen" -eq 1 ]]; then
-  has_screen=0
+if [[ $# -gt 0 ]]; then
   for a in "$@"; do
-    if [[ "$a" == "--screen" ]]; then
-      has_screen=1
-    fi
+    case "$a" in
+      --once|--check-config|--preflight|--backtest|--no-screen)
+        want_screen=0
+        ;;
+      --screen)
+        want_screen=1
+        ;;
+    esac
   done
-  if [[ "$has_screen" -eq 0 ]]; then
-    SCREEN_ARGS=(--screen)
-  fi
 fi
 
-echo "opening Bitbank BTC/JPY 取引画面 (Ctrl-C to stop)"
+# macOS /bin/bash 3.2 with set -u treats an empty "${array[@]}" as unbound.
+launch=("$VPY" "$ROOT/main.py")
+if [[ "$want_screen" -eq 1 ]]; then
+  has_screen=0
+  if [[ $# -gt 0 ]]; then
+    for a in "$@"; do
+      if [[ "$a" == "--screen" ]]; then
+        has_screen=1
+      fi
+    done
+  fi
+  if [[ "$has_screen" -eq 0 ]]; then
+    launch+=("--screen")
+  fi
+fi
+if [[ $# -gt 0 ]]; then
+  launch+=("$@")
+fi
+
+if [[ "$want_screen" -eq 1 ]]; then
+  echo "opening Bitbank BTC/JPY 取引画面 (Ctrl-C to stop)"
+else
+  echo "starting without the trading screen"
+fi
 echo "HOLD/WAIT is normal. JSON detail is logs/bot.log"
 echo "using $VPY"
 
-# Default (no extra args): continuous loop + trading screen on a TTY.
+# Default (no extra args, on a TTY): continuous loop + trading screen.
 # Do not pass --once here.
-exec "$VPY" "$ROOT/main.py" "${SCREEN_ARGS[@]}" "$@"
+exec "${launch[@]}"
