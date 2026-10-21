@@ -2,31 +2,28 @@
 
 Bitbank-only `btc_jpy` bot. Default is a **continuous DRY_RUN loop** with an iTerm **取引画面** (trading dashboard). HOLD/WAIT on a bar is normal. JSON lines are written to `logs/bot.log`, not the dashboard.
 
-`main` on GitHub is still wiki HTML. The runnable bot is branch `cursor/bitbank-audit-unify-f5fd`.
+HOLD for 15 minutes while market data and strategy are healthy is `LONG_WAIT`, not a crash. Public-API fallback candles never place orders. Live UNFILLED limits are persisted and polled. A canceled order releases that pending state. New BUY is blocked when both 4h and 1d SMA slopes are down (`ENABLE_HTF_FILTER`). Take-profit and stop-loss can fire on an already processed candle.
 
-HOLD for 15 minutes while market data and strategy are healthy is `LONG_WAIT`, not a crash. Public-API fallback candles never place orders. Live UNFILLED limits are persisted and polled. New BUY is blocked when both 4h and 1d SMA slopes are down (`ENABLE_HTF_FILTER`).
+## Start (no Git login)
 
-## Start (this is the program)
-
-`main` on GitHub is wiki HTML. You do **not** need pip, venv, or `start.sh` for the bot to run.
-
-Paste **this one line** in iTerm. It downloads `run.py` and starts a DRY_RUN 取引画面 (no orders):
+Git is not required. Do not run `/run.sh` (that path is the filesystem root). From any directory:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/kazuterukawamitu/docker-compose-up-d/cursor/bitbank-audit-unify-f5fd/run.py -o "$HOME/bitbank_run.py" && python3 "$HOME/bitbank_run.py"
+bash ./run.sh help
+bash ./run.sh check
+bash ./run.sh dry
+bash ./run.sh once
+bash ./run.sh live-ready
+bash ./start.sh
 ```
 
-You should see `Bitbank  BTC/JPY  取引画面`. HOLD/待機 is normal. Stop with Ctrl-C.
+Do not paste `run.sh`, `start.sh`, or Python source into zsh. zsh treats `!` as history and `(` as syntax, which prints `event not found` and `parse error`.
 
-If this repo is already checked out on this branch:
+`dry` and `once` force `DRY_RUN` and do not call Bitbank `create_order`. `live-ready` only prints whether `.env` would allow live orders. `scripts/pack_source.sh` builds a tar on this machine and does not SSH.
 
-```bash
-python3 run.py
-```
+If the full package dependencies are missing, `run.sh once` falls back to `python3 run.py` (still no orders).
 
-`python3 main.py` also works: it uses the full package when httpx is installed, otherwise the same stdlib `run.py`.
-
-Live trading stays **off** unless `.env` has `DRY_RUN=false` **and** `LIVE_TRADING=true` **and** both API keys.
+Live trading stays **off** unless `.env` has `DRY_RUN=false` **and** `LIVE_TRADING=true` **and** both API keys. A VPS password rejection means the bot is not running on that VPS; the local tar is not a deploy.
 
 `--once --synthetic` is a one-cycle smoke test that **exits on purpose**. The launcher above does **not** use `--once`.
 
@@ -61,6 +58,7 @@ State-machine mapping: [docs/STRATEGY.md](docs/STRATEGY.md).
 - Copy `.env.example` to `.env` is done by `start.sh` when missing. **Never commit `.env`.**
 - If API keys were pasted into chat, **rotate them in the bitbank console**.
 - `DRY_RUN=true` and `LIVE_TRADING=true` are mutually exclusive.
+- `LIVE_READY=true` logs `WOULD_SUBMIT_ORDER` and does not call `create_order`, even when the live flags are set.
 - Create `data/KILL` to halt new orders.
 
 ## Tests

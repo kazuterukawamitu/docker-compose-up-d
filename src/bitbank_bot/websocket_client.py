@@ -66,6 +66,14 @@ class BitbankWebsocket:
     def is_connected(self) -> bool:
         return self._connected and not self.is_stale()
 
+    def link_state(self) -> str:
+        """`starting` until the first message. `disconnected` only after that."""
+        if self.is_connected():
+            return "connected"
+        if self._last_event_mono <= 0:
+            return "starting"
+        return "disconnected"
+
     def last_price(self) -> Any:
         if not self.last_ticker:
             return None

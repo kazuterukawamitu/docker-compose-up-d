@@ -256,6 +256,15 @@ class Strategy:
 
     def evaluate(self, snap: MarketSnapshot, position: Position | None) -> Signal:
         self.observe(snap)
+        if position is not None and self.cfg.stop_loss_pct > 0:
+            stop_px = pct_offset(position.average_price, -self.cfg.stop_loss_pct)
+            if snap.close <= stop_px:
+                return Signal(
+                    "STOP",
+                    "sell",
+                    None,
+                    f"stop loss close={snap.close} <= {stop_px}",
+                )
         same_entry = position is not None and snap.index == position.entry_candle_index
         if position is not None and not same_entry:
             sell = self._sell_signal(snap)
@@ -369,6 +378,18 @@ class Strategy:
                 origin_price=self.buy4.origin,
             )
         return Signal.hold("no_buy_setup")
+
+    def buy_checks(self, snap: MarketSnapshot) -> dict[str, bool]:
+        """Which Granville buy gates are true. Does not change the signal."""
+        return {
+            "buy1_left_downtrend": snap.prev_ma_trend == Trend.DOWN
+            and snap.ma_trend in {Trend.FLAT, Trend.UP},
+            "buy1_crossed_up": snap.crossed_up,
+            "buy2_uptrend": snap.ma_trend == Trend.UP,
+            "buy2_crossed_down": snap.crossed_down,
+            "buy3_armed": self._buy3,
+            "buy4_armed": self._buy4,
+        }
 
 
 def build_snapshots(

@@ -7,6 +7,26 @@ import pytest
 from bitbank_bot.config import PAIR, ConfigError, load_config, normalize_pair
 
 
+def test_dotenv_loads_only_the_project_file(tmp_path, monkeypatch) -> None:
+    seen: dict[str, object] = {}
+
+    def fake_load(path=None, override=False):
+        seen["path"] = path
+        return True
+
+    monkeypatch.setattr("bitbank_bot.config.load_dotenv", fake_load)
+    monkeypatch.setattr(
+        "bitbank_bot.config._project_env_file", lambda: tmp_path / "missing.env"
+    )
+    load_config(environ={"DRY_RUN": "true"}, load_default_dotenv=True)
+    assert "path" not in seen
+    env_file = tmp_path / ".env"
+    env_file.write_text("DRY_RUN=true\n", encoding="utf-8")
+    monkeypatch.setattr("bitbank_bot.config._project_env_file", lambda: env_file)
+    load_config(environ={"DRY_RUN": "true"}, load_default_dotenv=True)
+    assert seen["path"] == env_file
+
+
 def test_default_is_dry_run() -> None:
     cfg = load_config(environ={}, load_default_dotenv=False)
     assert cfg.dry_run is True

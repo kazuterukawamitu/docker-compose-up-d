@@ -9,7 +9,11 @@ def test_ws_not_stale_before_first_event() -> None:
     ws = BitbankWebsocket("wss://example/socket.io/?EIO=4&transport=websocket", ("ticker_btc_jpy",))
     assert not ws.is_stale()
     assert not ws.is_connected()
+    assert ws.link_state() == "starting"
     assert ws.last_price() is None
+    ws._last_event_mono = 1.0
+    ws._connected = False
+    assert ws.link_state() == "disconnected"
 
 
 def test_start_without_websockets_does_not_raise() -> None:

@@ -7,7 +7,7 @@ runnable bot lives in `src/bitbank_bot/`. This branch is Bitbank `btc_jpy` only.
 
 | Area | Where | Role |
 | --- | --- | --- |
-| Config / dual live flags | `config.py` | `DRY_RUN` default; live needs `DRY_RUN=false` and `LIVE_TRADING=true` and keys |
+| Config / dual live flags | `config.py` | `DRY_RUN` default; live needs `DRY_RUN=false` and `LIVE_TRADING=true` and keys. `LIVE_READY=true` blocks `create_order` |
 | Public + private REST | `rest_client.py` | HMAC `ACCESS-TIME-WINDOW`; `create_order` requires `live_confirmed` |
 | README MA rules | `strategy.py`, `docs/STRATEGY.md` | BUY1–4 / SELL1–4; HOLD always has a reason |
 | Size | `amounts.py` | Only place that sets quantity; TARGET vs PLANNED; ACTUAL unset until fill |
@@ -57,13 +57,22 @@ bitFlyer, Coincheck, and GMO are not imported and are not executed.
 10. **Partial fills.** `PARTIALLY_FILLED` stays in `state.pending` and is polled
     until the remainder fills.
 11. **Kill file.** `data/KILL` blocks sells as well as buys.
+12. **Canceled orders.** `CANCELED` / `CANCELED_UNFILLED` clear `state.pending` instead of leaving it unfilled forever.
+13. **Partial-fill cost.** Added size uses cumulative notional minus the notional already booked, not new size times the cumulative average.
+14. **Fees.** Reported quote/base fees (or `FEE_RATE` when the payload has none) are included in cost and deducted from sell proceeds.
+15. **Same-candle exits.** A sell signal on an already processed bar still orders. Live price can take profit or hit `STOP_LOSS_PCT` without waiting for the next closed candle. `STOP` is a market order.
+16. **Startup reconcile.** In live mode, one open exchange order is adopted and a local pending id missing from active orders is polled. DRY_RUN does not adopt.
+17. **Launcher.** `run.sh` and `start.sh` do not run git. `/run.sh` is not a valid path.
+18. **Empty active-order payload.** `{"orders": []}` is not treated as an open order.
+19. **LIVE_READY.** `LIVE_READY=true` logs `WOULD_SUBMIT_ORDER` and never calls `create_order`. A simulated fill is ignored when `DRY_RUN` is off.
+20. **BUY_GATE / candle errors.** A `no_buy_setup` bar logs which Granville gates failed. A candle fetch error logs pair, type, date, HTTP status, and Bitbank code, not the API secret.
 
 ## What this bot does not do
 
 - Does not SSH to a VPS or install systemd for you.
 - Does not implement quantum / multi-exchange / guaranteed fills or profits.
 - Does not log API keys or secrets (`safe_dict` / `Config.__repr__`).
-- Does not place a live order unless both flags and keys are set.
+- Does not place a live order unless both flags and keys are set, and `LIVE_READY` is false.
 
 If keys were pasted into chat, rotate them in the bitbank console. Do not put
 them in git, screenshots, or logs.

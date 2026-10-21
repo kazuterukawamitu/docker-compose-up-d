@@ -88,6 +88,26 @@ def test_take_profit_sells() -> None:
     assert sig.side == "sell"
 
 
+def test_stop_loss_sells_even_on_entry_candle() -> None:
+    c = cfg(ma_period=3, short_ma_period=3, long_ma_period=5, stop_loss_pct=D("0.02"))
+    closes = [D("100")] * 10
+    snaps = build_snapshots(closes, list(range(10)), c)
+    pos = Position(
+        amount=D("0.01"),
+        average_price=D("100"),
+        tp_pct=D("0.03"),
+        entry_candle_index=snaps[-1].index,
+        entry_candle_ts=snaps[-1].timestamp_ms,
+        actual_execution_jpy=D("1000"),
+        kind="BUY1",
+    )
+    snapped = snaps[-1]
+    snapped.close = D("97")
+    sig = Strategy(c).evaluate(snapped, pos)
+    assert sig.kind == "STOP"
+    assert sig.side == "sell"
+
+
 def test_hold_requires_reason() -> None:
     from bitbank_bot.strategy import Signal
 
@@ -117,3 +137,16 @@ def test_sell3_on_upcross_in_downtrend() -> None:
             last_sell = sig
     assert last_sell is not None
     assert last_sell.side == "sell"
+
+
+def test_buy_checks_name_the_failed_gate() -> None:
+    closes = [D("100")] * 8
+    snaps, c = _snaps_from_closes(closes)
+    strat = Strategy(c)
+    for snap in snaps:
+        strat.observe(snap)
+    checks = strat.buy_checks(snaps[-1])
+    assert checks["buy1_crossed_up"] is False
+    assert checks["buy3_armed"] is False
+    assert checks["buy4_armed"] is False
+    assert strat.evaluate(snaps[-1], None).reason == "no_buy_setup"

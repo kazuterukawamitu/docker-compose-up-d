@@ -197,3 +197,113 @@ def test_poll_failed() -> None:
     result = OrderExecutor(c, client).poll("42", Decimal("0.001"))
     assert not result.ok
     assert result.reason == "poll_failed"
+
+
+def test_poll_canceled_unfilled_is_terminal() -> None:
+    client = MagicMock()
+    client.get_order.return_value = {
+        "order_id": "42",
+        "status": "CANCELED_UNFILLED",
+        "executed_amount": "0",
+        "average_price": "0",
+        "start_amount": "0.001",
+    }
+    c = cfg(dry_run=False, live_trading=True, api_key="k", api_secret="s")
+    result = OrderExecutor(c, client).poll("42", Decimal("0.001"))
+    assert result.ok
+    assert result.reason == "canceled"
+    assert result.executed_amount == Decimal("0")
+
+
+def test_poll_fee_quote_is_cumulative() -> None:
+    client = MagicMock()
+    client.get_order.return_value = {
+        "order_id": "42",
+        "status": "FULLY_FILLED",
+        "executed_amount": "0.001",
+        "average_price": "10000000",
+        "start_amount": "0.001",
+        "fee_amount_quote": "15",
+    }
+    c = cfg(dry_run=False, live_trading=True, api_key="k", api_secret="s")
+    result = OrderExecutor(c, client).poll("42", Decimal("0.001"))
+    assert result.fee_jpy == Decimal("15")
+    assert result.actual_execution_jpy == Decimal("10000")
+
+
+def test_stop_signal_is_market_order() -> None:
+    client = MagicMock()
+    client.get_active_orders.return_value = []
+    client.create_order.return_value = {
+        "order_id": "7",
+        "status": "FULLY_FILLED",
+        "executed_amount": "0.001",
+        "average_price": "10000000",
+        "start_amount": "0.001",
+    }
+    c = cfg(dry_run=False, live_trading=True, api_key="k", api_secret="s", order_type="limit")
+    result = OrderExecutor(c, client).place(
+        Signal("STOP", "sell", None, "stop"), _plan()
+    )
+    assert result.ok
+    assert client.create_order.call_args.kwargs["order_type"] == "market"
+    assert client.create_order.call_args.kwargs["price"] is None
+
+
+def test_incremental_notional_uses_cumulative_average() -> None:
+    from bitbank_bot.orders import incremental_notional
+
+    delta_amt, delta_notional, cumulative = incremental_notional(
+        Decimal("0.001"),
+        Decimal("12000000"),
+        Decimal("0.0004"),
+        Decimal("4000"),
+    )
+    assert delta_amt == Decimal("0.0006")
+    assert cumulative == Decimal("12000")
+    assert delta_notional == Decimal("8000")
+    assert delta_amt * Decimal("12000000") != delta_notional
+
+
+def test_empty_order_object_is_not_an_active_order() -> None:
+    from bitbank_bot.orders import coerce_active_orders
+
+    client = MagicMock()
+    client.get_active_orders.return_value = {"orders": []}
+    client.get_order.return_value = {
+        "order_id": "9",
+        "status": "UNFILLED",
+        "executed_amount": "0",
+        "average_price": "0",
+        "start_amount": "0.001",
+    }
+    client.create_order.return_value = {
+        "order_id": "9",
+        "status": "UNFILLED",
+        "executed_amount": "0",
+        "average_price": "0",
+        "start_amount": "0.001",
+    }
+    c = cfg(dry_run=False, live_trading=True, api_key="k", api_secret="s")
+    result = OrderExecutor(c, client).place(Signal("BUY1", "buy", Decimal("0.05"), "x"), _plan())
+    assert result.order_id == "9"
+    client.create_order.assert_called_once()
+    assert coerce_active_orders({"orders": [{"order_id": "1"}]})[0]["order_id"] == "1"
+
+
+def test_live_ready_logs_intent_and_does_not_order() -> None:
+    client = MagicMock()
+    client.get_active_orders.return_value = []
+    c = cfg(
+        dry_run=False,
+        live_trading=True,
+        live_ready=True,
+        api_key="k",
+        api_secret="s",
+        simulate_fill=True,
+    )
+    result = OrderExecutor(c, client).place(Signal("BUY1", "buy", Decimal("0.05"), "x"), _plan())
+    assert result.reason == "would_submit"
+    assert result.simulated is False
+    assert result.executed_amount == Decimal("0")
+    client.create_order.assert_not_called()

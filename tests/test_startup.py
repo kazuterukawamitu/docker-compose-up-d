@@ -52,8 +52,12 @@ def test_start_sh_is_venv_loop_launcher() -> None:
     assert ".env.example" in text
     assert "python3.12" in text
     assert "python3" in text
-    assert 'BOT_BRANCH="cursor/bitbank-audit-unify-f5fd"' in text
+    assert "git fetch" not in text
+    assert "git clone" not in text
+    assert "run.sh" in text
     assert "run.py" in text
+    assert '"${SCREEN_ARGS[@]}"' not in text
+    assert "bash ./" in text
 
 
 def test_loop_cli_exits_after_max_cycles(tmp_path, monkeypatch) -> None:

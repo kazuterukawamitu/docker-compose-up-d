@@ -6,7 +6,8 @@ from decimal import Decimal
 from typing import Any
 from unittest.mock import MagicMock, patch
 
-from bitbank_bot.engine import Engine, PendingOrder, load_state
+from bitbank_bot.engine import BotState, Engine, PendingOrder, load_state
+from bitbank_bot.orders import OrderResult
 from bitbank_bot.market_data import parse_ohlcv, synthetic_candles
 from bitbank_bot.multi_timeframe import HtfVerdict
 from bitbank_bot.preflight import preflight
@@ -436,3 +437,245 @@ def test_partial_fill_keeps_pending(tmp_path) -> None:
     assert state.pending.filled_amount == Decimal("0.0004")
     assert state.position is not None
     assert state.position.amount == Decimal("0.0004")
+
+
+def test_canceled_pending_is_cleared(tmp_path) -> None:
+    c = cfg(
+        state_path=str(tmp_path / "state.json"),
+        lock_path=str(tmp_path / "bot.lock"),
+        log_dir=str(tmp_path / "logs"),
+        enable_websocket=False,
+        enable_htf_filter=False,
+        dry_run=False,
+        live_trading=True,
+        api_key="k",
+        api_secret="s",
+        ma_period=3,
+        short_ma_period=3,
+        long_ma_period=5,
+    )
+    rest = MagicMock()
+    rest.free_amount.side_effect = lambda asset: (
+        Decimal("100000") if asset == "jpy" else Decimal("0")
+    )
+    rest.get_active_orders.return_value = []
+    engine = Engine(c, client=rest)
+    from bitbank_bot.engine import BotState
+
+    state = BotState(
+        None,
+        RiskManager(c),
+        0,
+        time.monotonic(),
+        pending=PendingOrder(
+            order_id="42",
+            side="buy",
+            kind="BUY1",
+            tp_pct=Decimal("0.03"),
+            index=1,
+            timestamp_ms=1,
+            amount=Decimal("0.001"),
+        ),
+    )
+    rest.get_order.return_value = {
+        "order_id": "42",
+        "status": "CANCELED_UNFILLED",
+        "executed_amount": "0",
+        "average_price": "0",
+        "start_amount": "0.001",
+    }
+    with patch(
+        "bitbank_bot.strategy.Strategy.evaluate",
+        return_value=Signal.hold("no_setup"),
+    ):
+        engine.process_candles(synthetic_candles(40), state, execute=True, persist=False)
+    assert state.pending is None
+    rest.create_order.assert_not_called()
+
+
+def test_partial_increment_does_not_use_cumulative_average(tmp_path) -> None:
+    c = cfg(
+        state_path=str(tmp_path / "state.json"),
+        lock_path=str(tmp_path / "bot.lock"),
+        log_dir=str(tmp_path / "logs"),
+        enable_websocket=False,
+        enable_htf_filter=False,
+        dry_run=False,
+        live_trading=True,
+        api_key="k",
+        api_secret="s",
+        ma_period=3,
+        short_ma_period=3,
+        long_ma_period=5,
+    )
+    rest = MagicMock()
+    rest.free_amount.side_effect = lambda asset: (
+        Decimal("100000") if asset == "jpy" else Decimal("1")
+    )
+    rest.get_active_orders.return_value = []
+    rest.get_order.return_value = {
+        "order_id": "99",
+        "status": "FULLY_FILLED",
+        "executed_amount": "0.001",
+        "average_price": "12000000",
+        "start_amount": "0.001",
+    }
+    engine = Engine(c, client=rest)
+    from bitbank_bot.engine import BotState
+    from bitbank_bot.strategy import Position
+
+    state = BotState(
+        Position(
+            amount=Decimal("0.0004"),
+            average_price=Decimal("10000000"),
+            tp_pct=Decimal("0.50"),
+            entry_candle_index=0,
+            entry_candle_ts=1,
+            actual_execution_jpy=Decimal("4000"),
+            kind="BUY1",
+        ),
+        RiskManager(c),
+        0,
+        time.monotonic(),
+        pending=PendingOrder(
+            order_id="99",
+            side="buy",
+            kind="BUY1",
+            tp_pct=Decimal("0.50"),
+            index=1,
+            timestamp_ms=1,
+            amount=Decimal("0.001"),
+            filled_amount=Decimal("0.0004"),
+            filled_notional_jpy=Decimal("4000"),
+        ),
+    )
+    with patch(
+        "bitbank_bot.strategy.Strategy.evaluate",
+        return_value=Signal.hold("no_setup"),
+    ):
+        engine.process_candles(synthetic_candles(40), state, execute=True, persist=False)
+    assert state.position is not None
+    assert state.position.amount == Decimal("0.001")
+    assert state.position.actual_execution_jpy == Decimal("12000")
+    assert state.pending is None
+
+
+def test_heartbeat_sell_still_orders(tmp_path) -> None:
+    from bitbank_bot.engine import BotState
+    from bitbank_bot.strategy import Position, build_snapshots
+
+    c = cfg(
+        state_path=str(tmp_path / "state.json"),
+        lock_path=str(tmp_path / "bot.lock"),
+        log_dir=str(tmp_path / "logs"),
+        enable_websocket=False,
+        enable_htf_filter=False,
+        dry_run=True,
+        live_trading=False,
+        simulate_fill=True,
+        ma_period=3,
+        short_ma_period=3,
+        long_ma_period=5,
+    )
+    candles = synthetic_candles(40)
+    snaps = build_snapshots(
+        [x.close for x in candles], [x.timestamp_ms for x in candles], c
+    )
+    engine = Engine(c, client=FakeRest())  # type: ignore[arg-type]
+    state = BotState(
+        Position(
+            amount=Decimal("0.001"),
+            average_price=Decimal("10000000"),
+            tp_pct=Decimal("0.50"),
+            entry_candle_index=1,
+            entry_candle_ts=1,
+            actual_execution_jpy=Decimal("10000"),
+            kind="BUY1",
+        ),
+        RiskManager(c),
+        snaps[-1].timestamp_ms,
+        time.monotonic(),
+        paper_jpy=Decimal("90000"),
+        paper_btc=Decimal("0.001"),
+    )
+    with patch(
+        "bitbank_bot.strategy.Strategy.evaluate",
+        return_value=Signal("SELL1", "sell", None, "forced"),
+    ):
+        engine.process_candles(candles, state, execute=True, persist=False)
+    assert state.position is None
+
+
+def test_reported_fee_increases_buy_cost(tmp_path) -> None:
+    c = cfg(
+        state_path=str(tmp_path / "state.json"),
+        lock_path=str(tmp_path / "bot.lock"),
+        log_dir=str(tmp_path / "logs"),
+        enable_websocket=False,
+        enable_htf_filter=False,
+        dry_run=False,
+        live_trading=True,
+        api_key="k",
+        api_secret="s",
+        ma_period=3,
+        short_ma_period=3,
+        long_ma_period=5,
+    )
+    rest = MagicMock()
+    rest.free_amount.side_effect = lambda asset: (
+        Decimal("100000") if asset == "jpy" else Decimal("0")
+    )
+    rest.get_active_orders.return_value = []
+    rest.create_order.return_value = {
+        "order_id": "5",
+        "status": "FULLY_FILLED",
+        "executed_amount": "0.001",
+        "average_price": "10000000",
+        "start_amount": "0.001",
+        "fee_amount_quote": "15",
+    }
+    engine = Engine(c, client=rest)
+    from bitbank_bot.engine import BotState
+
+    state = BotState(None, RiskManager(c), 0, time.monotonic())
+    with patch(
+        "bitbank_bot.strategy.Strategy.evaluate",
+        return_value=Signal("BUY1", "buy", Decimal("0.03"), "forced"),
+    ):
+        engine.process_candles(synthetic_candles(40), state, execute=True, persist=False)
+    assert state.position is not None
+    assert state.position.actual_execution_jpy == Decimal("10015")
+
+
+def test_live_mode_ignores_simulated_fill() -> None:
+    c = cfg(dry_run=False, live_trading=True, api_key="k", api_secret="s")
+    engine = Engine(c, client=MagicMock())
+    state = BotState(None, RiskManager(c), 0, time.monotonic())
+    plan = MagicMock()
+    plan.amount = Decimal("0.001")
+    plan.target_jpy = Decimal("10000")
+    plan.planned_order_jpy = Decimal("10000")
+    result = OrderResult(
+        True,
+        "simulated",
+        True,
+        True,
+        "dry-run",
+        "FULLY_FILLED",
+        Decimal("0.001"),
+        Decimal("10000000"),
+        Decimal("10000"),
+        None,
+    )
+    engine._apply_fill(
+        Signal("BUY1", "buy", Decimal("0.05"), "x"),
+        plan,
+        result,
+        1,
+        1,
+        state,
+        Decimal("100000"),
+        Decimal("0"),
+    )
+    assert state.position is None
+    assert state.paper_btc == Decimal("0")

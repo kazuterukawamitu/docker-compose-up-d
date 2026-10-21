@@ -124,6 +124,7 @@ class Config:
     dry_run: bool = True
     live_trading: bool = False
     simulate_fill: bool = True
+    live_ready: bool = False
     candle_type: str = DEFAULT_CANDLE_TYPE
     ma_period: int = DEFAULT_MA_PERIOD
     short_ma_period: int = DEFAULT_SHORT_MA_PERIOD
@@ -172,6 +173,8 @@ class Config:
     candle_lookback_days: int = DEFAULT_LOOKBACK_DAYS
     circuit_breaker_errors: int = DEFAULT_CIRCUIT_BREAKER_ERRORS
     max_drawdown_jpy: Decimal = D(DEFAULT_MAX_DRAWDOWN_JPY)
+    stop_loss_pct: Decimal = D("0")
+    fee_rate: Decimal = D("0")
     ws_rooms: tuple[str, ...] = ("ticker_btc_jpy",)
 
     def __str__(self) -> str:
@@ -197,6 +200,7 @@ class Config:
             "live_trading": self.live_trading,
             "may_place_live_orders": self.may_place_live_orders,
             "simulate_fill": self.simulate_fill,
+            "live_ready": self.live_ready,
             "candle_type": self.candle_type,
             "ma_period": self.ma_period,
             "short_ma_period": self.short_ma_period,
@@ -214,7 +218,14 @@ class Config:
             "min_amount_btc": str(self.min_amount_btc),
             "circuit_breaker_errors": self.circuit_breaker_errors,
             "max_drawdown_jpy": str(self.max_drawdown_jpy),
+            "stop_loss_pct": str(self.stop_loss_pct),
+            "fee_rate": str(self.fee_rate),
         }
+
+
+def _project_env_file() -> Path:
+    """`.env` next to `main.py`. Do not walk up to a home-directory dotenv."""
+    return Path(__file__).resolve().parents[2] / ".env"
 
 
 def load_config(
@@ -225,7 +236,9 @@ def load_config(
     if env_file:
         load_dotenv(env_file, override=False)
     elif load_default_dotenv:
-        load_dotenv(override=False)
+        project_env = _project_env_file()
+        if project_env.is_file():
+            load_dotenv(project_env, override=False)
     env: Mapping[str, str] = environ if environ is not None else os.environ
     pair = normalize_pair(_env(env, "BITBANK_PAIR", PAIR) or PAIR)
     if pair in REJECTED_PAIR_ALIASES:
@@ -277,6 +290,7 @@ def load_config(
         dry_run=dry_run,
         live_trading=live_trading,
         simulate_fill=_bool(env, "DRY_RUN_SIMULATE_FILL", True),
+        live_ready=_bool(env, "LIVE_READY", False),
         candle_type=candle_type,
         ma_period=_int(env, "MA_PERIOD", DEFAULT_MA_PERIOD),
         short_ma_period=_int(
@@ -335,6 +349,8 @@ def load_config(
             env, "CIRCUIT_BREAKER_ERRORS", DEFAULT_CIRCUIT_BREAKER_ERRORS
         ),
         max_drawdown_jpy=_dec(env, "MAX_DRAWDOWN_JPY", DEFAULT_MAX_DRAWDOWN_JPY),
+        stop_loss_pct=_dec(env, "STOP_LOSS_PCT", "0"),
+        fee_rate=_dec(env, "FEE_RATE", "0"),
     )
     if live_trading and not cfg.has_keys:
         raise ConfigError("LIVE_TRADING requires BITBANK_API_KEY and BITBANK_API_SECRET")
@@ -342,4 +358,8 @@ def load_config(
         raise ConfigError("MA periods must be >= 2")
     if cfg.long_ma_period < cfg.short_ma_period:
         raise ConfigError("LONG_MA_PERIOD must be >= SHORT_MA_PERIOD")
+    if cfg.stop_loss_pct < 0 or cfg.stop_loss_pct >= 1:
+        raise ConfigError("STOP_LOSS_PCT must be in [0, 1)")
+    if cfg.fee_rate < 0 or cfg.fee_rate >= 1:
+        raise ConfigError("FEE_RATE must be in [0, 1)")
     return cfg
