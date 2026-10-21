@@ -24,7 +24,12 @@ from bitbank_bot.market_data import (
 )
 from bitbank_bot.money import D, ZERO, pct_offset
 from bitbank_bot.multi_timeframe import evaluate_htf
-from bitbank_bot.orders import OrderExecutor, OrderResult, incremental_notional
+from bitbank_bot.orders import (
+    OrderExecutor,
+    OrderResult,
+    coerce_active_orders,
+    incremental_notional,
+)
 from bitbank_bot.preflight import preflight
 from bitbank_bot.rest_client import BitbankAPIError, RestClient, is_auth_error
 from bitbank_bot.risk import RiskManager
@@ -272,6 +277,8 @@ class Engine:
             signal = strategy.evaluate(snap, state.position)
             self.strategy_evaluations += 1
             slog("STRATEGY", "signal", kind=signal.kind, reason=signal.reason, side=signal.side)
+            if is_last and signal.reason == "no_buy_setup":
+                slog("STRATEGY", "BUY_GATE", close=str(snap.close), ma=str(snap.ma), trend=snap.ma_trend.value, **strategy.buy_checks(snap))
             if not execute or heartbeat:
                 if (
                     heartbeat
@@ -561,6 +568,14 @@ class Engine:
                 side=signal.side,
             )
             return
+        if result.simulated and not self.cfg.dry_run:
+            slog(
+                "EXECUTION_BLOCKED",
+                "simulated fill rejected while DRY_RUN is off",
+                reason="simulated_fill_rejected_in_live",
+                side=signal.side,
+            )
+            return
         if not result.ok or result.executed_amount <= ZERO:
             return
         actual_jpy = result.actual_execution_jpy
@@ -691,12 +706,9 @@ class Engine:
             return
         rest = self._rest()
         try:
-            active = rest.get_active_orders(self.cfg.pair)
+            active = coerce_active_orders(rest.get_active_orders(self.cfg.pair))
         except Exception as exc:
             slog("ERROR", "reconcile active orders failed", error=type(exc).__name__)
-            return
-        if not isinstance(active, list):
-            slog("ERROR", "reconcile active orders returned unexpected payload")
             return
         active_ids = {str(row.get("order_id")) for row in active if row.get("order_id")}
         if state.pending is not None and state.pending.order_id not in active_ids:

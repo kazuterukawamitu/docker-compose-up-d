@@ -124,6 +124,7 @@ class Config:
     dry_run: bool = True
     live_trading: bool = False
     simulate_fill: bool = True
+    live_ready: bool = False
     candle_type: str = DEFAULT_CANDLE_TYPE
     ma_period: int = DEFAULT_MA_PERIOD
     short_ma_period: int = DEFAULT_SHORT_MA_PERIOD
@@ -199,6 +200,7 @@ class Config:
             "live_trading": self.live_trading,
             "may_place_live_orders": self.may_place_live_orders,
             "simulate_fill": self.simulate_fill,
+            "live_ready": self.live_ready,
             "candle_type": self.candle_type,
             "ma_period": self.ma_period,
             "short_ma_period": self.short_ma_period,
@@ -281,6 +283,7 @@ def load_config(
         dry_run=dry_run,
         live_trading=live_trading,
         simulate_fill=_bool(env, "DRY_RUN_SIMULATE_FILL", True),
+        live_ready=_bool(env, "LIVE_READY", False),
         candle_type=candle_type,
         ma_period=_int(env, "MA_PERIOD", DEFAULT_MA_PERIOD),
         short_ma_period=_int(

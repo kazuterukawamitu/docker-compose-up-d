@@ -6,7 +6,8 @@ from decimal import Decimal
 from typing import Any
 from unittest.mock import MagicMock, patch
 
-from bitbank_bot.engine import Engine, PendingOrder, load_state
+from bitbank_bot.engine import BotState, Engine, PendingOrder, load_state
+from bitbank_bot.orders import OrderResult
 from bitbank_bot.market_data import parse_ohlcv, synthetic_candles
 from bitbank_bot.multi_timeframe import HtfVerdict
 from bitbank_bot.preflight import preflight
@@ -644,3 +645,37 @@ def test_reported_fee_increases_buy_cost(tmp_path) -> None:
         engine.process_candles(synthetic_candles(40), state, execute=True, persist=False)
     assert state.position is not None
     assert state.position.actual_execution_jpy == Decimal("10015")
+
+
+def test_live_mode_ignores_simulated_fill() -> None:
+    c = cfg(dry_run=False, live_trading=True, api_key="k", api_secret="s")
+    engine = Engine(c, client=MagicMock())
+    state = BotState(None, RiskManager(c), 0, time.monotonic())
+    plan = MagicMock()
+    plan.amount = Decimal("0.001")
+    plan.target_jpy = Decimal("10000")
+    plan.planned_order_jpy = Decimal("10000")
+    result = OrderResult(
+        True,
+        "simulated",
+        True,
+        True,
+        "dry-run",
+        "FULLY_FILLED",
+        Decimal("0.001"),
+        Decimal("10000000"),
+        Decimal("10000"),
+        None,
+    )
+    engine._apply_fill(
+        Signal("BUY1", "buy", Decimal("0.05"), "x"),
+        plan,
+        result,
+        1,
+        1,
+        state,
+        Decimal("100000"),
+        Decimal("0"),
+    )
+    assert state.position is None
+    assert state.paper_btc == Decimal("0")

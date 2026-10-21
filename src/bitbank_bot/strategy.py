@@ -379,6 +379,18 @@ class Strategy:
             )
         return Signal.hold("no_buy_setup")
 
+    def buy_checks(self, snap: MarketSnapshot) -> dict[str, bool]:
+        """Which Granville buy gates are true. Does not change the signal."""
+        return {
+            "buy1_left_downtrend": snap.prev_ma_trend == Trend.DOWN
+            and snap.ma_trend in {Trend.FLAT, Trend.UP},
+            "buy1_crossed_up": snap.crossed_up,
+            "buy2_uptrend": snap.ma_trend == Trend.UP,
+            "buy2_crossed_down": snap.crossed_down,
+            "buy3_armed": self._buy3,
+            "buy4_armed": self._buy4,
+        }
+
 
 def build_snapshots(
     closes: Sequence[Decimal],

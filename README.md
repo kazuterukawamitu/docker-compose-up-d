@@ -55,6 +55,7 @@ State-machine mapping: [docs/STRATEGY.md](docs/STRATEGY.md).
 - Copy `.env.example` to `.env` is done by `start.sh` when missing. **Never commit `.env`.**
 - If API keys were pasted into chat, **rotate them in the bitbank console**.
 - `DRY_RUN=true` and `LIVE_TRADING=true` are mutually exclusive.
+- `LIVE_READY=true` logs `WOULD_SUBMIT_ORDER` and does not call `create_order`, even when the live flags are set.
 - Create `data/KILL` to halt new orders.
 
 ## Tests

@@ -137,3 +137,16 @@ def test_sell3_on_upcross_in_downtrend() -> None:
             last_sell = sig
     assert last_sell is not None
     assert last_sell.side == "sell"
+
+
+def test_buy_checks_name_the_failed_gate() -> None:
+    closes = [D("100")] * 8
+    snaps, c = _snaps_from_closes(closes)
+    strat = Strategy(c)
+    for snap in snaps:
+        strat.observe(snap)
+    checks = strat.buy_checks(snaps[-1])
+    assert checks["buy1_crossed_up"] is False
+    assert checks["buy3_armed"] is False
+    assert checks["buy4_armed"] is False
+    assert strat.evaluate(snaps[-1], None).reason == "no_buy_setup"

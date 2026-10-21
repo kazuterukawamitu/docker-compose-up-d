@@ -61,6 +61,19 @@ def _reason_for_status(status: str) -> str:
     return "fill"
 
 
+def coerce_active_orders(payload: Any) -> list[dict[str, Any]]:
+    """Bitbank returns ``{"orders": [...]}``. An empty dict is not an open order."""
+    if isinstance(payload, list):
+        return [row for row in payload if isinstance(row, dict)]
+    if isinstance(payload, dict):
+        nested = payload.get("orders")
+        if isinstance(nested, list):
+            return [row for row in nested if isinstance(row, dict)]
+        if payload.get("order_id"):
+            return [payload]
+    return []
+
+
 def order_fee_jpy(
     raw: dict[str, Any] | None,
     executed: Decimal,
@@ -156,7 +169,7 @@ class OrderExecutor:
         if self.client is None:
             return []
         try:
-            return self.client.get_active_orders(self.cfg.pair)
+            return coerce_active_orders(self.client.get_active_orders(self.cfg.pair))
         except Exception as exc:
             slog("ERROR", "active_orders failed", error=type(exc).__name__)
             raise
@@ -215,7 +228,30 @@ class OrderExecutor:
                 None,
                 None,
             )
-        if not self.cfg.may_place_live_orders:
+        if self.cfg.live_ready or not self.cfg.may_place_live_orders:
+            if self.cfg.live_ready:
+                slog(
+                    "ORDER_INTENT",
+                    "WOULD_SUBMIT_ORDER",
+                    pair=self.cfg.pair,
+                    side=plan.side,
+                    amount=str(plan.amount),
+                    price=str(plan.price),
+                    order_type=self.cfg.order_type,
+                )
+                return OrderResult(
+                    True,
+                    "would_submit",
+                    True,
+                    False,
+                    None,
+                    "UNFILLED",
+                    ZERO,
+                    ZERO,
+                    None,
+                    None,
+                    ZERO,
+                )
             slog(
                 "ORDER_INTENT",
                 "DRY_RUN: not calling Bitbank create_order",
@@ -224,7 +260,7 @@ class OrderExecutor:
                 price=str(plan.price),
                 mode="DRY_RUN" if self.cfg.dry_run else "LIVE_BLOCKED",
             )
-            if self.cfg.dry_run and self.cfg.simulate_fill:
+            if self.cfg.dry_run and self.cfg.simulate_fill and not self.cfg.live_ready:
                 actual = plan.amount * plan.price
                 fee = order_fee_jpy(None, plan.amount, plan.price, self.cfg.fee_rate)
                 slog(

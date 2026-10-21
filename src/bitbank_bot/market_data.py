@@ -88,7 +88,16 @@ def fetch_candles(
         try:
             rows = client.get_candlestick(cfg.pair, cfg.candle_type, key)
         except Exception as exc:
-            slog("MARKET", "candlestick fetch skipped", date_key=key, error=type(exc).__name__)
+            slog(
+                "ERROR",
+                "CANDLE_API_ERROR",
+                pair=cfg.pair,
+                candle_type=cfg.candle_type,
+                date=key,
+                error=type(exc).__name__,
+                http_status=getattr(exc, "http_status", None),
+                bitbank_code=getattr(exc, "code", None),
+            )
             continue
         for row in rows:
             try:

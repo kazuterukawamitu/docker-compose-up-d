@@ -263,3 +263,47 @@ def test_incremental_notional_uses_cumulative_average() -> None:
     assert cumulative == Decimal("12000")
     assert delta_notional == Decimal("8000")
     assert delta_amt * Decimal("12000000") != delta_notional
+
+
+def test_empty_order_object_is_not_an_active_order() -> None:
+    from bitbank_bot.orders import coerce_active_orders
+
+    client = MagicMock()
+    client.get_active_orders.return_value = {"orders": []}
+    client.get_order.return_value = {
+        "order_id": "9",
+        "status": "UNFILLED",
+        "executed_amount": "0",
+        "average_price": "0",
+        "start_amount": "0.001",
+    }
+    client.create_order.return_value = {
+        "order_id": "9",
+        "status": "UNFILLED",
+        "executed_amount": "0",
+        "average_price": "0",
+        "start_amount": "0.001",
+    }
+    c = cfg(dry_run=False, live_trading=True, api_key="k", api_secret="s")
+    result = OrderExecutor(c, client).place(Signal("BUY1", "buy", Decimal("0.05"), "x"), _plan())
+    assert result.order_id == "9"
+    client.create_order.assert_called_once()
+    assert coerce_active_orders({"orders": [{"order_id": "1"}]})[0]["order_id"] == "1"
+
+
+def test_live_ready_logs_intent_and_does_not_order() -> None:
+    client = MagicMock()
+    client.get_active_orders.return_value = []
+    c = cfg(
+        dry_run=False,
+        live_trading=True,
+        live_ready=True,
+        api_key="k",
+        api_secret="s",
+        simulate_fill=True,
+    )
+    result = OrderExecutor(c, client).place(Signal("BUY1", "buy", Decimal("0.05"), "x"), _plan())
+    assert result.reason == "would_submit"
+    assert result.simulated is False
+    assert result.executed_amount == Decimal("0")
+    client.create_order.assert_not_called()
