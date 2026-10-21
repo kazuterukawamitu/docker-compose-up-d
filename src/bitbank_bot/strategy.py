@@ -256,6 +256,15 @@ class Strategy:
 
     def evaluate(self, snap: MarketSnapshot, position: Position | None) -> Signal:
         self.observe(snap)
+        if position is not None and self.cfg.stop_loss_pct > 0:
+            stop_px = pct_offset(position.average_price, -self.cfg.stop_loss_pct)
+            if snap.close <= stop_px:
+                return Signal(
+                    "STOP",
+                    "sell",
+                    None,
+                    f"stop loss close={snap.close} <= {stop_px}",
+                )
         same_entry = position is not None and snap.index == position.entry_candle_index
         if position is not None and not same_entry:
             sell = self._sell_signal(snap)

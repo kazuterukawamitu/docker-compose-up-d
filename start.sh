@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 # Bitbank BTC/JPY launcher — opens the iTerm 取引画面 (trading screen).
 #
-# Paste this ONE line in iTerm (zsh is fine; this wraps bash):
-#   bash -lc 'REPO="$HOME/docker-compose-up-d"; set -euo pipefail; if [ ! -d "$REPO/.git" ]; then git clone https://github.com/kazuterukawamitu/docker-compose-up-d.git "$REPO"; fi; cd "$REPO"; git fetch origin cursor/bitbank-audit-unify-f5fd; git checkout -B cursor/bitbank-audit-unify-f5fd origin/cursor/bitbank-audit-unify-f5fd; exec bash ./start.sh --screen'
+# Git login is not required. From any directory, call this file by its real path.
+# `/start.sh` and `/run.sh` are the filesystem root and will not work.
 #
-# That line clones if needed, checks out the bot branch (main is wiki HTML only),
-# then opens the trading dashboard. Do not paste python3 main.py. Do not use !.
+#   bash /path/to/this/repo/run.sh help
+#   bash /path/to/this/repo/run.sh check
+#   bash /path/to/this/repo/run.sh dry
+#   bash /path/to/this/repo/run.sh once
+#   bash /path/to/this/repo/run.sh live-ready
 
 if [ -z "${BASH_VERSION:-}" ]; then
   exec /usr/bin/env bash "$0" "$@"
@@ -20,28 +23,20 @@ export PYTHONIOENCODING=utf-8
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT"
 
-BOT_BRANCH="cursor/bitbank-audit-unify-f5fd"
-
 ensure_bot_source() {
   if [[ -f "$ROOT/src/bitbank_bot/__init__.py" && -f "$ROOT/main.py" ]]; then
     return 0
   fi
-  echo "bot source not found at $ROOT (this clone is probably still on main / wiki dump)" >&2
-  if [[ ! -d "$ROOT/.git" ]]; then
-    echo "Paste this ONE line in iTerm:" >&2
-    echo "  bash -lc 'git clone https://github.com/kazuterukawamitu/docker-compose-up-d.git \"\$HOME/docker-compose-up-d\" && bash \"\$HOME/docker-compose-up-d/start.sh\" --screen'" >&2
-    exit 2
+  echo "bot package not found at $ROOT" >&2
+  echo "Git login is not used. Keep this folder on disk, or run python3 \"$ROOT/run.py\"." >&2
+  if [[ -f "$ROOT/run.py" ]]; then
+    echo "starting stdlib DRY_RUN (python3 run.py, no orders)" >&2
+    exec python3 "$ROOT/run.py" "$@"
   fi
-  echo "fetching $BOT_BRANCH so the trading screen can start" >&2
-  git fetch origin "$BOT_BRANCH"
-  git checkout -B "$BOT_BRANCH" "origin/$BOT_BRANCH"
-  if [[ ! -f "$ROOT/src/bitbank_bot/__init__.py" || ! -f "$ROOT/main.py" ]]; then
-    echo "still no bitbank_bot after checkout; branch may not be fetched" >&2
-    exit 2
-  fi
+  exit 2
 }
 
-ensure_bot_source
+ensure_bot_source "$@"
 
 pick_python() {
   local c

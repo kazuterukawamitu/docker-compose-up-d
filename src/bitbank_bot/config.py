@@ -172,6 +172,8 @@ class Config:
     candle_lookback_days: int = DEFAULT_LOOKBACK_DAYS
     circuit_breaker_errors: int = DEFAULT_CIRCUIT_BREAKER_ERRORS
     max_drawdown_jpy: Decimal = D(DEFAULT_MAX_DRAWDOWN_JPY)
+    stop_loss_pct: Decimal = D("0")
+    fee_rate: Decimal = D("0")
     ws_rooms: tuple[str, ...] = ("ticker_btc_jpy",)
 
     def __str__(self) -> str:
@@ -214,6 +216,8 @@ class Config:
             "min_amount_btc": str(self.min_amount_btc),
             "circuit_breaker_errors": self.circuit_breaker_errors,
             "max_drawdown_jpy": str(self.max_drawdown_jpy),
+            "stop_loss_pct": str(self.stop_loss_pct),
+            "fee_rate": str(self.fee_rate),
         }
 
 
@@ -335,6 +339,8 @@ def load_config(
             env, "CIRCUIT_BREAKER_ERRORS", DEFAULT_CIRCUIT_BREAKER_ERRORS
         ),
         max_drawdown_jpy=_dec(env, "MAX_DRAWDOWN_JPY", DEFAULT_MAX_DRAWDOWN_JPY),
+        stop_loss_pct=_dec(env, "STOP_LOSS_PCT", "0"),
+        fee_rate=_dec(env, "FEE_RATE", "0"),
     )
     if live_trading and not cfg.has_keys:
         raise ConfigError("LIVE_TRADING requires BITBANK_API_KEY and BITBANK_API_SECRET")
@@ -342,4 +348,8 @@ def load_config(
         raise ConfigError("MA periods must be >= 2")
     if cfg.long_ma_period < cfg.short_ma_period:
         raise ConfigError("LONG_MA_PERIOD must be >= SHORT_MA_PERIOD")
+    if cfg.stop_loss_pct < 0 or cfg.stop_loss_pct >= 1:
+        raise ConfigError("STOP_LOSS_PCT must be in [0, 1)")
+    if cfg.fee_rate < 0 or cfg.fee_rate >= 1:
+        raise ConfigError("FEE_RATE must be in [0, 1)")
     return cfg

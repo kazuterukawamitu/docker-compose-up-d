@@ -88,6 +88,26 @@ def test_take_profit_sells() -> None:
     assert sig.side == "sell"
 
 
+def test_stop_loss_sells_even_on_entry_candle() -> None:
+    c = cfg(ma_period=3, short_ma_period=3, long_ma_period=5, stop_loss_pct=D("0.02"))
+    closes = [D("100")] * 10
+    snaps = build_snapshots(closes, list(range(10)), c)
+    pos = Position(
+        amount=D("0.01"),
+        average_price=D("100"),
+        tp_pct=D("0.03"),
+        entry_candle_index=snaps[-1].index,
+        entry_candle_ts=snaps[-1].timestamp_ms,
+        actual_execution_jpy=D("1000"),
+        kind="BUY1",
+    )
+    snapped = snaps[-1]
+    snapped.close = D("97")
+    sig = Strategy(c).evaluate(snapped, pos)
+    assert sig.kind == "STOP"
+    assert sig.side == "sell"
+
+
 def test_hold_requires_reason() -> None:
     from bitbank_bot.strategy import Signal
 

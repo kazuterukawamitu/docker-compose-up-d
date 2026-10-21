@@ -197,3 +197,69 @@ def test_poll_failed() -> None:
     result = OrderExecutor(c, client).poll("42", Decimal("0.001"))
     assert not result.ok
     assert result.reason == "poll_failed"
+
+
+def test_poll_canceled_unfilled_is_terminal() -> None:
+    client = MagicMock()
+    client.get_order.return_value = {
+        "order_id": "42",
+        "status": "CANCELED_UNFILLED",
+        "executed_amount": "0",
+        "average_price": "0",
+        "start_amount": "0.001",
+    }
+    c = cfg(dry_run=False, live_trading=True, api_key="k", api_secret="s")
+    result = OrderExecutor(c, client).poll("42", Decimal("0.001"))
+    assert result.ok
+    assert result.reason == "canceled"
+    assert result.executed_amount == Decimal("0")
+
+
+def test_poll_fee_quote_is_cumulative() -> None:
+    client = MagicMock()
+    client.get_order.return_value = {
+        "order_id": "42",
+        "status": "FULLY_FILLED",
+        "executed_amount": "0.001",
+        "average_price": "10000000",
+        "start_amount": "0.001",
+        "fee_amount_quote": "15",
+    }
+    c = cfg(dry_run=False, live_trading=True, api_key="k", api_secret="s")
+    result = OrderExecutor(c, client).poll("42", Decimal("0.001"))
+    assert result.fee_jpy == Decimal("15")
+    assert result.actual_execution_jpy == Decimal("10000")
+
+
+def test_stop_signal_is_market_order() -> None:
+    client = MagicMock()
+    client.get_active_orders.return_value = []
+    client.create_order.return_value = {
+        "order_id": "7",
+        "status": "FULLY_FILLED",
+        "executed_amount": "0.001",
+        "average_price": "10000000",
+        "start_amount": "0.001",
+    }
+    c = cfg(dry_run=False, live_trading=True, api_key="k", api_secret="s", order_type="limit")
+    result = OrderExecutor(c, client).place(
+        Signal("STOP", "sell", None, "stop"), _plan()
+    )
+    assert result.ok
+    assert client.create_order.call_args.kwargs["order_type"] == "market"
+    assert client.create_order.call_args.kwargs["price"] is None
+
+
+def test_incremental_notional_uses_cumulative_average() -> None:
+    from bitbank_bot.orders import incremental_notional
+
+    delta_amt, delta_notional, cumulative = incremental_notional(
+        Decimal("0.001"),
+        Decimal("12000000"),
+        Decimal("0.0004"),
+        Decimal("4000"),
+    )
+    assert delta_amt == Decimal("0.0006")
+    assert cumulative == Decimal("12000")
+    assert delta_notional == Decimal("8000")
+    assert delta_amt * Decimal("12000000") != delta_notional

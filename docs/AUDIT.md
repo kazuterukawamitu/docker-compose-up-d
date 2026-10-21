@@ -57,6 +57,12 @@ bitFlyer, Coincheck, and GMO are not imported and are not executed.
 10. **Partial fills.** `PARTIALLY_FILLED` stays in `state.pending` and is polled
     until the remainder fills.
 11. **Kill file.** `data/KILL` blocks sells as well as buys.
+12. **Canceled orders.** `CANCELED` / `CANCELED_UNFILLED` clear `state.pending` instead of leaving it unfilled forever.
+13. **Partial-fill cost.** Added size uses cumulative notional minus the notional already booked, not new size times the cumulative average.
+14. **Fees.** Reported quote/base fees (or `FEE_RATE` when the payload has none) are included in cost and deducted from sell proceeds.
+15. **Same-candle exits.** A sell signal on an already processed bar still orders. Live price can take profit or hit `STOP_LOSS_PCT` without waiting for the next closed candle. `STOP` is a market order.
+16. **Startup reconcile.** In live mode, one open exchange order is adopted and a local pending id missing from active orders is polled. DRY_RUN does not adopt.
+17. **Launcher.** `run.sh` and `start.sh` do not run git. `/run.sh` is not a valid path.
 
 ## What this bot does not do
 
