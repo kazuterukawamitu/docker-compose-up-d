@@ -249,6 +249,7 @@ class Engine:
             if (
                 self._candle_fp == fingerprint
                 and state.last_candle_ts >= last_bar.timestamp_ms
+                and state.position is None
             ):
                 self.strategy_evaluations += 1
                 slog(
@@ -553,7 +554,9 @@ class Engine:
         refreshed = executor.poll(pending.order_id, pending.amount)
         if refreshed.ok:
             self._book_pending_delta(state, pending, refreshed)
-        state.pending = None
+            state.pending = None
+        else:
+            slog("ERROR", "poll after cancel failed; keeping pending", order_id=pending.order_id)
 
     def _quote_is_stale(self) -> bool:
         if self.last_quote_ms <= 0:
