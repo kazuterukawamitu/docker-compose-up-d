@@ -28,6 +28,7 @@ MA_PERIOD = 20
 SLOPE = Decimal("0.0005")
 BUY1_TP = Decimal("0.03")
 MIN_BTC = Decimal("0.0001")
+FIXED_BTC = Decimal("0.001")
 PAPER_JPY = Decimal("100000")
 POLL_SEC = 5
 LONG_WAIT_SEC = 900
@@ -258,7 +259,7 @@ def main(argv: list[str] | None = None) -> int:
             if signal == "BUY1" or signal == "BUY2":
                 price = D(last)
                 if price > 0:
-                    raw = (PAPER_JPY * Decimal("0.95")) / price
+                    raw = min((PAPER_JPY * Decimal("0.95")) / price, FIXED_BTC)
                     amount = (raw // MIN_BTC) * MIN_BTC
                     if amount >= MIN_BTC:
                         in_position = True

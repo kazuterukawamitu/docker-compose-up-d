@@ -66,6 +66,8 @@ def plan_buy(
     balance_btc = usable_jpy / price
     decision = risk.check_buy(available_btc, balance_btc)
     raw = min(balance_btc, decision.capped_btc) if decision.allowed else ZERO
+    if cfg.fixed_order_btc > ZERO:
+        raw = min(raw, cfg.fixed_order_btc)
     amount = truncate(raw, cfg.amount_precision)
     planned = amount * price
     ok = decision.allowed and meets_min_amount(amount, cfg.min_amount_btc)

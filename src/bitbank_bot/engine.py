@@ -46,6 +46,7 @@ class PendingOrder:
     timestamp_ms: int
     amount: Decimal
     filled_amount: Decimal = ZERO
+    placed_at: float = 0.0
 
 
 @dataclass
@@ -100,6 +101,7 @@ def load_state(path: str | Path, cfg: Config) -> BotState:
                 timestamp_ms=int(pending_raw.get("timestamp_ms") or 0),
                 amount=D(pending_raw.get("amount") or 0),
                 filled_amount=D(pending_raw.get("filled_amount") or 0),
+                placed_at=float(pending_raw.get("placed_at") or 0) or time.time(),
             )
         if raw.get("paper_jpy") not in (None, ""):
             paper_jpy = D(raw.get("paper_jpy"))
@@ -133,6 +135,7 @@ def save_state(path: str | Path, state: BotState) -> None:
             "timestamp_ms": state.pending.timestamp_ms,
             "amount": str(state.pending.amount),
             "filled_amount": str(state.pending.filled_amount),
+            "placed_at": state.pending.placed_at,
         }
     if state.position:
         payload["position"] = {
@@ -171,7 +174,10 @@ class Engine:
         self.last_trend = "-"
         self.last_signal = Signal.hold("starting")
         self.last_public_last: str = "-"
+        self.last_quote_ms = 0
         self.last_error = ""
+        self._candle_fp: tuple[int, int, str] | None = None
+        self._last_bar_index = 0
 
     def request_stop(self, *_args: object) -> None:
         slog("BOOT", "shutdown requested")
@@ -194,8 +200,13 @@ class Engine:
 
     def _balances(self, rest: RestClient, state: BotState | None = None) -> tuple[Decimal, Decimal]:
         if self.cfg.has_keys:
-            jpy = rest.free_amount("jpy")
-            btc = rest.free_amount("btc")
+            if isinstance(rest, RestClient) and hasattr(rest, "free_amounts"):
+                amounts = rest.free_amounts()
+                jpy = amounts.get("jpy", ZERO)
+                btc = amounts.get("btc", ZERO)
+            else:
+                jpy = rest.free_amount("jpy")
+                btc = rest.free_amount("btc")
             slog("ASSET", "free_amount", jpy=str(jpy), btc=str(btc))
             return jpy, btc
         jpy = self.cfg.dry_run_free_jpy
@@ -228,6 +239,35 @@ class Engine:
         persist: bool = True,
     ) -> Signal:
         candles = drop_incomplete_candle(candles, self.cfg.candle_type)
+        if execute and state.pending:
+            self._poll_pending(state)
+            if persist:
+                save_state(self.cfg.state_path, state)
+        if candles:
+            last_bar = candles[-1]
+            fingerprint = (len(candles), last_bar.timestamp_ms, str(last_bar.close))
+            if (
+                self._candle_fp == fingerprint
+                and state.last_candle_ts >= last_bar.timestamp_ms
+            ):
+                self.strategy_evaluations += 1
+                slog(
+                    "STRATEGY",
+                    "cached signal",
+                    kind=self.last_signal.kind,
+                    reason=self.last_signal.reason,
+                )
+                if execute and state.pending is None:
+                    self._retry_open_sell(
+                        state,
+                        self.last_signal,
+                        last_bar.close,
+                        self._last_bar_index,
+                        last_bar.timestamp_ms,
+                    )
+                    if persist:
+                        save_state(self.cfg.state_path, state)
+                return self.last_signal
         closes = [c.close for c in candles]
         stamps = [c.timestamp_ms for c in candles]
         snaps = build_snapshots(closes, stamps, self.cfg)
@@ -236,10 +276,6 @@ class Engine:
             hold = Signal.hold("not_enough_candles")
             self.last_signal = hold
             return hold
-        if execute and state.pending:
-            self._poll_pending(state)
-            if persist:
-                save_state(self.cfg.state_path, state)
         strategy = Strategy(self.cfg)
         last = snaps[-1]
         self.last_close = last.close
@@ -265,10 +301,19 @@ class Engine:
                 continue
             signal = strategy.evaluate(snap, state.position)
             self.strategy_evaluations += 1
+            if is_last:
+                self._last_bar_index = snap.index
             slog("STRATEGY", "signal", kind=signal.kind, reason=signal.reason, side=signal.side)
-            if not execute or heartbeat:
-                if heartbeat:
-                    slog("STRATEGY", "candle already processed", candle_ts=snap.timestamp_ms)
+            if not execute:
+                continue
+            if heartbeat:
+                slog("STRATEGY", "candle already processed", candle_ts=snap.timestamp_ms)
+                if state.pending is None:
+                    self._retry_open_sell(
+                        state, signal, snap.close, snap.index, snap.timestamp_ms
+                    )
+                    if persist:
+                        save_state(self.cfg.state_path, state)
                 continue
             if signal.side in {"buy", "sell"}:
                 if not is_last:
@@ -312,8 +357,23 @@ class Engine:
             state.last_candle_ts = snap.timestamp_ms
             if persist:
                 save_state(self.cfg.state_path, state)
+        if candles:
+            self._candle_fp = (len(candles), candles[-1].timestamp_ms, str(candles[-1].close))
         self.last_signal = signal
         return signal
+
+    def _retry_open_sell(
+        self,
+        state: BotState,
+        signal: Signal,
+        price: Decimal,
+        index: int,
+        ts: int,
+    ) -> None:
+        """Replace a timed-out exit on the same closed candle. Buys stay once per bar."""
+        if state.pending is not None or state.position is None or signal.side != "sell":
+            return
+        self._execute(signal, price, index, ts, state)
 
     def _execute(
         self,
@@ -326,6 +386,10 @@ class Engine:
         rest = self._rest()
         if self.ws is not None and not self.ws.is_stale() and self.ws.last_price():
             price = self.ws.last_price() or price
+        if self._quote_is_stale():
+            self.last_block_reason = "stale_quote"
+            slog("MARKET", "stale quote; skip order", quote_ms=self.last_quote_ms)
+            return
         try:
             jpy, btc = self._balances(rest, state)
         except BitbankAPIError as exc:
@@ -351,7 +415,11 @@ class Engine:
         if signal.side == "buy":
             plan = sizer.plan_buy(available_jpy=jpy, available_btc=btc, price=price)
         else:
-            plan = sizer.plan_sell(available_jpy=jpy, available_btc=btc, price=price)
+            sell_btc = btc
+            if state.position is not None and state.position.amount > ZERO:
+                tracked = state.position.amount
+                sell_btc = min(btc, tracked) if self.cfg.has_keys else tracked
+            plan = sizer.plan_sell(available_jpy=jpy, available_btc=sell_btc, price=price)
         slog(
             "RISK",
             "RISK MANAGER OK",
@@ -397,13 +465,25 @@ class Engine:
                 "pending poll failed; holding new orders",
                 order_id=pending.order_id,
             )
+            self._cancel_if_timed_out(state)
             return
+        self._book_pending_delta(state, pending, result)
+        if state.pending is not None and result.reason == "canceled":
+            state.pending = None
+            slog("ORDER_STATUS", "cleared canceled order", order_id=pending.order_id)
+        if state.pending is not None:
+            if result.executed_amount <= pending.filled_amount and result.reason != "canceled":
+                slog(
+                    "ORDER_STATUS",
+                    "pending still unfilled; skip new orders",
+                    order_id=pending.order_id,
+                )
+            self._cancel_if_timed_out(state)
+
+    def _book_pending_delta(
+        self, state: BotState, pending: PendingOrder, result: OrderResult
+    ) -> None:
         if result.executed_amount <= pending.filled_amount:
-            slog(
-                "ORDER_STATUS",
-                "pending still unfilled; skip new orders",
-                order_id=pending.order_id,
-            )
             return
         delta = result.executed_amount - pending.filled_amount
         avg = result.average_price
@@ -423,7 +503,7 @@ class Engine:
         plan = AmountPlan(
             side=pending.side,
             amount=pending.amount,
-            price=result.average_price,
+            price=avg if avg > ZERO else ZERO,
             available_jpy=ZERO,
             available_btc=ZERO,
             target_jpy=ZERO,
@@ -435,17 +515,51 @@ class Engine:
             reason="pending_poll",
         )
         try:
-            jpy, btc = self._balances(rest, state)
+            jpy, btc = self._balances(self._rest(), state)
         except Exception:
             jpy, btc = ZERO, ZERO
-        pending.filled_amount = result.executed_amount
-        if result.reason != "partial_fill":
-            state.pending = None
         self._apply_fill(
             signal, plan, delta_result, pending.index, pending.timestamp_ms, state, jpy, btc
         )
-        if result.reason == "partial_fill":
-            state.pending = pending
+
+    def _pending_limit(self, pending: PendingOrder) -> int:
+        if pending.side == "sell":
+            return int(self.cfg.sell_order_timeout_seconds)
+        return int(self.cfg.pending_order_timeout_seconds)
+
+    def _cancel_if_timed_out(self, state: BotState) -> None:
+        pending = state.pending
+        if pending is None:
+            return
+        limit = self._pending_limit(pending)
+        if limit <= 0 or pending.placed_at <= 0:
+            return
+        if time.time() - pending.placed_at < limit:
+            return
+        slog(
+            "ORDER_STATUS",
+            "pending timeout",
+            order_id=pending.order_id,
+            side=pending.side,
+            limit_sec=limit,
+        )
+        if not self.cfg.may_place_live_orders:
+            state.pending = None
+            return
+        executor = OrderExecutor(self.cfg, self._rest())
+        if not executor.cancel(pending.order_id):
+            slog("ERROR", "cancel failed; keeping pending", order_id=pending.order_id)
+            return
+        refreshed = executor.poll(pending.order_id, pending.amount)
+        if refreshed.ok:
+            self._book_pending_delta(state, pending, refreshed)
+        state.pending = None
+
+    def _quote_is_stale(self) -> bool:
+        if self.last_quote_ms <= 0:
+            return False
+        age = time.time() - (self.last_quote_ms / 1000.0)
+        return age > float(self.cfg.quote_max_age_sec)
 
     def _set_watchdog(
         self,
@@ -483,6 +597,10 @@ class Engine:
         jpy: Decimal,
         btc: Decimal,
     ) -> None:
+        if result.reason == "canceled" and result.executed_amount <= ZERO:
+            state.pending = None
+            slog("ORDER_STATUS", "order canceled; pending cleared", order_id=result.order_id)
+            return
         if result.reason == "accepted_unfilled" and result.order_id:
             state.pending = PendingOrder(
                 order_id=result.order_id,
@@ -493,6 +611,7 @@ class Engine:
                 timestamp_ms=ts,
                 amount=plan.amount,
                 filled_amount=ZERO,
+                placed_at=time.time(),
             )
             slog(
                 "ORDER_STATUS",
@@ -564,7 +683,11 @@ class Engine:
                 state.position.amount = pos_amt - result.executed_amount
                 state.position.actual_execution_jpy -= cost
         if result.reason == "partial_fill" and result.order_id:
-            already = state.pending.filled_amount if state.pending else ZERO
+            already = ZERO
+            placed_at = time.time()
+            if state.pending is not None and state.pending.order_id == result.order_id:
+                already = state.pending.filled_amount
+                placed_at = state.pending.placed_at or placed_at
             state.pending = PendingOrder(
                 order_id=result.order_id,
                 side=signal.side or "",
@@ -574,6 +697,7 @@ class Engine:
                 timestamp_ms=ts,
                 amount=plan.amount,
                 filled_amount=already + result.executed_amount,
+                placed_at=placed_at,
             )
         elif result.reason != "partial_fill":
             state.pending = None
@@ -734,7 +858,10 @@ class Engine:
                 if max_cycles is not None:
                     time.sleep(0.05)
                 else:
-                    for _ in range(int(max(1, self.cfg.poll_sec))):
+                    wait = float(self.cfg.poll_sec)
+                    if state.pending is not None and state.pending.side == "sell":
+                        wait = min(wait, float(self.cfg.exit_poll_sec))
+                    for _ in range(int(max(1, wait))):
                         if self._stop:
                             break
                         time.sleep(1)
@@ -761,7 +888,7 @@ class Engine:
             utc=datetime.now(timezone.utc).isoformat(),
         )
         slog("HEARTBEAT", "WebSocket CONNECTED" if ws_ok else "WebSocket DISCONNECTED")
-        slog("HEARTBEAT", "REST API OK")
+        slog("HEARTBEAT", "REST API ERROR" if self.last_error else "REST API OK")
         slog("HEARTBEAT", "MARKET DATA OK")
         slog("HEARTBEAT", "ORDER MANAGER OK")
         slog("HEARTBEAT", "RISK MANAGER OK")
@@ -774,6 +901,9 @@ class Engine:
             if last not in (None, ""):
                 self.last_public_last = str(last)
                 self.last_error = ""
+            stamp = ticker.get("timestamp")
+            if stamp not in (None, ""):
+                self.last_quote_ms = int(stamp)
         except Exception as exc:
             self.last_error = type(exc).__name__
 

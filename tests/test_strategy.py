@@ -88,6 +88,24 @@ def test_take_profit_sells() -> None:
     assert sig.side == "sell"
 
 
+def test_hard_stop_sells_below_average() -> None:
+    c = cfg(ma_period=3, short_ma_period=3, long_ma_period=5, stop_loss_pct=D("0.03"))
+    closes = [D("100")] * 8 + [D("96")]
+    snaps = build_snapshots(closes, list(range(len(closes))), c)
+    pos = Position(
+        amount=D("0.001"),
+        average_price=D("100"),
+        tp_pct=D("0.03"),
+        entry_candle_index=0,
+        entry_candle_ts=0,
+        actual_execution_jpy=D("100"),
+        kind="BUY1",
+    )
+    sig = Strategy(c).evaluate(snaps[-1], pos)
+    assert sig.kind == "STOP"
+    assert sig.side == "sell"
+
+
 def test_hold_requires_reason() -> None:
     from bitbank_bot.strategy import Signal
 
@@ -97,7 +115,13 @@ def test_hold_requires_reason() -> None:
 def test_sell3_on_upcross_in_downtrend() -> None:
     # Bounce just through a still-falling SMA so trend stays DOWN (a large
     # bounce would flip SMA to UP and would not be SELL3).
-    c = cfg(ma_period=5, short_ma_period=5, long_ma_period=8, ma_slope_threshold=D("0.0001"))
+    c = cfg(
+        ma_period=5,
+        short_ma_period=5,
+        long_ma_period=8,
+        ma_slope_threshold=D("0.0001"),
+        stop_loss_pct=D("0"),
+    )
     closes = [D(200 - i) for i in range(30)] + [D("168"), D("172")]
     snaps = build_snapshots(closes, list(range(len(closes))), c)
     pos = Position(

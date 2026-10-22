@@ -13,12 +13,31 @@ from bitbank_bot.money import D, ZERO, ensure_decimal, quantize_price
 from bitbank_bot.strategy import Signal
 
 
-def _fill_status(raw_status: str, executed: Decimal, ordered: Decimal) -> str:
+_CANCELED_STATUSES = frozenset(
+    {
+        "CANCELED",
+        "CANCELED_UNFILLED",
+        "CANCELED_PARTIALLY_FILLED",
+        "REJECTED",
+        "EXPIRED",
+    }
+)
+
+
+def classify_order(raw_status: str, executed: Decimal, ordered: Decimal) -> tuple[str, str]:
+    """Map a Bitbank order row to (status, reason).
+
+    Terminal cancels stay terminal even when executed_amount is 0.
+    Treating those as UNFILLED left state.pending set and blocked every new order.
+    """
+    status = (raw_status or "").strip().upper()
+    if status in _CANCELED_STATUSES or status.startswith("CANCELED"):
+        return status or "CANCELED", "canceled"
     if executed <= ZERO:
-        return "UNFILLED"
+        return "UNFILLED", "accepted_unfilled"
     if ordered > ZERO and executed < ordered:
-        return "PARTIALLY_FILLED"
-    return "FULLY_FILLED"
+        return "PARTIALLY_FILLED", "partial_fill"
+    return "FULLY_FILLED", "fill"
 
 
 class OrderClient(Protocol):
@@ -77,6 +96,17 @@ class OrderExecutor:
             return None
         slog("ORDER_STATUS", "refreshed from GET /user/spot/order", order_id=order_id)
         return data
+
+    def cancel(self, order_id: str) -> bool:
+        if self.client is None or not hasattr(self.client, "cancel_order"):
+            return False
+        try:
+            self.client.cancel_order(self.cfg.pair, order_id, live_confirmed=True)
+        except Exception as exc:
+            slog("ERROR", "cancel_order failed", error=type(exc).__name__, order_id=order_id)
+            return False
+        slog("ORDER_STATUS", "cancel requested", order_id=order_id)
+        return True
 
     def place(self, signal: Signal, plan: AmountPlan) -> OrderResult:
         slog(
@@ -214,7 +244,7 @@ class OrderExecutor:
                 executed = D(raw.get("executed_amount") or 0)
                 avg = D(raw.get("average_price") or 0)
                 amount_ordered = D(raw.get("start_amount") or amount_ordered)
-        status = _fill_status(status, executed, amount_ordered)
+        status, reason = classify_order(status, executed, amount_ordered)
         slog(
             "ORDER_STATUS",
             "order status",
@@ -222,16 +252,26 @@ class OrderExecutor:
             status=status,
             executed_amount=str(executed),
         )
-        if executed <= ZERO:
+        if reason == "canceled" and executed <= ZERO:
+            slog("ORDER_STATUS", "order canceled with no fill", order_id=order_id, status=status)
+            return OrderResult(
+                True, "canceled", False, False, order_id, status, ZERO, ZERO, None, raw
+            )
+        if reason == "accepted_unfilled":
             slog("ORDER_STATUS", "no fill yet; not logging FILL", order_id=order_id, status=status)
             return OrderResult(
                 True, "accepted_unfilled", False, False, order_id, status, ZERO, ZERO, None, raw
             )
         actual = executed * avg
-        reason = "partial_fill" if status == "PARTIALLY_FILLED" else "fill"
+        if reason == "fill":
+            stage, message = "FILL", "fill"
+        elif reason == "canceled":
+            stage, message = "ORDER_STATUS", "canceled with a partial fill"
+        else:
+            stage, message = "ORDER_STATUS", "partial fill; keep polling"
         slog(
-            "FILL" if reason == "fill" else "ORDER_STATUS",
-            "fill" if reason == "fill" else "partial fill; keep polling",
+            stage,
+            message,
             order_id=order_id,
             executed_amount=str(executed),
             average_price=str(avg),
@@ -252,7 +292,7 @@ class OrderExecutor:
         executed = D(raw.get("executed_amount") or 0)
         avg = D(raw.get("average_price") or 0)
         ordered = D(raw.get("start_amount") or fallback_amount)
-        status = _fill_status(str(raw.get("status") or ""), executed, ordered)
+        status, reason = classify_order(str(raw.get("status") or ""), executed, ordered)
         slog(
             "ORDER_STATUS",
             "pending poll",
@@ -260,15 +300,20 @@ class OrderExecutor:
             status=status,
             executed_amount=str(executed),
         )
-        if executed <= ZERO:
+        if reason in {"accepted_unfilled", "canceled"} and executed <= ZERO:
             return OrderResult(
-                True, "accepted_unfilled", False, False, order_id, status, ZERO, ZERO, None, raw
+                True, reason, False, False, order_id, status, ZERO, ZERO, None, raw
             )
         actual = executed * avg
-        reason = "partial_fill" if status == "PARTIALLY_FILLED" else "fill"
+        if reason == "fill":
+            stage, message = "FILL", "fill after poll"
+        elif reason == "canceled":
+            stage, message = "ORDER_STATUS", "canceled after partial fill"
+        else:
+            stage, message = "ORDER_STATUS", "partial fill after poll"
         slog(
-            "FILL" if reason == "fill" else "ORDER_STATUS",
-            "fill after poll" if reason == "fill" else "partial fill after poll",
+            stage,
+            message,
             order_id=order_id,
             executed_amount=str(executed),
             actual_execution_jpy=str(actual),

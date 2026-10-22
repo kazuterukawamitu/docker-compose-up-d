@@ -45,6 +45,12 @@ DEFAULT_AMOUNT_PRECISION = "0.0001"
 DEFAULT_PRICE_TICK = "1"
 DEFAULT_MAX_POSITION = "1"
 DEFAULT_MAX_ORDER = "10"
+DEFAULT_FIXED_ORDER_BTC = "0.001"
+DEFAULT_STOP_LOSS_PCT = "0.03"
+DEFAULT_PENDING_ORDER_TIMEOUT = 900
+DEFAULT_SELL_ORDER_TIMEOUT = 30
+DEFAULT_EXIT_POLL_SEC = "5"
+DEFAULT_QUOTE_MAX_AGE = "60"
 DEFAULT_MAX_DAILY_LOSS = "0"
 DEFAULT_DAILY_PNL_FLOOR = "0"
 DEFAULT_STALE_SEC = "60"
@@ -148,6 +154,12 @@ class Config:
     order_type: str = "limit"
     max_position_btc: Decimal = D(DEFAULT_MAX_POSITION)
     max_order_btc: Decimal = D(DEFAULT_MAX_ORDER)
+    fixed_order_btc: Decimal = D(DEFAULT_FIXED_ORDER_BTC)
+    stop_loss_pct: Decimal = D(DEFAULT_STOP_LOSS_PCT)
+    pending_order_timeout_seconds: int = DEFAULT_PENDING_ORDER_TIMEOUT
+    sell_order_timeout_seconds: int = DEFAULT_SELL_ORDER_TIMEOUT
+    exit_poll_sec: float = float(DEFAULT_EXIT_POLL_SEC)
+    quote_max_age_sec: float = float(DEFAULT_QUOTE_MAX_AGE)
     max_daily_loss_jpy: Decimal = D(DEFAULT_MAX_DAILY_LOSS)
     daily_pnl_floor: Decimal = D(DEFAULT_DAILY_PNL_FLOOR)
     kill_switch: bool = False
@@ -212,6 +224,12 @@ class Config:
             "log_level": self.log_level,
             "max_balance_usage": str(self.max_balance_usage),
             "min_amount_btc": str(self.min_amount_btc),
+            "fixed_order_btc": str(self.fixed_order_btc),
+            "stop_loss_pct": str(self.stop_loss_pct),
+            "pending_order_timeout_seconds": self.pending_order_timeout_seconds,
+            "sell_order_timeout_seconds": self.sell_order_timeout_seconds,
+            "exit_poll_sec": self.exit_poll_sec,
+            "quote_max_age_sec": self.quote_max_age_sec,
             "circuit_breaker_errors": self.circuit_breaker_errors,
             "max_drawdown_jpy": str(self.max_drawdown_jpy),
         }
@@ -267,6 +285,33 @@ def load_config(
     if usage <= 0 or usage > 1:
         raise ConfigError("MAX_BALANCE_USAGE / BALANCE_USAGE_RATIO must be in (0, 1]")
 
+    fixed_order_btc = _dec(env, "FIXED_ORDER_BTC", DEFAULT_FIXED_ORDER_BTC)
+    if fixed_order_btc < 0:
+        raise ConfigError("FIXED_ORDER_BTC must be >= 0 (0 disables the cap)")
+    stop_loss_pct = _dec(env, "STOP_LOSS_PCT", DEFAULT_STOP_LOSS_PCT)
+    if stop_loss_pct < 0 or stop_loss_pct >= 1:
+        raise ConfigError("STOP_LOSS_PCT must be in [0, 1)")
+    pending_timeout = _int(
+        env,
+        "PENDING_ORDER_TIMEOUT_SEC",
+        _int(env, "PENDING_ORDER_TIMEOUT_SECONDS", DEFAULT_PENDING_ORDER_TIMEOUT),
+    )
+    sell_timeout = _int(
+        env,
+        "SELL_ORDER_TIMEOUT_SEC",
+        _int(env, "SELL_ORDER_TIMEOUT_SECONDS", DEFAULT_SELL_ORDER_TIMEOUT),
+    )
+    if pending_timeout < 0 or sell_timeout < 0:
+        raise ConfigError("order timeouts must be >= 0")
+    exit_poll = float(_env(env, "EXIT_POLL_SEC", DEFAULT_EXIT_POLL_SEC) or DEFAULT_EXIT_POLL_SEC)
+    if exit_poll <= 0:
+        raise ConfigError("EXIT_POLL_SEC must be > 0")
+    quote_max_age = float(
+        _env(env, "QUOTE_MAX_AGE_SEC", DEFAULT_QUOTE_MAX_AGE) or DEFAULT_QUOTE_MAX_AGE
+    )
+    if quote_max_age <= 0:
+        raise ConfigError("QUOTE_MAX_AGE_SEC must be > 0")
+
     cfg = Config(
         pair=pair,
         public_url=_env(env, "BITBANK_PUBLIC_URL", PUBLIC_URL) or PUBLIC_URL,
@@ -305,6 +350,12 @@ def load_config(
         order_type=order_type,
         max_position_btc=_dec(env, "MAX_POSITION_BTC", DEFAULT_MAX_POSITION),
         max_order_btc=_dec(env, "MAX_ORDER_BTC", DEFAULT_MAX_ORDER),
+        fixed_order_btc=fixed_order_btc,
+        stop_loss_pct=stop_loss_pct,
+        pending_order_timeout_seconds=pending_timeout,
+        sell_order_timeout_seconds=sell_timeout,
+        exit_poll_sec=exit_poll,
+        quote_max_age_sec=quote_max_age,
         max_daily_loss_jpy=_dec(env, "MAX_DAILY_LOSS_JPY", DEFAULT_MAX_DAILY_LOSS),
         daily_pnl_floor=_dec(env, "DAILY_PNL_FLOOR", DEFAULT_DAILY_PNL_FLOOR),
         kill_switch=_bool(env, "KILL_SWITCH", False),

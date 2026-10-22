@@ -8,8 +8,9 @@ Authority: [README.md](../README.md) percents and “buy possible amount / sell 
 - Pair: `btc_jpy`
 - Min order size: 0.0001 BTC
 - Price tick: 1 JPY
-- Buy size: possible amount (`free_amount` JPY × usage × fee buffer / price, quantized)
-- Sell size: all free BTC (quantized)
+- Buy size: possible amount, capped by `FIXED_ORDER_BTC` (default `0.001`, the backtest lot). `FIXED_ORDER_BTC=0` removes the cap.
+- Sell size: the tracked position, never the rest of the wallet. Paper mode with no keys sells that position even when the paper BTC ledger is still 0.
+- Hard stop: `STOP_LOSS_PCT` (default `0.03`) sells when close is at or below fill average × (1 − stop), including the entry candle. `0` disables it.
 - Primary candle: `1hour` SMA(20); golden cross SMA(20)/SMA(50)
 - Timezone: Japan (JST)
 

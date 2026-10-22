@@ -4,7 +4,7 @@ Bitbank-only `btc_jpy` bot. Default is a **continuous DRY_RUN loop** with an iTe
 
 `main` on GitHub is still wiki HTML. The runnable bot is branch `cursor/bitbank-audit-unify-f5fd`.
 
-HOLD for 15 minutes while market data and strategy are healthy is `LONG_WAIT`, not a crash. Public-API fallback candles never place orders. Live UNFILLED limits are persisted and polled. New BUY is blocked when both 4h and 1d SMA slopes are down (`ENABLE_HTF_FILTER`).
+HOLD for 15 minutes while market data and strategy are healthy is `LONG_WAIT`, not a crash. Public-API fallback candles never place orders. Live UNFILLED limits are persisted and polled. New BUY is blocked when both 4h and 1d SMA slopes are down (`ENABLE_HTF_FILTER`). Buys are capped at `FIXED_ORDER_BTC` (default 0.001). Sells flatten the tracked position only, and a resting sell is canceled after `SELL_ORDER_TIMEOUT_SEC` (default 30). `STOP_LOSS_PCT` defaults to 3%. Live orders stay off until `DRY_RUN=false`, `LIVE_TRADING=true`, and both API keys are set.
 
 ## Start (this is the program)
 

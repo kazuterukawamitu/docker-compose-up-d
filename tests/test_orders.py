@@ -4,6 +4,8 @@ from decimal import Decimal
 from typing import Any
 from unittest.mock import MagicMock
 
+import pytest
+
 from bitbank_bot.amounts import AmountPlan
 from bitbank_bot.orders import OrderExecutor
 from bitbank_bot.strategy import Signal
@@ -188,6 +190,33 @@ def test_poll_partial_stays_open() -> None:
     assert result.reason == "partial_fill"
     assert result.executed_amount == Decimal("0.0004")
     assert result.status == "PARTIALLY_FILLED"
+
+
+def test_poll_canceled_unfilled_is_terminal() -> None:
+    client = MagicMock()
+    client.get_order.return_value = {
+        "order_id": "42",
+        "status": "CANCELED_UNFILLED",
+        "executed_amount": "0",
+        "average_price": "0",
+        "start_amount": "0.001",
+    }
+    c = cfg(dry_run=False, live_trading=True, api_key="k", api_secret="s")
+    result = OrderExecutor(c, client).poll("42", Decimal("0.001"))
+    assert result.ok
+    assert result.reason == "canceled"
+    assert result.executed_amount == Decimal("0")
+
+
+def test_cancel_requires_live_confirmation() -> None:
+    from bitbank_bot.rest_client import BitbankAPIError, RestClient
+
+    client = RestClient("https://public.example", "https://api.example/v1", "k", "s")
+    try:
+        with pytest.raises(BitbankAPIError, match="live_confirmed"):
+            client.cancel_order("btc_jpy", "42", live_confirmed=False)
+    finally:
+        client.close()
 
 
 def test_poll_failed() -> None:

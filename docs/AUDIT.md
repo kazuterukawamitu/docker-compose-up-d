@@ -57,6 +57,15 @@ bitFlyer, Coincheck, and GMO are not imported and are not executed.
 10. **Partial fills.** `PARTIALLY_FILLED` stays in `state.pending` and is polled
     until the remainder fills.
 11. **Kill file.** `data/KILL` blocks sells as well as buys.
+12. **Terminal order status.** `CANCELED_UNFILLED` and the other cancel/reject statuses clear `state.pending`. A zero fill is no longer stored as `UNFILLED`, which had blocked every later order.
+13. **Sell size.** A live sell is `min(free BTC, tracked position)`. Extra wallet BTC is not an exit order.
+14. **Fixed lot.** Buys default to `0.001` BTC (`FIXED_ORDER_BTC`), the same lot the backtest uses. Possible-amount sizing remains available by setting the cap to `0`.
+15. **Exit timeout.** A resting sell older than `SELL_ORDER_TIMEOUT_SEC` (default 30) is canceled and can be replaced on the same closed candle. A resting buy uses `PENDING_ORDER_TIMEOUT_SEC` (default 900).
+16. **Hard stop.** `STOP_LOSS_PCT` (default 3%) is evaluated before the pattern sells.
+17. **Quote age and assets.** A public ticker older than `QUOTE_MAX_AGE_SEC` blocks a new order. Keyed balance reads use one assets request.
+18. **Readiness.** `live_ready` stays false unless both live flags, both keys, the 0.001 lot, a stop, and no kill switch are set. The report does not place an order.
+
+This tree does not SSH to a VPS and does not restart a running bot. Applying it to a live process is a separate operator step after the service is stopped.
 
 ## What this bot does not do
 

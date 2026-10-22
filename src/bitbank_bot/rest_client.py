@@ -83,18 +83,18 @@ class RateLimiter:
     def wait(self, kind: Literal["query", "update"]) -> None:
         limit = self.query_rps if kind == "query" else self.update_rps
         bucket = self._q if kind == "query" else self._u
-        with self._lock:
-            now = time.monotonic()
-            while bucket and now - bucket[0] >= 1.0:
-                bucket.popleft()
-            if len(bucket) >= limit:
-                sleep_for = 1.0 - (now - bucket[0]) + 0.02
-                if sleep_for > 0:
-                    time.sleep(sleep_for)
+        while True:
+            sleep_for = 0.0
+            with self._lock:
                 now = time.monotonic()
                 while bucket and now - bucket[0] >= 1.0:
                     bucket.popleft()
-            bucket.append(time.monotonic())
+                if len(bucket) < limit:
+                    bucket.append(now)
+                    return
+                sleep_for = 1.0 - (now - bucket[0]) + 0.02
+            if sleep_for > 0:
+                time.sleep(sleep_for)
 
 
 def _backoff_seconds(attempt: int, cap: float = 16.0) -> float:
@@ -280,12 +280,34 @@ class RestClient:
         slog("ASSET", "assets fetched", count=len(data.get("assets") or []))
         return data
 
-    def free_amount(self, asset: str) -> Decimal:
+    def free_amounts(self) -> dict[str, Decimal]:
+        """One private assets call for every free balance."""
         data = self.get_assets()
+        out: dict[str, Decimal] = {}
         for row in data.get("assets") or []:
-            if row.get("asset") == asset:
-                return D(row.get("free_amount") or 0)
-        return D(0)
+            asset = str(row.get("asset") or "")
+            if asset:
+                out[asset] = D(row.get("free_amount") or 0)
+        return out
+
+    def free_amount(self, asset: str) -> Decimal:
+        return self.free_amounts().get(asset, D(0))
+
+    def cancel_order(
+        self,
+        pair: str,
+        order_id: str,
+        *,
+        live_confirmed: bool = False,
+    ) -> dict[str, Any]:
+        if not live_confirmed:
+            raise BitbankAPIError("refusing cancel_order without live_confirmed")
+        order_key: int | str = int(order_id) if str(order_id).isdigit() else order_id
+        return self.private_post(
+            "/user/spot/cancel_order",
+            {"pair": pair, "order_id": order_key},
+            update=True,
+        )
 
     def get_order(self, pair: str, order_id: str) -> dict[str, Any]:
         return self.private_get(
