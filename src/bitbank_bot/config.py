@@ -40,6 +40,10 @@ DEFAULT_SELL4_DIP = "0.04"
 DEFAULT_MAX_BALANCE_USAGE = "0.95"
 DEFAULT_SELL_SAFETY = "0.999"
 DEFAULT_FEE_BUFFER = "0.0015"
+DEFAULT_TAKER_FEE_RATE = "0.0012"
+DEFAULT_MAKER_FEE_RATE = "0"
+DEFAULT_STOP_ORDER_TYPE = "market"
+DEFAULT_DAILY_PROFIT_TARGET = "0"
 DEFAULT_MIN_AMOUNT = "0.0001"
 DEFAULT_AMOUNT_PRECISION = "0.0001"
 DEFAULT_PRICE_TICK = "1"
@@ -148,6 +152,10 @@ class Config:
     max_balance_usage: Decimal = D(DEFAULT_MAX_BALANCE_USAGE)
     sell_safety_factor: Decimal = D(DEFAULT_SELL_SAFETY)
     fee_buffer: Decimal = D(DEFAULT_FEE_BUFFER)
+    taker_fee_rate: Decimal = D(DEFAULT_TAKER_FEE_RATE)
+    maker_fee_rate: Decimal = D(DEFAULT_MAKER_FEE_RATE)
+    stop_order_type: str = DEFAULT_STOP_ORDER_TYPE
+    daily_profit_target: Decimal = D(DEFAULT_DAILY_PROFIT_TARGET)
     min_amount_btc: Decimal = D(DEFAULT_MIN_AMOUNT)
     amount_precision: Decimal = D(DEFAULT_AMOUNT_PRECISION)
     price_tick: Decimal = D(DEFAULT_PRICE_TICK)
@@ -230,6 +238,10 @@ class Config:
             "sell_order_timeout_seconds": self.sell_order_timeout_seconds,
             "exit_poll_sec": self.exit_poll_sec,
             "quote_max_age_sec": self.quote_max_age_sec,
+            "taker_fee_rate": str(self.taker_fee_rate),
+            "maker_fee_rate": str(self.maker_fee_rate),
+            "stop_order_type": self.stop_order_type,
+            "daily_profit_target": str(self.daily_profit_target),
             "circuit_breaker_errors": self.circuit_breaker_errors,
             "max_drawdown_jpy": str(self.max_drawdown_jpy),
         }
@@ -311,6 +323,17 @@ def load_config(
     )
     if quote_max_age <= 0:
         raise ConfigError("QUOTE_MAX_AGE_SEC must be > 0")
+    taker_fee_rate = _dec(env, "TAKER_FEE_RATE", DEFAULT_TAKER_FEE_RATE)
+    maker_fee_rate = _dec(env, "MAKER_FEE_RATE", DEFAULT_MAKER_FEE_RATE)
+    for label, rate in (("TAKER_FEE_RATE", taker_fee_rate), ("MAKER_FEE_RATE", maker_fee_rate)):
+        if rate < D("-0.01") or rate >= D("0.05"):
+            raise ConfigError(f"{label} must be in [-0.01, 0.05)")
+    stop_order_type = (_env(env, "STOP_ORDER_TYPE", DEFAULT_STOP_ORDER_TYPE) or DEFAULT_STOP_ORDER_TYPE).lower()
+    if stop_order_type not in {"market", "limit"}:
+        raise ConfigError("STOP_ORDER_TYPE must be market or limit")
+    daily_profit_target = _dec(env, "DAILY_PROFIT_TARGET", DEFAULT_DAILY_PROFIT_TARGET)
+    if daily_profit_target < 0:
+        raise ConfigError("DAILY_PROFIT_TARGET must be >= 0")
 
     cfg = Config(
         pair=pair,
@@ -344,6 +367,10 @@ def load_config(
         max_balance_usage=usage,
         sell_safety_factor=_dec(env, "SELL_SAFETY_FACTOR", DEFAULT_SELL_SAFETY),
         fee_buffer=_dec(env, "FEE_BUFFER", DEFAULT_FEE_BUFFER),
+        taker_fee_rate=taker_fee_rate,
+        maker_fee_rate=maker_fee_rate,
+        stop_order_type=stop_order_type,
+        daily_profit_target=daily_profit_target,
         min_amount_btc=_dec(env, "MIN_AMOUNT_BTC", DEFAULT_MIN_AMOUNT),
         amount_precision=_dec(env, "AMOUNT_PRECISION", DEFAULT_AMOUNT_PRECISION),
         price_tick=_dec(env, "PRICE_TICK", DEFAULT_PRICE_TICK),

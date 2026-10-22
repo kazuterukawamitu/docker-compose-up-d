@@ -39,6 +39,15 @@ def test_max_position() -> None:
     assert buy.reason == "max_position"
 
 
+def test_daily_profit_target_blocks_new_buys_only() -> None:
+    c = cfg(daily_profit_target=Decimal("100"))
+    r = RiskManager(c, daily_pnl=Decimal("100"))
+    buy = r.check_buy(Decimal("0"), Decimal("0.01"))
+    assert not buy.allowed
+    assert buy.reason == "daily_profit_target"
+    assert r.check_sell(Decimal("0.01")).allowed
+
+
 def test_daily_halt_resets_next_jst_day() -> None:
     c = cfg(daily_pnl_floor=Decimal("150"))
     r = RiskManager(c, daily_pnl=Decimal("-200"), daily_pnl_date="2000-01-01")

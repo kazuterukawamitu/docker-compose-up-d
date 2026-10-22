@@ -43,3 +43,17 @@ Trend uses `slope = (ma - prev_ma) / prev_ma` versus `MA_SLOPE_THRESHOLD=0.0005`
 When `ENABLE_HTF_FILTER=true` (default), a **new BUY** is blocked if the 4-hour
 and 1-day SMA slopes are both DOWN, or if those candles cannot be read. Sells
 and take-profit are unchanged. `--synthetic` smoke tests skip this filter.
+
+## Live mark, fees, and the daily screen
+
+Pattern BUY1–4 and SELL1–4 still read the closed candle. A resting position can
+also exit from the public ticker: at `average × (1 − STOP_LOSS_PCT)` the bot
+sends `STOP_ORDER_TYPE` (default market), and at `average × (1 + tp)` it sends
+a limit. That path runs only when the ticker has a timestamp.
+
+Realized PnL subtracts the taker fee (default 0.12% each side, about 0.24%
+round trip). A 0.05% scalp on 0.001 BTC does not clear that cost. BUY1 at +3%
+does. `DAILY_PNL_FLOOR` and `DAILY_PROFIT_TARGET` block new buys. They do not
+replace Granville and they do not flatten an open position. Entropy and the
+down posterior do the same, and only after 8 return samples. The 取引画面 shows
+日次損益 next to the position.

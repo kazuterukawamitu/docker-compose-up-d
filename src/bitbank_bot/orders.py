@@ -108,7 +108,9 @@ class OrderExecutor:
         slog("ORDER_STATUS", "cancel requested", order_id=order_id)
         return True
 
-    def place(self, signal: Signal, plan: AmountPlan) -> OrderResult:
+    def place(
+        self, signal: Signal, plan: AmountPlan, order_type: str | None = None
+    ) -> OrderResult:
         slog(
             "ORDER_REQUEST",
             "order request",
@@ -217,17 +219,20 @@ class OrderExecutor:
                 None,
                 None,
             )
+        chosen = (order_type or self.cfg.order_type).lower()
+        if chosen not in {"market", "limit"}:
+            chosen = self.cfg.order_type
         price_str: str | None = None
-        if self.cfg.order_type == "limit":
+        if chosen == "limit":
             q = quantize_price(plan.price, self.cfg.price_tick)
             price_str = str(int(q)) if q == q.to_integral_value() else str(q)
         raw = self.client.create_order(
             pair=self.cfg.pair,
             amount=str(plan.amount),
             side=plan.side,
-            order_type=self.cfg.order_type,
+            order_type=chosen,
             price=price_str,
-            post_only=self.cfg.post_only if self.cfg.order_type == "limit" else None,
+            post_only=self.cfg.post_only if chosen == "limit" else None,
             live_confirmed=True,
         )
         order_id = str(raw.get("order_id") or "")

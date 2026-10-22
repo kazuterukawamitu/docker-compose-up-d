@@ -62,6 +62,9 @@ def test_live_defaults_stay_capped() -> None:
     assert cfg.fixed_order_btc == Decimal("0.001")
     assert cfg.stop_loss_pct == Decimal("0.03")
     assert cfg.sell_order_timeout_seconds == 30
+    assert cfg.taker_fee_rate == Decimal("0.0012")
+    assert cfg.stop_order_type == "market"
+    assert cfg.daily_profit_target == Decimal("0")
     assert cfg.pending_order_timeout_seconds == 900
     assert cfg.may_place_live_orders is False
 

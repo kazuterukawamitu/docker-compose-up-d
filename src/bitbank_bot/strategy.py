@@ -52,6 +52,7 @@ class Position:
     entry_candle_ts: int
     actual_execution_jpy: Decimal
     kind: str
+    fees_jpy: Decimal = ZERO
 
 
 @dataclass

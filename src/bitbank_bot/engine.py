@@ -12,8 +12,17 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
+from bitbank_bot.adaptive import (
+    gravity_well_escape_optimizer,
+    multi_scenario_inference,
+    probability_state_updater,
+    self_healing_execution_guard,
+    shannon_entropy,
+    spline_end_slope,
+)
 from bitbank_bot.amounts import AmountPlan, PositionSizer
 from bitbank_bot.config import Config
+from bitbank_bot.fees import fill_fee_jpy, incremental_notional
 from bitbank_bot.logging_setup import slog
 from bitbank_bot.market_data import (
     Candle,
@@ -22,7 +31,8 @@ from bitbank_bot.market_data import (
     fetch_candles,
     synthetic_candles,
 )
-from bitbank_bot.money import D, ZERO
+from bitbank_bot.money import D, ONE, ZERO
+from bitbank_bot.reconcile import decide_reconcile
 from bitbank_bot.multi_timeframe import evaluate_htf
 from bitbank_bot.orders import OrderExecutor, OrderResult
 from bitbank_bot.preflight import preflight
@@ -47,6 +57,7 @@ class PendingOrder:
     amount: Decimal
     filled_amount: Decimal = ZERO
     placed_at: float = 0.0
+    average_price: Decimal = ZERO
 
 
 @dataclass
@@ -80,6 +91,7 @@ def load_state(path: str | Path, cfg: Config) -> BotState:
                 entry_candle_ts=int(pos.get("entry_candle_ts") or 0),
                 actual_execution_jpy=D(pos["actual_execution_jpy"]),
                 kind=str(pos.get("kind") or ""),
+                fees_jpy=D(pos.get("fees_jpy") or 0),
             )
         operator_killed = bool(raw.get("operator_killed", False))
         risk = RiskManager(
@@ -102,6 +114,7 @@ def load_state(path: str | Path, cfg: Config) -> BotState:
                 amount=D(pending_raw.get("amount") or 0),
                 filled_amount=D(pending_raw.get("filled_amount") or 0),
                 placed_at=float(pending_raw.get("placed_at") or 0) or time.time(),
+                average_price=D(pending_raw.get("average_price") or 0),
             )
         if raw.get("paper_jpy") not in (None, ""):
             paper_jpy = D(raw.get("paper_jpy"))
@@ -136,6 +149,7 @@ def save_state(path: str | Path, state: BotState) -> None:
             "amount": str(state.pending.amount),
             "filled_amount": str(state.pending.filled_amount),
             "placed_at": state.pending.placed_at,
+            "average_price": str(state.pending.average_price),
         }
     if state.position:
         payload["position"] = {
@@ -146,6 +160,7 @@ def save_state(path: str | Path, state: BotState) -> None:
             "entry_candle_ts": state.position.entry_candle_ts,
             "actual_execution_jpy": str(state.position.actual_execution_jpy),
             "kind": state.position.kind,
+            "fees_jpy": str(state.position.fees_jpy),
         }
     p.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
@@ -178,6 +193,14 @@ class Engine:
         self.last_error = ""
         self._candle_fp: tuple[int, int, str] | None = None
         self._last_bar_index = 0
+        self._closes: list[Decimal] = []
+        self._returns: list[Decimal] = []
+        self.entropy = ZERO
+        self.posterior_up = D("0.333")
+        self.posterior_down = D("0.333")
+        self.hold_escape = "-"
+        self.spline_slope = ZERO
+        self.scenarios: dict[str, Decimal] = {}
 
     def request_stop(self, *_args: object) -> None:
         slog("BOOT", "shutdown requested")
@@ -243,6 +266,24 @@ class Engine:
             self._poll_pending(state)
             if persist:
                 save_state(self.cfg.state_path, state)
+        if candles:
+            self._observe_close(candles[-1].close)
+            self._note_scenarios(candles[-1].close)
+        if execute and candles:
+            protective = self._protective_exit(
+                state, self._last_bar_index, candles[-1].timestamp_ms
+            )
+            if protective is not None:
+                self.last_signal = protective
+                state.last_candle_ts = max(state.last_candle_ts, candles[-1].timestamp_ms)
+                self._candle_fp = (
+                    len(candles),
+                    candles[-1].timestamp_ms,
+                    str(candles[-1].close),
+                )
+                if persist:
+                    save_state(self.cfg.state_path, state)
+                return protective
         if candles:
             last_bar = candles[-1]
             fingerprint = (len(candles), last_bar.timestamp_ms, str(last_bar.close))
@@ -383,6 +424,7 @@ class Engine:
         index: int,
         ts: int,
         state: BotState,
+        order_type: str | None = None,
     ) -> None:
         rest = self._rest()
         if self.ws is not None and not self.ws.is_stale() and self.ws.last_price():
@@ -434,11 +476,13 @@ class Engine:
             self.last_block_reason = plan.reason
             slog("RISK", "order blocked", reason=plan.reason, side=signal.side)
             return
+        if signal.side == "buy" and not self._buy_guard_allows(signal, state):
+            return
         self.last_block_reason = ""
         order_client = rest if self.cfg.has_keys else None
         executor = OrderExecutor(self.cfg, order_client)
         try:
-            result = executor.place(signal, plan)
+            result = executor.place(signal, plan, order_type=order_type)
         except Exception as exc:
             _LOG.exception("order place failed")
             slog("ERROR", "order path failed", error=type(exc).__name__)
@@ -486,8 +530,14 @@ class Engine:
     ) -> None:
         if result.executed_amount <= pending.filled_amount:
             return
-        delta = result.executed_amount - pending.filled_amount
-        avg = result.average_price
+        delta_qty, delta_notional, incremental_avg = incremental_notional(
+            pending.filled_amount,
+            pending.average_price,
+            result.executed_amount,
+            result.average_price,
+        )
+        if delta_qty <= ZERO:
+            return
         delta_result = OrderResult(
             True,
             result.reason,
@@ -495,16 +545,16 @@ class Engine:
             False,
             pending.order_id,
             result.status,
-            delta,
-            avg,
-            delta * avg if avg else ZERO,
+            delta_qty,
+            incremental_avg,
+            delta_notional,
             result.raw,
         )
         signal = Signal(pending.kind, pending.side, pending.tp_pct, "pending_fill")
         plan = AmountPlan(
             side=pending.side,
             amount=pending.amount,
-            price=avg if avg > ZERO else ZERO,
+            price=incremental_avg if incremental_avg > ZERO else ZERO,
             available_jpy=ZERO,
             available_btc=ZERO,
             target_jpy=ZERO,
@@ -522,6 +572,9 @@ class Engine:
         self._apply_fill(
             signal, plan, delta_result, pending.index, pending.timestamp_ms, state, jpy, btc
         )
+        if state.pending is not None and state.pending.order_id == pending.order_id:
+            state.pending.average_price = result.average_price
+            state.pending.filled_amount = result.executed_amount
 
     def _pending_limit(self, pending: PendingOrder) -> int:
         if pending.side == "sell":
@@ -640,16 +693,17 @@ class Engine:
             actual_balance_btc=str(btc),
             bitbank_jpy_unchanged=bool(self.cfg.dry_run or result.simulated),
         )
+        fee = self._fill_fee(signal, actual_jpy)
         if result.simulated or (self.cfg.dry_run and not self.cfg.has_keys):
             if state.paper_jpy <= ZERO and state.paper_btc <= ZERO:
                 state.paper_jpy = jpy
                 state.paper_btc = btc
             if signal.side == "buy":
                 state.paper_btc += result.executed_amount
-                state.paper_jpy = max(ZERO, state.paper_jpy - actual_jpy)
+                state.paper_jpy = max(ZERO, state.paper_jpy - actual_jpy - fee)
             elif signal.side == "sell":
                 state.paper_btc = max(ZERO, state.paper_btc - result.executed_amount)
-                state.paper_jpy += actual_jpy
+                state.paper_jpy += max(ZERO, actual_jpy - fee)
         if signal.side == "buy":
             tp = signal.tp_pct if signal.tp_pct is not None else self.cfg.buy1_tp
             if state.position:
@@ -664,6 +718,7 @@ class Engine:
                     entry_candle_ts=state.position.entry_candle_ts,
                     actual_execution_jpy=total_jpy,
                     kind=state.position.kind,
+                    fees_jpy=state.position.fees_jpy + fee,
                 )
             else:
                 state.position = Position(
@@ -674,23 +729,31 @@ class Engine:
                     entry_candle_ts=ts,
                     actual_execution_jpy=actual_jpy,
                     kind=signal.kind,
+                    fees_jpy=fee,
                 )
         elif signal.side == "sell" and state.position:
             pos_amt = state.position.amount
             if pos_amt <= ZERO or result.executed_amount >= pos_amt:
-                state.risk.record_realized_pnl(actual_jpy - state.position.actual_execution_jpy)
+                pnl = (actual_jpy - fee) - state.position.actual_execution_jpy - state.position.fees_jpy
+                state.risk.record_realized_pnl(pnl)
                 state.position = None
             else:
-                cost = state.position.actual_execution_jpy * (result.executed_amount / pos_amt)
-                state.risk.record_realized_pnl(actual_jpy - cost)
+                frac = result.executed_amount / pos_amt
+                cost = state.position.actual_execution_jpy * frac
+                allocated = state.position.fees_jpy * frac
+                state.risk.record_realized_pnl((actual_jpy - fee) - cost - allocated)
                 state.position.amount = pos_amt - result.executed_amount
                 state.position.actual_execution_jpy -= cost
+                state.position.fees_jpy -= allocated
         if result.reason == "partial_fill" and result.order_id:
             already = ZERO
             placed_at = time.time()
+            kept_avg = result.average_price
             if state.pending is not None and state.pending.order_id == result.order_id:
                 already = state.pending.filled_amount
                 placed_at = state.pending.placed_at or placed_at
+                if kept_avg <= ZERO:
+                    kept_avg = state.pending.average_price
             state.pending = PendingOrder(
                 order_id=result.order_id,
                 side=signal.side or "",
@@ -701,6 +764,7 @@ class Engine:
                 amount=plan.amount,
                 filled_amount=already + result.executed_amount,
                 placed_at=placed_at,
+                average_price=kept_avg,
             )
         elif result.reason != "partial_fill":
             state.pending = None
@@ -728,6 +792,7 @@ class Engine:
         else:
             candles = self.cache.merge(candles)
             state = load_state(self.cfg.state_path, self.cfg)
+            self.reconcile(state)
         signal = self.process_candles(
             candles, state, execute=True, persist=not synthetic
         )
@@ -799,6 +864,8 @@ class Engine:
         state = load_state(self.cfg.state_path, self.cfg)
         if synthetic:
             state.last_candle_ts = 0
+        else:
+            self.reconcile(state)
         last_ok = time.monotonic()
         timeout = float(self.cfg.no_trade_timeout_seconds)
         while not self._stop:
@@ -910,7 +977,177 @@ class Engine:
         except Exception as exc:
             self.last_error = type(exc).__name__
 
+    def _fill_fee(self, signal: Signal, notional: Decimal) -> Decimal:
+        rate = self.cfg.taker_fee_rate
+        if signal.kind != "STOP" and self.cfg.post_only and self.cfg.order_type == "limit":
+            rate = self.cfg.maker_fee_rate
+        return fill_fee_jpy(notional, rate)
+
+    def _buy_guard_allows(self, signal: Signal, state: BotState) -> bool:
+        if self._returns:
+            posterior = probability_state_updater(self._returns)
+            entropy = shannon_entropy(self._returns)
+            down = posterior["down"]
+            self.posterior_up = posterior["up"]
+            self.posterior_down = down
+            self.entropy = entropy
+        else:
+            entropy = ZERO
+            down = D("0.333")
+        halt = state.risk.halt_reason() in {
+            "daily_pnl_floor",
+            "max_daily_loss",
+            "daily_profit_target",
+        }
+        allowed, why = self_healing_execution_guard(
+            side="buy",
+            kind=signal.kind,
+            tp_pct=signal.tp_pct if signal.tp_pct is not None else self.cfg.buy1_tp,
+            fee_rate=self.cfg.taker_fee_rate,
+            entropy=entropy,
+            samples=len(self._returns),
+            posterior_down=down,
+            daily_halt=halt,
+        )
+        if not allowed:
+            self.last_block_reason = why
+            slog("RISK", "buy blocked by execution guard", reason=why)
+        return allowed
+
+    def _observe_close(self, close: Decimal) -> None:
+        close = D(close)
+        if self._closes and self._closes[-1] == close:
+            return
+        prev = self._closes[-1] if self._closes else None
+        self._closes.append(close)
+        if len(self._closes) > 64:
+            del self._closes[:-64]
+        if prev is not None and prev > ZERO:
+            self._returns.append((close - prev) / prev)
+            if len(self._returns) > 64:
+                del self._returns[:-64]
+            posterior = probability_state_updater(self._returns)
+            self.entropy = shannon_entropy(self._returns)
+            self.posterior_up = posterior["up"]
+            self.posterior_down = posterior["down"]
+        self.spline_slope = spline_end_slope(self._closes)
+
+    def _note_scenarios(self, price: Decimal) -> None:
+        try:
+            lot = self.cfg.fixed_order_btc if self.cfg.fixed_order_btc > ZERO else D("0.001")
+            self.scenarios = multi_scenario_inference(lot, price, self.cfg.taker_fee_rate)
+        except Exception as exc:
+            slog("ERROR", "scenario note skipped", error=type(exc).__name__)
+
+    def _mark_price(self) -> Decimal | None:
+        if self.last_quote_ms <= 0 or self.last_public_last in {"", "-"}:
+            return None
+        try:
+            price = D(self.last_public_last)
+        except Exception:
+            return None
+        if price <= ZERO:
+            return None
+        return price
+
+    def _protective_exit(self, state: BotState, index: int, ts: int) -> Signal | None:
+        if state.pending is not None or state.position is None:
+            return None
+        mark = self._mark_price()
+        if mark is None or self._quote_is_stale():
+            return None
+        pos = state.position
+        signal: Signal | None = None
+        order_type: str | None = None
+        price = mark
+        if self.cfg.stop_loss_pct > ZERO and mark <= pos.average_price * (ONE - self.cfg.stop_loss_pct):
+            signal = Signal("STOP", "sell", pos.tp_pct, "live_mark_stop")
+            order_type = self.cfg.stop_order_type
+        elif pos.tp_pct > ZERO and mark >= pos.average_price * (ONE + pos.tp_pct):
+            signal = Signal("TP", "sell", pos.tp_pct, "live_mark_tp")
+            order_type = "limit"
+            price = pos.average_price * (ONE + pos.tp_pct)
+        if signal is None:
+            return None
+        slog("STRATEGY", "protective exit", kind=signal.kind, mark=str(mark))
+        self._execute(signal, price, index, ts, state, order_type=order_type)
+        return signal
+
+    def _entropy_text(self) -> str:
+        if len(self._returns) < 8:
+            return "-"
+        return f"{shannon_entropy(self._returns):.3f}"
+
+    def _posterior_text(self) -> str:
+        if len(self._returns) < 8:
+            return "-"
+        return f"{self.posterior_up:.3f}"
+
+    def reconcile(self, state: BotState) -> None:
+        if not self.cfg.has_keys or self._explicit_synthetic:
+            return
+        try:
+            self._reconcile_open(state)
+        except Exception as exc:
+            slog("ERROR", "reconcile skipped", error=type(exc).__name__)
+
+    def _reconcile_open(self, state: BotState) -> None:
+        rest = self._rest()
+        active = rest.get_active_orders(self.cfg.pair) or []
+        ids = [str(row.get("order_id")) for row in active if row.get("order_id")]
+        local = state.pending.order_id if state.pending else None
+        status: str | None = None
+        if local and local not in ids:
+            try:
+                row = rest.get_order(self.cfg.pair, local)
+                status = str((row or {}).get("status") or "")
+            except Exception:
+                status = None
+        decision = decide_reconcile(local, ids, status)
+        slog("ORDER_STATUS", "reconcile", action=decision.action, reason=decision.reason)
+        if decision.action == "clear":
+            state.pending = None
+        elif decision.action == "adopt" and state.pending is None and decision.order_id:
+            chosen = next(row for row in active if str(row.get("order_id")) == decision.order_id)
+            state.pending = PendingOrder(
+                order_id=decision.order_id,
+                side=str(chosen.get("side") or ""),
+                kind="RECONCILE",
+                tp_pct=None,
+                index=0,
+                timestamp_ms=0,
+                amount=D(chosen.get("start_amount") or chosen.get("remaining_amount") or 0),
+                filled_amount=D(chosen.get("executed_amount") or 0),
+                placed_at=time.time(),
+                average_price=D(chosen.get("average_price") or 0),
+            )
+            slog(
+                "ORDER_STATUS",
+                "adopted exchange order; not placing another",
+                order_id=decision.order_id,
+            )
+        if state.position is None:
+            return
+        try:
+            free = D(rest.free_amount("btc"))
+        except Exception as exc:
+            slog("ERROR", "reconcile balance skipped", error=type(exc).__name__)
+            return
+        if free != state.position.amount:
+            slog(
+                "ASSET",
+                "btc free differs from tracked position; not selling the difference",
+                free=str(free),
+                position=str(state.position.amount),
+            )
+
     def _paint(self, state: BotState, signal: Signal, last: str = "-") -> None:
+        self.hold_escape = gravity_well_escape_optimizer(
+            in_position=state.position is not None,
+            signal_kind=signal.kind,
+            block_reason=self.last_block_reason,
+            samples=len(self._returns),
+        )
         if self.screen is None:
             return
         pos = state.position
@@ -935,6 +1172,11 @@ class Engine:
             block_reason=self.last_block_reason,
             error=self.last_error,
             candle_type=self.cfg.candle_type,
+            daily_pnl=state.risk.daily_pnl,
+            entropy=self._entropy_text(),
+            posterior_up=self._posterior_text(),
+            escape=self.hold_escape,
+            fee_note="往復テイカー約0.24%。0.05%の小幅は費用負け",
         )
         self.screen.render(view)
 
