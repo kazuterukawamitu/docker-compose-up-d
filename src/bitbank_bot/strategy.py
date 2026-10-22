@@ -18,7 +18,7 @@ from bitbank_bot.indicators import (
     ma_trend,
     moving_average,
 )
-from bitbank_bot.money import ONE, pct_offset
+from bitbank_bot.money import ONE, ZERO, pct_offset
 
 
 @dataclass
@@ -52,6 +52,7 @@ class Position:
     entry_candle_ts: int
     actual_execution_jpy: Decimal
     kind: str
+    fees_jpy: Decimal = ZERO
 
 
 @dataclass
@@ -256,6 +257,10 @@ class Strategy:
 
     def evaluate(self, snap: MarketSnapshot, position: Position | None) -> Signal:
         self.observe(snap)
+        if position is not None:
+            stop = self._stop_signal(snap, position)
+            if stop.kind != "HOLD":
+                return stop
         same_entry = position is not None and snap.index == position.entry_candle_index
         if position is not None and not same_entry:
             sell = self._sell_signal(snap)
@@ -271,6 +276,23 @@ class Strategy:
         if buy.kind != "HOLD":
             return buy
         return Signal.hold("no_buy_setup")
+
+    def _stop_signal(self, snap: MarketSnapshot, position: Position) -> Signal:
+        stop = self.cfg.stop_loss_pct
+        if stop <= ZERO or position.average_price <= ZERO:
+            return Signal.hold("stop_disabled")
+        floor = position.average_price * (ONE - stop)
+        if snap.close <= floor:
+            return Signal(
+                kind="STOP",
+                side="sell",
+                tp_pct=None,
+                reason=(
+                    f"hard stop close={snap.close} <= "
+                    f"{floor} (fill_avg={position.average_price} - {stop})"
+                ),
+            )
+        return Signal.hold("stop_not_hit")
 
     def _tp_signal(self, snap: MarketSnapshot, position: Position) -> Signal:
         target = pct_offset(position.average_price, position.tp_pct)

@@ -138,6 +138,9 @@ class RiskManager:
         if reason:
             return RiskDecision(False, ZERO, reason, True)
         headroom = self.max_position_btc - D(current_btc)
+        target = D(self.cfg.daily_profit_target or 0)
+        if target > ZERO and self.daily_pnl >= target:
+            return RiskDecision(False, ZERO, "daily_profit_target", False)
         if headroom <= ZERO:
             return RiskDecision(False, ZERO, "max_position", False)
         capped = min(D(requested_btc), headroom, self.max_order_btc)

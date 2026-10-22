@@ -17,10 +17,23 @@ def test_buy_from_free_jpy_floors_to_lot() -> None:
         risk=r,
     )
     assert plan.ok
-    assert plan.amount == Decimal("0.0094")  # 100000*0.95*0.9985 / 10_000_000 floored
+    assert plan.amount == Decimal("0.001")  # FIXED_ORDER_BTC cap
     assert plan.target_jpy > 0
     assert plan.planned_order_jpy == plan.amount * plan.price
     assert plan.actual_execution_jpy is None
+
+
+def test_buy_possible_amount_when_fixed_disabled() -> None:
+    c = cfg(fixed_order_btc=Decimal("0"))
+    plan = plan_buy(
+        available_jpy=Decimal("100000"),
+        available_btc=Decimal("0"),
+        price=Decimal("10000000"),
+        cfg=c,
+        risk=risk(c),
+    )
+    assert plan.ok
+    assert plan.amount == Decimal("0.0094")
 
 
 def test_buy_insufficient_jpy() -> None:

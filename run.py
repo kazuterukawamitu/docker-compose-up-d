@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import ssl
 import sys
 import time
@@ -28,6 +29,7 @@ MA_PERIOD = 20
 SLOPE = Decimal("0.0005")
 BUY1_TP = Decimal("0.03")
 MIN_BTC = Decimal("0.0001")
+FIXED_BTC = Decimal("0.001")
 PAPER_JPY = Decimal("100000")
 POLL_SEC = 5
 LONG_WAIT_SEC = 900
@@ -180,6 +182,34 @@ def decide(
     return "HOLD", "no_buy_setup"
 
 
+def entropy_line(closes: list[Decimal]) -> str:
+    """3-bin Shannon entropy. Fewer than 8 returns stays in warmup and does not trade."""
+    if len(closes) < 9:
+        return "エントロピー サンプル不足"
+    returns: list[Decimal] = []
+    for prev, close in zip(closes, closes[1:]):
+        if prev > 0:
+            returns.append((close - prev) / prev)
+    returns = returns[-64:]
+    if len(returns) < 8:
+        return "エントロピー サンプル不足"
+    bins = [0, 0, 0]
+    for value in returns:
+        if value < Decimal("-0.001"):
+            bins[0] += 1
+        elif value > Decimal("0.001"):
+            bins[2] += 1
+        else:
+            bins[1] += 1
+    total = sum(bins)
+    entropy = 0.0
+    for count in bins:
+        if count:
+            p = count / total
+            entropy -= p * math.log2(p)
+    return f"エントロピー {entropy:.3f} bit（履歴が揃うまで新規買いは制限しない）"
+
+
 def screen(
     *,
     last: str,
@@ -194,6 +224,7 @@ def screen(
     in_position: bool,
     amount: Decimal,
     entry: Decimal,
+    entropy: str,
 ) -> str:
     pos = "なし"
     if in_position:
@@ -210,6 +241,9 @@ def screen(
             f"  移動平均     {commas(ma)}    トレンド {trend}",
             f"  シグナル     {signal}    {reason}",
             f"  建玉         {pos}",
+            f"  日次損益     0 JPY（この画面は注文しない）",
+            f"  {entropy}",
+            "  手数料       往復テイカー約0.24%。0.05%の小幅は費用負け",
             f"  監視         {watchdog}",
             f"  エラー       {error or 'なし'}",
             bar,
@@ -258,7 +292,7 @@ def main(argv: list[str] | None = None) -> int:
             if signal == "BUY1" or signal == "BUY2":
                 price = D(last)
                 if price > 0:
-                    raw = (PAPER_JPY * Decimal("0.95")) / price
+                    raw = min((PAPER_JPY * Decimal("0.95")) / price, FIXED_BTC)
                     amount = (raw // MIN_BTC) * MIN_BTC
                     if amount >= MIN_BTC:
                         in_position = True
@@ -292,6 +326,7 @@ def main(argv: list[str] | None = None) -> int:
                 in_position=in_position,
                 amount=amount,
                 entry=entry,
+                entropy=entropy_line(closes),
             )
             if use_screen:
                 sys.stdout.write(CLEAR + text + "\n")

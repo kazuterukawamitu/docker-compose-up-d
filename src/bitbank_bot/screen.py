@@ -56,6 +56,11 @@ class ScreenView:
     error: str
     candle_type: str
     note: str = "HOLD/待機は正常です。Ctrl-C で停止"
+    daily_pnl: str = "0"
+    entropy: str = "-"
+    posterior_up: str = "-"
+    escape: str = "-"
+    fee_note: str = ""
 
 
 def format_screen(view: ScreenView) -> str:
@@ -81,6 +86,10 @@ def format_screen(view: ScreenView) -> str:
         f"  移動平均     {_commas(view.ma)}    トレンド {view.trend}",
         f"  シグナル     {view.signal_kind}    {view.signal_reason}",
         f"  建玉         {pos}",
+        f"  日次損益     {_commas(view.daily_pnl)} JPY",
+        f"  エントロピー {view.entropy}    上昇確率 {view.posterior_up}",
+        f"  待機理由     {view.escape or '-'}",
+        f"  手数料       {view.fee_note or '往復テイカー約0.24%。小さい利幅は費用負け'}",
         f"  監視         {view.watchdog}    WS {ws}",
         f"  ブロック     {block}",
         f"  エラー       {err}",
@@ -151,6 +160,11 @@ def view_from_engine(
     block_reason: str = "",
     error: str = "",
     candle_type: str = "1hour",
+    daily_pnl: object = "0",
+    entropy: str = "-",
+    posterior_up: str = "-",
+    escape: str = "-",
+    fee_note: str = "",
 ) -> ScreenView:
     return ScreenView(
         pair=pair,
@@ -173,6 +187,11 @@ def view_from_engine(
         block_reason=block_reason,
         error=error,
         candle_type=candle_type,
+        daily_pnl=str(daily_pnl),
+        entropy=entropy,
+        posterior_up=posterior_up,
+        escape=escape,
+        fee_note=fee_note,
     )
 
 

@@ -436,3 +436,170 @@ def test_partial_fill_keeps_pending(tmp_path) -> None:
     assert state.pending.filled_amount == Decimal("0.0004")
     assert state.position is not None
     assert state.position.amount == Decimal("0.0004")
+
+
+def test_canceled_pending_releases_the_gate(tmp_path) -> None:
+    c = cfg(
+        state_path=str(tmp_path / "state.json"),
+        lock_path=str(tmp_path / "bot.lock"),
+        log_dir=str(tmp_path / "logs"),
+        enable_websocket=False,
+        enable_htf_filter=False,
+        dry_run=False,
+        live_trading=True,
+        api_key="k",
+        api_secret="s",
+        ma_period=3,
+        short_ma_period=3,
+        long_ma_period=5,
+    )
+    rest = MagicMock()
+    rest.free_amount.side_effect = lambda asset: (
+        Decimal("100000") if asset == "jpy" else Decimal("0")
+    )
+    rest.get_active_orders.return_value = []
+    rest.create_order.return_value = {
+        "order_id": "7",
+        "status": "UNFILLED",
+        "executed_amount": "0",
+        "average_price": "0",
+        "start_amount": "0.001",
+    }
+    rest.get_order.return_value = {
+        "order_id": "7",
+        "status": "CANCELED_UNFILLED",
+        "executed_amount": "0",
+        "average_price": "0",
+        "start_amount": "0.001",
+    }
+    engine = Engine(c, client=rest)
+    from bitbank_bot.engine import BotState
+
+    candles = synthetic_candles(40)
+    state = BotState(
+        None,
+        RiskManager(c),
+        candles[-1].timestamp_ms,
+        time.monotonic(),
+        pending=PendingOrder(
+            order_id="7",
+            side="buy",
+            kind="BUY1",
+            tp_pct=Decimal("0.03"),
+            index=1,
+            timestamp_ms=1,
+            amount=Decimal("0.001"),
+            placed_at=time.time(),
+        ),
+    )
+    engine.process_candles(candles, state, execute=True, persist=False)
+    assert state.pending is None
+    assert state.position is None
+
+
+def test_live_sell_does_not_exceed_tracked_position(tmp_path) -> None:
+    from bitbank_bot.engine import BotState
+    from bitbank_bot.strategy import Position
+
+    c = cfg(
+        state_path=str(tmp_path / "state.json"),
+        lock_path=str(tmp_path / "bot.lock"),
+        log_dir=str(tmp_path / "logs"),
+        enable_websocket=False,
+        enable_htf_filter=False,
+        dry_run=False,
+        live_trading=True,
+        api_key="k",
+        api_secret="s",
+        ma_period=3,
+        short_ma_period=3,
+        long_ma_period=5,
+    )
+    rest = MagicMock()
+    rest.free_amount.side_effect = lambda asset: (
+        Decimal("100000") if asset == "jpy" else Decimal("0.002")
+    )
+    rest.get_active_orders.return_value = []
+    rest.create_order.return_value = {
+        "order_id": "8",
+        "status": "FULLY_FILLED",
+        "executed_amount": "0.001",
+        "average_price": "10000000",
+        "start_amount": "0.001",
+    }
+    engine = Engine(c, client=rest)
+    state = BotState(
+        Position(
+            amount=Decimal("0.001"),
+            average_price=Decimal("10000000"),
+            tp_pct=Decimal("0.03"),
+            entry_candle_index=1,
+            entry_candle_ts=1,
+            actual_execution_jpy=Decimal("10000"),
+            kind="BUY1",
+        ),
+        RiskManager(c),
+        0,
+        time.monotonic(),
+    )
+    with patch(
+        "bitbank_bot.strategy.Strategy.evaluate",
+        return_value=Signal("SELL1", "sell", None, "forced"),
+    ):
+        engine.process_candles(synthetic_candles(40), state, execute=True, persist=False)
+    sent = rest.create_order.call_args.kwargs["amount"]
+    assert Decimal(sent) == Decimal("0.001")
+    assert state.position is None
+
+
+def test_stale_sell_is_canceled(tmp_path) -> None:
+    c = cfg(
+        state_path=str(tmp_path / "state.json"),
+        lock_path=str(tmp_path / "bot.lock"),
+        log_dir=str(tmp_path / "logs"),
+        enable_websocket=False,
+        enable_htf_filter=False,
+        dry_run=False,
+        live_trading=True,
+        api_key="k",
+        api_secret="s",
+        sell_order_timeout_seconds=30,
+        ma_period=3,
+        short_ma_period=3,
+        long_ma_period=5,
+    )
+    rest = MagicMock()
+    rest.free_amount.side_effect = lambda asset: (
+        Decimal("100000") if asset == "jpy" else Decimal("0.001")
+    )
+    rest.get_order.return_value = {
+        "order_id": "9",
+        "status": "UNFILLED",
+        "executed_amount": "0",
+        "average_price": "0",
+        "start_amount": "0.001",
+    }
+    rest.cancel_order.return_value = {"order_id": "9", "status": "CANCELED_UNFILLED"}
+    engine = Engine(c, client=rest)
+    from bitbank_bot.engine import BotState
+
+    candles = synthetic_candles(40)
+    state = BotState(
+        None,
+        RiskManager(c),
+        candles[-1].timestamp_ms,
+        time.monotonic(),
+        pending=PendingOrder(
+            order_id="9",
+            side="sell",
+            kind="SELL1",
+            tp_pct=None,
+            index=1,
+            timestamp_ms=1,
+            amount=Decimal("0.001"),
+            placed_at=time.time() - 120,
+        ),
+    )
+    engine.process_candles(candles, state, execute=True, persist=False)
+    rest.cancel_order.assert_called_once()
+    assert state.pending is None

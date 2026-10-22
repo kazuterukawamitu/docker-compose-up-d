@@ -57,11 +57,26 @@ bitFlyer, Coincheck, and GMO are not imported and are not executed.
 10. **Partial fills.** `PARTIALLY_FILLED` stays in `state.pending` and is polled
     until the remainder fills.
 11. **Kill file.** `data/KILL` blocks sells as well as buys.
+12. **Terminal order status.** `CANCELED_UNFILLED` and the other cancel/reject statuses clear `state.pending`. A zero fill is no longer stored as `UNFILLED`, which had blocked every later order.
+13. **Sell size.** A live sell is `min(free BTC, tracked position)`. Extra wallet BTC is not an exit order.
+14. **Fixed lot.** Buys default to `0.001` BTC (`FIXED_ORDER_BTC`), the same lot the backtest uses. Possible-amount sizing remains available by setting the cap to `0`.
+15. **Exit timeout.** A resting sell older than `SELL_ORDER_TIMEOUT_SEC` (default 30) is canceled and can be replaced on the same closed candle. A resting buy uses `PENDING_ORDER_TIMEOUT_SEC` (default 900).
+16. **Hard stop.** `STOP_LOSS_PCT` (default 3%) is evaluated before the pattern sells.
+17. **Quote age and assets.** A public ticker older than `QUOTE_MAX_AGE_SEC` blocks a new order. Keyed balance reads use one assets request.
+18. **Readiness.** `live_ready` stays false unless both live flags, both keys, the 0.001 lot, a stop, and no kill switch are set. The report does not place an order.
+19. **Partial-fill cost.** A later fill is booked as the new cumulative notional minus the previous cumulative notional. The pending order stores the cumulative average for the next increment.
+20. **Fees.** Realized PnL and the paper JPY ledger deduct `TAKER_FEE_RATE` (default 0.12% per fill, about 0.24% round trip). Gross `actual_execution_jpy` stays the exchange notional. A buy whose take-profit does not clear that round trip is not sent.
+21. **Live mark exit.** When the public ticker has a timestamp, a position at the stop uses `STOP_ORDER_TYPE` (default market) and a position at its take-profit uses a limit. Pattern BUY/SELL still use the closed candle. A quote with no timestamp is not a mark.
+22. **Startup reconcile.** With API keys, and outside `--synthetic`, a missing local pending order is cleared only when the exchange says it is canceled. An exchange order with no local pending row is adopted so a second order is not sent. A full fill stays pending for the poll to book. Extra free BTC is logged and is not sold.
+23. **Daily PnL and entropy.** The daily loss floor and an optional `DAILY_PROFIT_TARGET` block new buys only. Shannon entropy and the down posterior block a new buy after 8 return samples. Neither forces a sell. The iTerm screen shows 日次損益, entropy, and the HOLD reason.
+24. **Offline slope note.** Backtest reports a suggested slope from a short search. That search does not write `MA_SLOPE_THRESHOLD` on the live bot.
+
+This tree does not SSH to a VPS and does not restart a running bot. Applying it to a live process is a separate operator step after the service is stopped. The names in `adaptive.py` are ordinary probability and search helpers. They do not run a quantum computer and they do not submit orders.
 
 ## What this bot does not do
 
 - Does not SSH to a VPS or install systemd for you.
-- Does not implement quantum / multi-exchange / guaranteed fills or profits.
+- Does not run a quantum computer, a second exchange, or a guaranteed-profit model.
 - Does not log API keys or secrets (`safe_dict` / `Config.__repr__`).
 - Does not place a live order unless both flags and keys are set.
 

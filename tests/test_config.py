@@ -57,6 +57,18 @@ def test_balance_usage_alias() -> None:
     assert str(cfg.max_balance_usage) == "0.8"
 
 
+def test_live_defaults_stay_capped() -> None:
+    cfg = load_config(environ={}, load_default_dotenv=False)
+    assert cfg.fixed_order_btc == Decimal("0.001")
+    assert cfg.stop_loss_pct == Decimal("0.03")
+    assert cfg.sell_order_timeout_seconds == 30
+    assert cfg.taker_fee_rate == Decimal("0.0012")
+    assert cfg.stop_order_type == "market"
+    assert cfg.daily_profit_target == Decimal("0")
+    assert cfg.pending_order_timeout_seconds == 900
+    assert cfg.may_place_live_orders is False
+
+
 def test_repr_hides_secret() -> None:
     cfg = load_config(
         environ={"BITBANK_API_KEY": "k", "BITBANK_API_SECRET": "s" * 16},

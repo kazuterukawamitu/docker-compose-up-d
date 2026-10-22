@@ -10,6 +10,7 @@ from bitbank_bot.engine import Engine, install_signal_handlers
 from bitbank_bot.instance_lock import InstanceLock, InstanceLockError
 from bitbank_bot.logging_setup import setup_logging, slog
 from bitbank_bot.preflight import preflight
+from bitbank_bot.readiness import describe as describe_readiness
 from bitbank_bot.rest_client import RestClient
 from bitbank_bot.screen import TradingScreen, should_use_screen
 
@@ -73,6 +74,15 @@ def main(argv: list[str] | None = None) -> int:
     use_screen = should_use_screen(args, sys.stdout)
     setup_logging(cfg.log_level, cfg.log_dir, console=not use_screen)
     slog("BOOT", "starting", **cfg.safe_dict())
+    readiness = describe_readiness(cfg)
+    slog(
+        "BOOT",
+        "live readiness",
+        live_ready=readiness["live_ready"],
+        blockers=",".join(readiness["blockers"]) or "none",
+        fixed_order_btc=readiness["fixed_order_btc"],
+        stop_loss_pct=readiness["stop_loss_pct"],
+    )
     slog(
         "BOOT",
         "mode",
