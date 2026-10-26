@@ -40,6 +40,9 @@ DEFAULT_SELL4_DIP = "0.04"
 DEFAULT_MAX_BALANCE_USAGE = "0.95"
 DEFAULT_SELL_SAFETY = "0.999"
 DEFAULT_FEE_BUFFER = "0.0015"
+DEFAULT_TAKER_FEE_RATE = "0.0012"
+DEFAULT_STOP_LOSS_PCT = "0.02"
+DEFAULT_SELL_UNFILLED_SEC = 20
 DEFAULT_MIN_AMOUNT = "0.0001"
 DEFAULT_AMOUNT_PRECISION = "0.0001"
 DEFAULT_PRICE_TICK = "1"
@@ -142,6 +145,10 @@ class Config:
     max_balance_usage: Decimal = D(DEFAULT_MAX_BALANCE_USAGE)
     sell_safety_factor: Decimal = D(DEFAULT_SELL_SAFETY)
     fee_buffer: Decimal = D(DEFAULT_FEE_BUFFER)
+    taker_fee_rate: Decimal = D(DEFAULT_TAKER_FEE_RATE)
+    stop_loss_pct: Decimal = D(DEFAULT_STOP_LOSS_PCT)
+    enable_protective_exits: bool = True
+    sell_unfilled_sec: int = DEFAULT_SELL_UNFILLED_SEC
     min_amount_btc: Decimal = D(DEFAULT_MIN_AMOUNT)
     amount_precision: Decimal = D(DEFAULT_AMOUNT_PRECISION)
     price_tick: Decimal = D(DEFAULT_PRICE_TICK)
@@ -214,6 +221,10 @@ class Config:
             "min_amount_btc": str(self.min_amount_btc),
             "circuit_breaker_errors": self.circuit_breaker_errors,
             "max_drawdown_jpy": str(self.max_drawdown_jpy),
+            "taker_fee_rate": str(self.taker_fee_rate),
+            "stop_loss_pct": str(self.stop_loss_pct),
+            "enable_protective_exits": self.enable_protective_exits,
+            "sell_unfilled_sec": self.sell_unfilled_sec,
         }
 
 
@@ -335,6 +346,10 @@ def load_config(
             env, "CIRCUIT_BREAKER_ERRORS", DEFAULT_CIRCUIT_BREAKER_ERRORS
         ),
         max_drawdown_jpy=_dec(env, "MAX_DRAWDOWN_JPY", DEFAULT_MAX_DRAWDOWN_JPY),
+        taker_fee_rate=_dec(env, "TAKER_FEE_RATE", DEFAULT_TAKER_FEE_RATE),
+        stop_loss_pct=_dec(env, "STOP_LOSS_PCT", DEFAULT_STOP_LOSS_PCT),
+        enable_protective_exits=_bool(env, "ENABLE_PROTECTIVE_EXITS", True),
+        sell_unfilled_sec=_int(env, "SELL_UNFILLED_SEC", DEFAULT_SELL_UNFILLED_SEC),
     )
     if live_trading and not cfg.has_keys:
         raise ConfigError("LIVE_TRADING requires BITBANK_API_KEY and BITBANK_API_SECRET")
@@ -342,4 +357,10 @@ def load_config(
         raise ConfigError("MA periods must be >= 2")
     if cfg.long_ma_period < cfg.short_ma_period:
         raise ConfigError("LONG_MA_PERIOD must be >= SHORT_MA_PERIOD")
+    if cfg.taker_fee_rate < 0 or cfg.taker_fee_rate >= 1:
+        raise ConfigError("TAKER_FEE_RATE must be in [0, 1)")
+    if cfg.stop_loss_pct < 0 or cfg.stop_loss_pct >= 1:
+        raise ConfigError("STOP_LOSS_PCT must be in [0, 1)")
+    if cfg.sell_unfilled_sec < 0:
+        raise ConfigError("SELL_UNFILLED_SEC must be >= 0")
     return cfg

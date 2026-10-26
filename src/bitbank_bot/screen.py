@@ -55,6 +55,9 @@ class ScreenView:
     block_reason: str
     error: str
     candle_type: str
+    daily_pnl: str = "0"
+    unrealized_jpy: str = "0"
+    entropy: str = "0"
     note: str = "HOLD/待機は正常です。Ctrl-C で停止"
 
 
@@ -81,6 +84,8 @@ def format_screen(view: ScreenView) -> str:
         f"  移動平均     {_commas(view.ma)}    トレンド {view.trend}",
         f"  シグナル     {view.signal_kind}    {view.signal_reason}",
         f"  建玉         {pos}",
+        f"  日時損益     {_commas(view.daily_pnl)} JPY    評価 {_commas(view.unrealized_jpy)}",
+        f"  エントロピー {view.entropy}",
         f"  監視         {view.watchdog}    WS {ws}",
         f"  ブロック     {block}",
         f"  エラー       {err}",
@@ -151,6 +156,9 @@ def view_from_engine(
     block_reason: str = "",
     error: str = "",
     candle_type: str = "1hour",
+    daily_pnl: object = "0",
+    unrealized_jpy: object = "0",
+    entropy: object = "0",
 ) -> ScreenView:
     return ScreenView(
         pair=pair,
@@ -173,6 +181,9 @@ def view_from_engine(
         block_reason=block_reason,
         error=error,
         candle_type=candle_type,
+        daily_pnl=str(daily_pnl),
+        unrealized_jpy=str(unrealized_jpy),
+        entropy=str(entropy),
     )
 
 

@@ -18,7 +18,7 @@ from bitbank_bot.indicators import (
     ma_trend,
     moving_average,
 )
-from bitbank_bot.money import ONE, pct_offset
+from bitbank_bot.money import ONE, ZERO, pct_offset
 
 
 @dataclass
@@ -52,6 +52,7 @@ class Position:
     entry_candle_ts: int
     actual_execution_jpy: Decimal
     kind: str
+    fee_jpy: Decimal = ZERO
 
 
 @dataclass
