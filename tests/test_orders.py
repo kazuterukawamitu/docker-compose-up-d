@@ -190,6 +190,53 @@ def test_poll_partial_stays_open() -> None:
     assert result.status == "PARTIALLY_FILLED"
 
 
+def test_poll_canceled_unfilled_is_terminal() -> None:
+    client = MagicMock()
+    client.get_order.return_value = {
+        "order_id": "42",
+        "status": "CANCELED_UNFILLED",
+        "executed_amount": "0",
+        "average_price": "0",
+        "start_amount": "0.001",
+    }
+    c = cfg(dry_run=False, live_trading=True, api_key="k", api_secret="s")
+    result = OrderExecutor(c, client).poll("42", Decimal("0.001"))
+    assert result.ok
+    assert result.reason == "canceled"
+    assert result.executed_amount == Decimal("0")
+
+
+def test_incremental_notional_uses_the_new_slice() -> None:
+    from bitbank_bot.orders import incremental_notional
+
+    cumulative, delta = incremental_notional(Decimal("10"), Decimal("0.2"), Decimal("110"))
+    assert cumulative == Decimal("22")
+    assert delta == Decimal("12")
+
+
+def test_protective_sell_can_be_market() -> None:
+    client = MagicMock()
+    client.get_active_orders.return_value = []
+    client.create_order.return_value = {
+        "order_id": "7",
+        "status": "FULLY_FILLED",
+        "executed_amount": "0.001",
+        "average_price": "10000000",
+        "start_amount": "0.001",
+        "fee_amount_quote": "12",
+    }
+    c = cfg(dry_run=False, live_trading=True, api_key="k", api_secret="s", order_type="limit")
+    result = OrderExecutor(c, client).place(
+        Signal("STOP", "sell", None, "stop"), _plan(), order_type="market"
+    )
+    assert result.reason == "fill"
+    assert result.fee_jpy == Decimal("12")
+    assert result.fee_estimated is False
+    kwargs = client.create_order.call_args.kwargs
+    assert kwargs["order_type"] == "market"
+    assert kwargs["price"] is None
+
+
 def test_poll_failed() -> None:
     client = MagicMock()
     client.get_order.side_effect = RuntimeError("offline")

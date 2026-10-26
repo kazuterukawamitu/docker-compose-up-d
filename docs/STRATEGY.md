@@ -15,7 +15,11 @@ Authority: [README.md](../README.md) percents and “buy possible amount / sell 
 
 ## README rules
 
-Priority: **SELL > TAKE_PROFIT > BUY**. No sell on the entry candle. HOLD always has a reason.
+Priority while a position is open: **STOP > pattern SELL > TAKE_PROFIT > BUY**.
+Pattern sells (SELL1–4) still wait for a new closed candle and do not sell on the entry candle.
+Stop-loss and take-profit use the latest public price on every loop, including the same hour, and are sent as market orders.
+A take-profit is skipped when the exit would not be profitable after fees.
+HOLD always has a reason.
 
 ### Buys (possible amount)
 
