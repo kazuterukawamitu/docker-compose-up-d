@@ -97,6 +97,12 @@ def load_state(path: str | Path, cfg: Config) -> BotState:
         pending_raw = raw.get("pending")
         if pending_raw and pending_raw.get("order_id"):
             tp_raw = pending_raw.get("tp_pct")
+            filled_amt = D(pending_raw.get("filled_amount") or 0)
+            filled_notional = D(pending_raw.get("filled_notional") or 0)
+            if filled_amt > ZERO and filled_notional <= ZERO:
+                avg_price = D(pending_raw.get("average_price") or 0)
+                if avg_price > ZERO:
+                    filled_notional = filled_amt * avg_price
             pending = PendingOrder(
                 order_id=str(pending_raw["order_id"]),
                 side=str(pending_raw.get("side") or ""),
@@ -105,8 +111,8 @@ def load_state(path: str | Path, cfg: Config) -> BotState:
                 index=int(pending_raw.get("index") or 0),
                 timestamp_ms=int(pending_raw.get("timestamp_ms") or 0),
                 amount=D(pending_raw.get("amount") or 0),
-                filled_amount=D(pending_raw.get("filled_amount") or 0),
-                filled_notional=D(pending_raw.get("filled_notional") or 0),
+                filled_amount=filled_amt,
+                filled_notional=filled_notional,
                 fee_jpy=D(pending_raw.get("fee_jpy") or 0),
                 fee_btc=D(pending_raw.get("fee_btc") or 0),
                 placed_at_ms=int(pending_raw.get("placed_at_ms") or 0),
@@ -134,6 +140,9 @@ def save_state(path: str | Path, state: BotState) -> None:
         "pending": None,
     }
     if state.pending:
+        avg_price = ZERO
+        if state.pending.filled_amount > ZERO and state.pending.filled_notional > ZERO:
+            avg_price = state.pending.filled_notional / state.pending.filled_amount
         payload["pending"] = {
             "order_id": state.pending.order_id,
             "side": state.pending.side,
@@ -144,6 +153,7 @@ def save_state(path: str | Path, state: BotState) -> None:
             "amount": str(state.pending.amount),
             "filled_amount": str(state.pending.filled_amount),
             "filled_notional": str(state.pending.filled_notional),
+            "average_price": str(avg_price),
             "fee_jpy": str(state.pending.fee_jpy),
             "fee_btc": str(state.pending.fee_btc),
             "placed_at_ms": state.pending.placed_at_ms,
@@ -484,6 +494,14 @@ class Engine:
                 slog(
                     "ORDER_STATUS",
                     "canceled remainder; pending cleared",
+                    order_id=pending.order_id,
+                )
+                state.pending = None
+                return
+            if result.reason == "fill":
+                slog(
+                    "ORDER_STATUS",
+                    "order complete; pending cleared",
                     order_id=pending.order_id,
                 )
                 state.pending = None
@@ -858,19 +876,53 @@ class Engine:
             if order_id:
                 executed = D(row.get("executed_amount") or 0)
                 average = D(row.get("average_price") or 0)
-                state.pending = PendingOrder(
-                    order_id=order_id,
-                    side=str(row.get("side") or ""),
-                    kind="RECONCILED",
-                    tp_pct=None,
-                    index=0,
-                    timestamp_ms=int(row.get("ordered_at") or 0),
-                    amount=D(row.get("start_amount") or 0),
-                    filled_amount=executed,
-                    filled_notional=executed * average,
-                    placed_at_ms=int(time.time() * 1000),
-                )
-                slog("RECONCILE", "adopted active order", order_id=order_id, side=state.pending.side)
+                side = str(row.get("side") or "")
+                if executed > ZERO and average > ZERO and side == "buy":
+                    received = executed
+                    notional = executed * average
+                    if state.position:
+                        total_amt = state.position.amount + received
+                        total_jpy = state.position.actual_execution_jpy + notional
+                        total_fee = state.position.fee_jpy
+                        avg = (total_jpy / total_amt) if total_amt > ZERO else average
+                        state.position = Position(
+                            amount=total_amt,
+                            average_price=avg,
+                            tp_pct=state.position.tp_pct,
+                            entry_candle_index=state.position.entry_candle_index,
+                            entry_candle_ts=state.position.entry_candle_ts,
+                            actual_execution_jpy=total_jpy,
+                            kind=state.position.kind,
+                            fee_jpy=total_fee,
+                        )
+                        slog("RECONCILE", "added adopted fill to position", executed=str(executed))
+                    else:
+                        state.position = Position(
+                            amount=received,
+                            average_price=average,
+                            tp_pct=self.cfg.buy1_tp,
+                            entry_candle_index=-1,
+                            entry_candle_ts=0,
+                            actual_execution_jpy=notional,
+                            kind="RECONCILED",
+                            fee_jpy=ZERO,
+                        )
+                        slog("RECONCILE", "created position from adopted fill", executed=str(executed))
+                remainder = D(row.get("start_amount") or 0) - executed
+                if remainder > self.cfg.amount_precision:
+                    state.pending = PendingOrder(
+                        order_id=order_id,
+                        side=side,
+                        kind="RECONCILED",
+                        tp_pct=None,
+                        index=0,
+                        timestamp_ms=int(row.get("ordered_at") or 0),
+                        amount=D(row.get("start_amount") or 0),
+                        filled_amount=executed,
+                        filled_notional=executed * average,
+                        placed_at_ms=int(time.time() * 1000),
+                    )
+                    slog("RECONCILE", "adopted active order with remainder", order_id=order_id, side=side)
         if state.position is None and btc >= self.cfg.min_amount_btc and state.pending is None:
             average, cost, fee = self._basis_from_trades(rest, btc)
             if average <= ZERO:
@@ -952,7 +1004,10 @@ class Engine:
             remain -= take
         if cost <= ZERO:
             return ZERO, ZERO, ZERO
-        return cost / amount, cost, fee
+        covered = amount - remain
+        if covered <= ZERO:
+            return ZERO, ZERO, ZERO
+        return cost / covered, cost, fee
 
     def run_once(self, *, synthetic: bool = False, skip_preflight: bool = False) -> int:
         slog("BOOT", "run_once", synthetic=synthetic, dry_run=self.cfg.dry_run)
