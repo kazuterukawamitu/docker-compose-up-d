@@ -6,6 +6,7 @@ import shutil
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from typing import TextIO
 
 from bitbank_bot.money import D, ZERO
@@ -55,7 +56,49 @@ class ScreenView:
     block_reason: str
     error: str
     candle_type: str
+    daily_pnl: str = "0"
+    unrealized_jpy: str = "0"
+    entropy: str = "0"
     note: str = "HOLD/待機は正常です。Ctrl-C で停止"
+
+
+def ma_gap_text(public_last: object, ma: object) -> str:
+    """Signed percent distance of the public last from the moving average."""
+    try:
+        mark = D(public_last)
+        base = D(ma)
+    except Exception:
+        return "-"
+    if mark <= ZERO or base <= ZERO:
+        return "-"
+    pct = ((mark - base) / base * Decimal("100")).quantize(Decimal("0.01"))
+    return f"{format(pct, '+f')}%"
+
+
+def session_lines(view: ScreenView) -> tuple[str, str]:
+    """Order gate and why this loop did not buy or sell.
+
+    A flat MA with no position is a market hold. DRY_RUN is a separate gate:
+    the strategy can be HOLD and, even when it is not, create_order is not called.
+    """
+    gate = (
+        "LIVE（条件成立時に発注）"
+        if view.live_orders
+        else "DRY_RUN（実注文APIは呼ばない）"
+    )
+    if view.block_reason:
+        gate = f"{gate} / {view.block_reason}"
+    gap = ma_gap_text(view.public_last, view.ma)
+    if view.in_position:
+        diagnosis = "建玉あり。利確と損切りは確定足を待たず公開約定で判定する"
+    elif view.signal_kind == "HOLD":
+        diagnosis = (
+            f"建玉なし。トレンド{view.trend}、MA乖離{gap}、{view.signal_reason}。"
+            "売りは建玉の後に公開約定で判定する"
+        )
+    else:
+        diagnosis = view.signal_reason
+    return gate, diagnosis
 
 
 def format_screen(view: ScreenView) -> str:
@@ -69,6 +112,8 @@ def format_screen(view: ScreenView) -> str:
     ws = "接続" if view.ws_ok else "未接続（RESTで継続）"
     err = view.error or "なし"
     block = view.block_reason or "なし"
+    gate, diagnosis = session_lines(view)
+    gap = ma_gap_text(view.public_last, view.ma)
     jst = datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S JST")
     bar = "═" * WIDTH
     lines = [
@@ -80,9 +125,14 @@ def format_screen(view: ScreenView) -> str:
         f"  戦略価格     {_commas(view.price)} JPY    足 {view.candle_type}",
         f"  移動平均     {_commas(view.ma)}    トレンド {view.trend}",
         f"  シグナル     {view.signal_kind}    {view.signal_reason}",
+        f"  MA乖離       {gap}",
         f"  建玉         {pos}",
+        f"  日時損益     {_commas(view.daily_pnl)} JPY    評価 {_commas(view.unrealized_jpy)}",
+        f"  エントロピー {view.entropy}",
         f"  監視         {view.watchdog}    WS {ws}",
         f"  ブロック     {block}",
+        f"  注文ゲート   {gate}",
+        f"  判定         {diagnosis}",
         f"  エラー       {err}",
         bar,
         f"  {view.note}",
@@ -151,6 +201,9 @@ def view_from_engine(
     block_reason: str = "",
     error: str = "",
     candle_type: str = "1hour",
+    daily_pnl: object = "0",
+    unrealized_jpy: object = "0",
+    entropy: object = "0",
 ) -> ScreenView:
     return ScreenView(
         pair=pair,
@@ -173,6 +226,9 @@ def view_from_engine(
         block_reason=block_reason,
         error=error,
         candle_type=candle_type,
+        daily_pnl=str(daily_pnl),
+        unrealized_jpy=str(unrealized_jpy),
+        entropy=str(entropy),
     )
 
 

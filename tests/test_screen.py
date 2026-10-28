@@ -12,6 +12,39 @@ from bitbank_bot.screen import (
 )
 
 
+def test_flat_hold_screen_matches_live_session() -> None:
+    """The 2026-10-29 JST session: flat MA, no position, DRY_RUN, ticker above the closed bar."""
+    view = ScreenView(
+        pair="btc_jpy",
+        mode="DRY_RUN",
+        live_orders=False,
+        price="12820130",
+        public_last="12809053",
+        ma="12793506.45",
+        trend="FLAT",
+        signal_kind="HOLD",
+        signal_reason="no_buy_setup",
+        in_position=False,
+        position_amount="0",
+        position_avg="0",
+        position_tp="",
+        watchdog="LONG_WAIT  market_conditions_not_met",
+        ws_ok=True,
+        cycles=848,
+        uptime_sec=2936,
+        block_reason="",
+        error="",
+        candle_type="1hour",
+    )
+    text = format_screen(view)
+    assert "MA乖離       +0.12%" in text
+    assert "DRY_RUN（実注文APIは呼ばない）" in text
+    assert "建玉なし" in text
+    assert "no_buy_setup" in text
+    assert "公開約定で判定する" in text
+    assert "LONG_WAIT  market_conditions_not_met" in text
+
+
 def test_format_screen_is_trading_dashboard() -> None:
     view = ScreenView(
         pair="btc_jpy",

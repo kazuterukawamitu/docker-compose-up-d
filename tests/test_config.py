@@ -50,6 +50,15 @@ def test_dual_flag_required_for_live() -> None:
         )
 
 
+def test_protective_stop_alias_can_disable_default() -> None:
+    cfg = load_config(
+        environ={"PROTECTIVE_STOP_PCT": "0"}, load_default_dotenv=False
+    )
+    assert cfg.stop_loss_pct == Decimal("0")
+    enabled = load_config(environ={}, load_default_dotenv=False)
+    assert enabled.stop_loss_pct == Decimal("0.02")
+
+
 def test_balance_usage_alias() -> None:
     cfg = load_config(
         environ={"BALANCE_USAGE_RATIO": "0.8"}, load_default_dotenv=False

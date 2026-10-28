@@ -13,12 +13,51 @@ from bitbank_bot.money import D, ZERO, ensure_decimal, quantize_price
 from bitbank_bot.strategy import Signal
 
 
-def _fill_status(raw_status: str, executed: Decimal, ordered: Decimal) -> str:
+_CANCELED = frozenset(
+    {
+        "CANCELED",
+        "CANCELED_UNFILLED",
+        "CANCELED_PARTIALLY_FILLED",
+        "REJECTED",
+        "EXPIRED",
+    }
+)
+
+
+def classify_order(raw_status: str, executed: Decimal, ordered: Decimal) -> tuple[str, str]:
+    """Map a Bitbank order to ``(status, reason)``.
+
+    Cancel states are terminal. An unfilled cancel must not stay
+    ``accepted_unfilled``, or the engine keeps a pending order forever.
+    A cancel that already traded is ``canceled_partial`` so the fill is
+    booked and the remainder is dropped.
+    """
+    status = (raw_status or "").strip().upper()
+    canceled = status in _CANCELED or status.startswith("CANCEL")
     if executed <= ZERO:
-        return "UNFILLED"
+        if canceled:
+            return status or "CANCELED_UNFILLED", "canceled"
+        return "UNFILLED", "accepted_unfilled"
+    if canceled:
+        return status or "CANCELED_PARTIALLY_FILLED", "canceled_partial"
     if ordered > ZERO and executed < ordered:
-        return "PARTIALLY_FILLED"
-    return "FULLY_FILLED"
+        return "PARTIALLY_FILLED", "partial_fill"
+    return "FULLY_FILLED", "fill"
+
+
+def incremental_notional(
+    previous_notional: Decimal, executed: Decimal, average: Decimal
+) -> tuple[Decimal, Decimal]:
+    """Split a cumulative average into the new slice's notional.
+
+    ``executed * average`` is the whole order, not the latest slice. Booking
+    the slice at the cumulative average mis-states cost when prices differ.
+    """
+    cumulative = D(executed) * D(average)
+    delta = cumulative - D(previous_notional)
+    if delta < ZERO:
+        delta = ZERO
+    return cumulative, delta
 
 
 class OrderClient(Protocol):
@@ -51,6 +90,13 @@ class OrderResult:
     average_price: Decimal
     actual_execution_jpy: Decimal | None
     raw: dict[str, Any] | None
+    fee_jpy: Decimal = ZERO
+    fee_btc: Decimal = ZERO
+    fee_estimated: bool = False
+    cumulative_filled: Decimal | None = None
+    cumulative_notional: Decimal | None = None
+    cumulative_fee_jpy: Decimal | None = None
+    cumulative_fee_btc: Decimal | None = None
 
 
 class OrderExecutor:
@@ -78,7 +124,148 @@ class OrderExecutor:
         slog("ORDER_STATUS", "refreshed from GET /user/spot/order", order_id=order_id)
         return data
 
-    def place(self, signal: Signal, plan: AmountPlan) -> OrderResult:
+    def _trade_fees(self, order_id: str) -> tuple[Decimal, Decimal] | None:
+        getter = getattr(self.client, "get_trade_history", None)
+        if not callable(getter):
+            return None
+        try:
+            trades = getter(self.cfg.pair)
+        except Exception as exc:
+            slog("ERROR", "trade_history failed", error=type(exc).__name__)
+            return None
+        if not isinstance(trades, list):
+            return None
+        matched = [row for row in trades if str(row.get("order_id")) == str(order_id)]
+        if not matched:
+            return None
+        fee_jpy = sum((D(row.get("fee_amount_quote") or 0) for row in matched), ZERO)
+        fee_btc = sum((D(row.get("fee_amount_base") or 0) for row in matched), ZERO)
+        occurred = sum((D(row.get("fee_occurred_amount") or 0) for row in matched), ZERO)
+        return fee_jpy + occurred, fee_btc
+
+    def _fees(
+        self,
+        raw: dict[str, Any] | None,
+        order_id: str,
+        executed: Decimal,
+        average: Decimal,
+    ) -> tuple[Decimal, Decimal, bool]:
+        quoted = self._trade_fees(order_id) if order_id and order_id != "dry-run" else None
+        if quoted is not None:
+            return quoted[0], quoted[1], False
+        if raw:
+            present = [
+                key
+                for key in ("fee_amount_quote", "fee_amount_base", "fee_occurred_amount")
+                if raw.get(key) not in (None, "")
+            ]
+            if present:
+                fee_jpy = D(raw.get("fee_amount_quote") or 0) + D(raw.get("fee_occurred_amount") or 0)
+                return fee_jpy, D(raw.get("fee_amount_base") or 0), False
+        notional = executed * average
+        rate = D(self.cfg.taker_fee_rate)
+        if notional > ZERO and rate > ZERO:
+            return notional * rate, ZERO, True
+        return ZERO, ZERO, False
+
+    def _from_exchange(
+        self,
+        raw: dict[str, Any],
+        *,
+        fallback_amount: Decimal,
+        order_id: str,
+        unfilled_ok: bool,
+    ) -> OrderResult:
+        executed = D(raw.get("executed_amount") or 0)
+        average = D(raw.get("average_price") or 0)
+        ordered = D(raw.get("start_amount") or fallback_amount)
+        status, reason = classify_order(str(raw.get("status") or ""), executed, ordered)
+        fee_jpy, fee_btc, estimated = self._fees(raw, order_id, executed, average)
+        notional = executed * average
+        slog(
+            "ORDER_STATUS",
+            "order status",
+            order_id=order_id,
+            status=status,
+            reason=reason,
+            executed_amount=str(executed),
+            fee_jpy=str(fee_jpy),
+            fee_estimated=estimated,
+        )
+        if reason == "canceled":
+            return OrderResult(
+                True,
+                "canceled",
+                False,
+                False,
+                order_id,
+                status,
+                ZERO,
+                average,
+                None,
+                raw,
+                fee_jpy,
+                fee_btc,
+                estimated,
+                executed,
+                notional,
+                fee_jpy,
+                fee_btc,
+            )
+        if executed <= ZERO or reason == "accepted_unfilled":
+            if not unfilled_ok:
+                return OrderResult(
+                    False, "poll_failed", False, False, order_id, status, ZERO, ZERO, None, raw
+                )
+            return OrderResult(
+                True,
+                "accepted_unfilled",
+                False,
+                False,
+                order_id,
+                status,
+                ZERO,
+                ZERO,
+                None,
+                raw,
+            )
+        stage = "FILL" if reason == "fill" else "ORDER_STATUS"
+        slog(
+            stage,
+            "fill" if reason == "fill" else reason,
+            order_id=order_id,
+            executed_amount=str(executed),
+            average_price=str(average),
+            actual_execution_jpy=str(notional),
+            status=status,
+        )
+        return OrderResult(
+            True,
+            reason,
+            False,
+            False,
+            order_id,
+            status,
+            executed,
+            average,
+            notional,
+            raw,
+            fee_jpy,
+            fee_btc,
+            estimated,
+            executed,
+            notional,
+            fee_jpy,
+            fee_btc,
+        )
+
+    def place(
+        self,
+        signal: Signal,
+        plan: AmountPlan,
+        *,
+        order_type: str | None = None,
+    ) -> OrderResult:
         slog(
             "ORDER_REQUEST",
             "order request",
@@ -132,12 +319,15 @@ class OrderExecutor:
             )
             if self.cfg.dry_run and self.cfg.simulate_fill:
                 actual = plan.amount * plan.price
+                fee_jpy, fee_btc, estimated = self._fees(None, "", plan.amount, plan.price)
                 slog(
                     "SIMULATED_FILL",
                     "paper fill only; Bitbank JPY unchanged",
                     executed_amount=str(plan.amount),
                     average_price=str(plan.price),
                     actual_execution_jpy=str(actual),
+                    fee_jpy=str(fee_jpy),
+                    fee_estimated=estimated,
                 )
                 return OrderResult(
                     True,
@@ -150,6 +340,13 @@ class OrderExecutor:
                     plan.price,
                     actual,
                     None,
+                    fee_jpy,
+                    fee_btc,
+                    estimated,
+                    plan.amount,
+                    actual,
+                    fee_jpy,
+                    fee_btc,
                 )
             return OrderResult(
                 True,
@@ -187,59 +384,31 @@ class OrderExecutor:
                 None,
                 None,
             )
+        chosen = (order_type or self.cfg.order_type).lower()
+        if chosen not in {"market", "limit"}:
+            chosen = self.cfg.order_type
         price_str: str | None = None
-        if self.cfg.order_type == "limit":
+        if chosen == "limit":
             q = quantize_price(plan.price, self.cfg.price_tick)
             price_str = str(int(q)) if q == q.to_integral_value() else str(q)
         raw = self.client.create_order(
             pair=self.cfg.pair,
             amount=str(plan.amount),
             side=plan.side,
-            order_type=self.cfg.order_type,
+            order_type=chosen,
             price=price_str,
-            post_only=self.cfg.post_only if self.cfg.order_type == "limit" else None,
+            post_only=self.cfg.post_only if chosen == "limit" else None,
             live_confirmed=True,
         )
         order_id = str(raw.get("order_id") or "")
-        status = str(raw.get("status") or "")
-        slog("ORDER_ACCEPTED", "order accepted", order_id=order_id, status=status)
+        slog("ORDER_ACCEPTED", "order accepted", order_id=order_id, status=raw.get("status"), type=chosen)
         executed = D(raw.get("executed_amount") or 0)
-        avg = D(raw.get("average_price") or 0)
-        amount_ordered = D(raw.get("start_amount") or plan.amount)
-        if order_id and executed <= ZERO:
+        if order_id and executed <= ZERO and str(raw.get("status") or "").upper() not in _CANCELED:
             refreshed = self._refresh_order(order_id)
             if refreshed:
                 raw = refreshed
-                status = str(raw.get("status") or status)
-                executed = D(raw.get("executed_amount") or 0)
-                avg = D(raw.get("average_price") or 0)
-                amount_ordered = D(raw.get("start_amount") or amount_ordered)
-        status = _fill_status(status, executed, amount_ordered)
-        slog(
-            "ORDER_STATUS",
-            "order status",
-            order_id=order_id,
-            status=status,
-            executed_amount=str(executed),
-        )
-        if executed <= ZERO:
-            slog("ORDER_STATUS", "no fill yet; not logging FILL", order_id=order_id, status=status)
-            return OrderResult(
-                True, "accepted_unfilled", False, False, order_id, status, ZERO, ZERO, None, raw
-            )
-        actual = executed * avg
-        reason = "partial_fill" if status == "PARTIALLY_FILLED" else "fill"
-        slog(
-            "FILL" if reason == "fill" else "ORDER_STATUS",
-            "fill" if reason == "fill" else "partial fill; keep polling",
-            order_id=order_id,
-            executed_amount=str(executed),
-            average_price=str(avg),
-            actual_execution_jpy=str(actual),
-            status=status,
-        )
-        return OrderResult(
-            True, reason, False, False, order_id, status, executed, avg, actual, raw
+        return self._from_exchange(
+            raw, fallback_amount=plan.amount, order_id=order_id, unfilled_ok=True
         )
 
     def poll(self, order_id: str, fallback_amount: Decimal) -> OrderResult:
@@ -249,29 +418,40 @@ class OrderExecutor:
             return OrderResult(
                 False, "poll_failed", False, False, order_id, None, ZERO, ZERO, None, None
             )
-        executed = D(raw.get("executed_amount") or 0)
-        avg = D(raw.get("average_price") or 0)
-        ordered = D(raw.get("start_amount") or fallback_amount)
-        status = _fill_status(str(raw.get("status") or ""), executed, ordered)
-        slog(
-            "ORDER_STATUS",
-            "pending poll",
-            order_id=order_id,
-            status=status,
-            executed_amount=str(executed),
+        return self._from_exchange(
+            raw, fallback_amount=fallback_amount, order_id=order_id, unfilled_ok=True
         )
-        if executed <= ZERO:
+
+    def cancel(self, order_id: str) -> OrderResult:
+        """Cancel one live order. DRY_RUN does not call the private API."""
+        if not self.cfg.may_place_live_orders:
             return OrderResult(
-                True, "accepted_unfilled", False, False, order_id, status, ZERO, ZERO, None, raw
+                True,
+                "canceled",
+                self.cfg.dry_run,
+                False,
+                order_id,
+                "CANCELED_UNFILLED",
+                ZERO,
+                ZERO,
+                None,
+                None,
             )
-        actual = executed * avg
-        reason = "partial_fill" if status == "PARTIALLY_FILLED" else "fill"
-        slog(
-            "FILL" if reason == "fill" else "ORDER_STATUS",
-            "fill after poll" if reason == "fill" else "partial fill after poll",
-            order_id=order_id,
-            executed_amount=str(executed),
-            actual_execution_jpy=str(actual),
-            status=status,
+        cancel_fn = getattr(self.client, "cancel_order", None)
+        if self.client is None or not callable(cancel_fn):
+            return OrderResult(
+                False, "cancel_unsupported", False, False, order_id, None, ZERO, ZERO, None, None
+            )
+        try:
+            raw = cancel_fn(self.cfg.pair, order_id)
+        except Exception as exc:
+            slog("ERROR", "cancel_order failed", error=type(exc).__name__, order_id=order_id)
+            return OrderResult(
+                False, "cancel_failed", False, False, order_id, None, ZERO, ZERO, None, None
+            )
+        if not isinstance(raw, dict):
+            raw = {"order_id": order_id, "status": "CANCELED_UNFILLED", "executed_amount": "0"}
+        slog("ORDER_STATUS", "cancel requested", order_id=order_id, status=raw.get("status"))
+        return self._from_exchange(
+            raw, fallback_amount=ZERO, order_id=order_id, unfilled_ok=True
         )
-        return OrderResult(True, reason, False, False, order_id, status, executed, avg, actual, raw)

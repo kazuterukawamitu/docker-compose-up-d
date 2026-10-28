@@ -57,13 +57,33 @@ bitFlyer, Coincheck, and GMO are not imported and are not executed.
 10. **Partial fills.** `PARTIALLY_FILLED` stays in `state.pending` and is polled
     until the remainder fills.
 11. **Kill file.** `data/KILL` blocks sells as well as buys.
+12. **Intra-bar exits.** A processed 1h candle used to skip every later poll.
+    Stop (`STOP_LOSS_PCT`, default 2%) and take-profit now use the public last
+    price on each loop and send a market sell. Pattern SELL1–4 still fire once
+    per new closed candle.
+13. **Cancel.** `CANCELED_UNFILLED` clears `pending`. A cancel with a partial
+    fill books only the new slice, then clears the remainder.
+14. **Partial-fill cost.** Added size is booked at
+    `(new cumulative notional - previous notional) / new size`, not at the
+    cumulative average.
+15. **Fees.** Realized JPY subtracts quote fees. Trade-history
+    `fee_amount_quote` / `fee_amount_base` win. Otherwise the taker rate
+    (`TAKER_FEE_RATE`, default 0.12%) is applied and logged as estimated.
+    Buys whose take-profit does not clear that round trip (widened by return
+    entropy) are not sent.
+16. **Startup reconcile.** Live mode polls a saved order, adopts an unknown
+    active order, and adopts or resizes BTC from `free_amount` plus trade
+    history. Dry-run does not rewrite state from the account.
+17. **Stale sell limits.** A live sell still open after `SELL_UNFILLED_SEC`
+    (default 20) is canceled and resent as a market order.
 
 ## What this bot does not do
 
-- Does not SSH to a VPS or install systemd for you.
-- Does not implement quantum / multi-exchange / guaranteed fills or profits.
+- Does not SSH to a VPS, install Docker there, or install systemd for you.
+- Does not place a live order unless both flags and keys are set on the machine that runs the bot.
+- Does not promise a profit. A long `HOLD` / `no_buy_setup` streak means the MA rules were not met. The trading screen prints `MA乖離`, `注文ゲート`, and `判定` so a flat MA with no position is not shown as a silent failure. `DRY_RUN` still does not send an order.
+- Does not implement multi-exchange routing or guaranteed fills.
 - Does not log API keys or secrets (`safe_dict` / `Config.__repr__`).
-- Does not place a live order unless both flags and keys are set.
 
 If keys were pasted into chat, rotate them in the bitbank console. Do not put
 them in git, screenshots, or logs.
