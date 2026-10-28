@@ -81,7 +81,7 @@ bitFlyer, Coincheck, and GMO are not imported and are not executed.
 
 - Does not SSH to a VPS, install Docker there, or install systemd for you.
 - Does not place a live order unless both flags and keys are set on the machine that runs the bot.
-- Does not promise a profit. A long `HOLD` / `no_buy_setup` streak means the MA rules were not met.
+- Does not promise a profit. A long `HOLD` / `no_buy_setup` streak means the MA rules were not met. The trading screen prints `MA乖離`, `注文ゲート`, and `判定` so a flat MA with no position is not shown as a silent failure. `DRY_RUN` still does not send an order.
 - Does not implement multi-exchange routing or guaranteed fills.
 - Does not log API keys or secrets (`safe_dict` / `Config.__repr__`).
 

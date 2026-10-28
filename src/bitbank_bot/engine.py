@@ -191,6 +191,7 @@ class Engine:
         self.used_synthetic_fallback = False
         self._explicit_synthetic = False
         self.last_watchdog = ""
+        self.last_watchdog_text = ""
         self.last_close: Decimal | str = "-"
         self.last_ma: Decimal | str = "-"
         self.last_trend = "-"
@@ -589,6 +590,7 @@ class Engine:
             uptime_sec=report.uptime_sec,
         )
         self.last_watchdog = report.status
+        self.last_watchdog_text = f"{report.status}  {report.reason}"
 
     def _apply_fill(
         self,
@@ -1161,6 +1163,7 @@ class Engine:
                 idle = time.monotonic() - last_ok
                 slog("WATCHDOG", "FAIL", reason="loop_error", idle_sec=int(idle))
                 self.last_watchdog = "FAIL"
+                self.last_watchdog_text = "FAIL  loop_error"
                 if idle >= timeout:
                     slog("WATCHDOG", "FAIL stuck errors; still not exiting on HOLD")
                 self.cycles += 1
@@ -1231,7 +1234,7 @@ class Engine:
             position_amount=pos.amount if pos else ZERO,
             position_avg=pos.average_price if pos else ZERO,
             position_tp=pos.tp_pct if pos else "",
-            watchdog=self.last_watchdog or "NORMAL WAIT",
+            watchdog=self.last_watchdog_text or self.last_watchdog or "NORMAL WAIT",
             ws_ok=bool(self.ws and self.ws.is_connected()),
             cycles=self.cycles,
             uptime_sec=int(time.monotonic() - state.started_at),

@@ -347,7 +347,11 @@ def load_config(
         ),
         max_drawdown_jpy=_dec(env, "MAX_DRAWDOWN_JPY", DEFAULT_MAX_DRAWDOWN_JPY),
         taker_fee_rate=_dec(env, "TAKER_FEE_RATE", DEFAULT_TAKER_FEE_RATE),
-        stop_loss_pct=_dec(env, "STOP_LOSS_PCT", DEFAULT_STOP_LOSS_PCT),
+        stop_loss_pct=(
+            _dec(env, "PROTECTIVE_STOP_PCT", DEFAULT_STOP_LOSS_PCT)
+            if _env(env, "PROTECTIVE_STOP_PCT") is not None
+            else _dec(env, "STOP_LOSS_PCT", DEFAULT_STOP_LOSS_PCT)
+        ),
         enable_protective_exits=_bool(env, "ENABLE_PROTECTIVE_EXITS", True),
         sell_unfilled_sec=_int(env, "SELL_UNFILLED_SEC", DEFAULT_SELL_UNFILLED_SEC),
     )
