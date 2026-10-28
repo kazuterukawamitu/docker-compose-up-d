@@ -323,10 +323,9 @@ class Engine:
                             order_type="market",
                         )
                         signal = protected
-                        if not heartbeat:
-                            state.last_candle_ts = snap.timestamp_ms
-                            if persist:
-                                save_state(self.cfg.state_path, state)
+                        state.last_candle_ts = snap.timestamp_ms
+                        if persist:
+                            save_state(self.cfg.state_path, state)
                         self.last_signal = signal
                         continue
             if not execute or heartbeat:
@@ -882,34 +881,37 @@ class Engine:
                 if executed > ZERO and average > ZERO and side == "buy":
                     received = executed
                     notional = executed * average
-                    if state.position:
-                        total_amt = state.position.amount + received
-                        total_jpy = state.position.actual_execution_jpy + notional
-                        total_fee = state.position.fee_jpy
-                        avg = (total_jpy / total_amt) if total_amt > ZERO else average
-                        state.position = Position(
-                            amount=total_amt,
-                            average_price=avg,
-                            tp_pct=state.position.tp_pct,
-                            entry_candle_index=state.position.entry_candle_index,
-                            entry_candle_ts=state.position.entry_candle_ts,
-                            actual_execution_jpy=total_jpy,
-                            kind=state.position.kind,
-                            fee_jpy=total_fee,
-                        )
-                        slog("RECONCILE", "added adopted fill to position", executed=str(executed))
-                    else:
-                        state.position = Position(
-                            amount=received,
-                            average_price=average,
-                            tp_pct=self.cfg.buy1_tp,
-                            entry_candle_index=-1,
-                            entry_candle_ts=0,
-                            actual_execution_jpy=notional,
-                            kind="RECONCILED",
-                            fee_jpy=ZERO,
-                        )
-                        slog("RECONCILE", "created position from adopted fill", executed=str(executed))
+                    local_amt = state.position.amount if state.position else ZERO
+                    unbooked = btc - local_amt
+                    if unbooked > self.cfg.amount_precision and abs(unbooked - received) <= self.cfg.amount_precision * 2:
+                        if state.position:
+                            total_amt = state.position.amount + received
+                            total_jpy = state.position.actual_execution_jpy + notional
+                            total_fee = state.position.fee_jpy
+                            avg = (total_jpy / total_amt) if total_amt > ZERO else average
+                            state.position = Position(
+                                amount=total_amt,
+                                average_price=avg,
+                                tp_pct=state.position.tp_pct,
+                                entry_candle_index=state.position.entry_candle_index,
+                                entry_candle_ts=state.position.entry_candle_ts,
+                                actual_execution_jpy=total_jpy,
+                                kind=state.position.kind,
+                                fee_jpy=total_fee,
+                            )
+                            slog("RECONCILE", "added adopted fill to position", executed=str(executed))
+                        else:
+                            state.position = Position(
+                                amount=received,
+                                average_price=average,
+                                tp_pct=self.cfg.buy1_tp,
+                                entry_candle_index=-1,
+                                entry_candle_ts=0,
+                                actual_execution_jpy=notional,
+                                kind="RECONCILED",
+                                fee_jpy=ZERO,
+                            )
+                            slog("RECONCILE", "created position from adopted fill", executed=str(executed))
                 remainder = D(row.get("start_amount") or 0) - executed
                 if remainder > self.cfg.amount_precision:
                     state.pending = PendingOrder(
@@ -926,7 +928,7 @@ class Engine:
                     )
                     slog("RECONCILE", "adopted active order with remainder", order_id=order_id, side=side)
         if state.position is None and btc >= self.cfg.min_amount_btc and state.pending is None:
-            average, cost, fee = self._basis_from_trades(rest, btc)
+            average, cost, fee, covered = self._basis_from_trades(rest, btc)
             if average <= ZERO:
                 mark = self._mark_price(ZERO)
                 if mark <= ZERO:
@@ -938,7 +940,7 @@ class Engine:
                 cost = btc * mark
             if average > ZERO:
                 state.position = Position(
-                    amount=btc,
+                    amount=covered if covered > ZERO else btc,
                     average_price=average,
                     tp_pct=self.cfg.buy1_tp,
                     entry_candle_index=-1,
@@ -950,7 +952,7 @@ class Engine:
                 slog(
                     "RECONCILE",
                     "adopted exchange btc",
-                    amount=str(btc),
+                    amount=str(covered if covered > ZERO else btc),
                     average=str(average),
                 )
         elif (
@@ -965,7 +967,7 @@ class Engine:
                 exchange=str(btc),
             )
             state.position = None
-        elif state.position is not None and btc >= self.cfg.min_amount_btc:
+        elif state.position is not None and btc >= self.cfg.min_amount_btc and state.pending is None:
             gap = abs(state.position.amount - btc)
             if gap > self.cfg.amount_precision and state.position.amount > ZERO:
                 scale = btc / state.position.amount
@@ -977,17 +979,17 @@ class Engine:
 
     def _basis_from_trades(
         self, rest: RestClient, amount: Decimal
-    ) -> tuple[Decimal, Decimal, Decimal]:
+    ) -> tuple[Decimal, Decimal, Decimal, Decimal]:
         getter = getattr(rest, "get_trade_history", None)
         if not callable(getter):
-            return ZERO, ZERO, ZERO
+            return ZERO, ZERO, ZERO, ZERO
         try:
             trades = getter(self.cfg.pair)
         except Exception as exc:
             slog("ERROR", "reconcile trade_history failed", error=type(exc).__name__)
-            return ZERO, ZERO, ZERO
+            return ZERO, ZERO, ZERO, ZERO
         if not isinstance(trades, list):
-            return ZERO, ZERO, ZERO
+            return ZERO, ZERO, ZERO, ZERO
         buys = [row for row in trades if str(row.get("side") or "").lower() == "buy"]
         buys.sort(key=lambda row: int(row.get("executed_at") or 0), reverse=True)
         remain = amount
@@ -1005,11 +1007,11 @@ class Engine:
                 fee += quote_fee * (take / lot)
             remain -= take
         if cost <= ZERO:
-            return ZERO, ZERO, ZERO
+            return ZERO, ZERO, ZERO, ZERO
         covered = amount - remain
         if covered <= ZERO:
-            return ZERO, ZERO, ZERO
-        return cost / covered, cost, fee
+            return ZERO, ZERO, ZERO, ZERO
+        return cost / covered, cost, fee, covered
 
     def run_once(self, *, synthetic: bool = False, skip_preflight: bool = False) -> int:
         slog("BOOT", "run_once", synthetic=synthetic, dry_run=self.cfg.dry_run)
