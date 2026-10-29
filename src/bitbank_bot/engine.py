@@ -14,6 +14,14 @@ from typing import Any
 
 from bitbank_bot.amounts import AmountPlan, PositionSizer
 from bitbank_bot.config import Config
+from bitbank_bot.fees import tp_covers_fees
+from bitbank_bot.indicators import (
+    daily_pnl_score,
+    entropy_regime,
+    realtime_daily_pnl,
+    shannon_entropy,
+    simple_returns,
+)
 from bitbank_bot.logging_setup import slog
 from bitbank_bot.market_data import (
     Candle,
@@ -26,6 +34,7 @@ from bitbank_bot.money import D, ZERO
 from bitbank_bot.multi_timeframe import evaluate_htf
 from bitbank_bot.orders import OrderExecutor, OrderResult
 from bitbank_bot.preflight import preflight
+from bitbank_bot.reconciliation import adopt_position_from_exchange, reconcile
 from bitbank_bot.rest_client import BitbankAPIError, RestClient, is_auth_error
 from bitbank_bot.risk import RiskManager
 from bitbank_bot.screen import TradingScreen, view_from_engine
@@ -46,6 +55,7 @@ class PendingOrder:
     timestamp_ms: int
     amount: Decimal
     filled_amount: Decimal = ZERO
+    filled_notional: Decimal = ZERO
 
 
 @dataclass
@@ -57,6 +67,8 @@ class BotState:
     pending: PendingOrder | None = None
     paper_jpy: Decimal = ZERO
     paper_btc: Decimal = ZERO
+    reconcile_ok: bool = True
+    reconcile_reason: str = "ok"
 
 
 def load_state(path: str | Path, cfg: Config) -> BotState:
@@ -79,6 +91,7 @@ def load_state(path: str | Path, cfg: Config) -> BotState:
                 entry_candle_ts=int(pos.get("entry_candle_ts") or 0),
                 actual_execution_jpy=D(pos["actual_execution_jpy"]),
                 kind=str(pos.get("kind") or ""),
+                fees_paid=D(pos.get("fees_paid") or 0),
             )
         operator_killed = bool(raw.get("operator_killed", False))
         risk = RiskManager(
@@ -100,6 +113,7 @@ def load_state(path: str | Path, cfg: Config) -> BotState:
                 timestamp_ms=int(pending_raw.get("timestamp_ms") or 0),
                 amount=D(pending_raw.get("amount") or 0),
                 filled_amount=D(pending_raw.get("filled_amount") or 0),
+                filled_notional=D(pending_raw.get("filled_notional") or 0),
             )
         if raw.get("paper_jpy") not in (None, ""):
             paper_jpy = D(raw.get("paper_jpy"))
@@ -133,6 +147,7 @@ def save_state(path: str | Path, state: BotState) -> None:
             "timestamp_ms": state.pending.timestamp_ms,
             "amount": str(state.pending.amount),
             "filled_amount": str(state.pending.filled_amount),
+            "filled_notional": str(state.pending.filled_notional),
         }
     if state.position:
         payload["position"] = {
@@ -143,6 +158,7 @@ def save_state(path: str | Path, state: BotState) -> None:
             "entry_candle_ts": state.position.entry_candle_ts,
             "actual_execution_jpy": str(state.position.actual_execution_jpy),
             "kind": state.position.kind,
+            "fees_paid": str(state.position.fees_paid),
         }
     p.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
@@ -172,6 +188,11 @@ class Engine:
         self.last_signal = Signal.hold("starting")
         self.last_public_last: str = "-"
         self.last_error = ""
+        self.last_entropy: Decimal = ZERO
+        self.last_entropy_regime = "-"
+        self.last_daily_pnl: Decimal = ZERO
+        self.last_daily_pnl_score: Decimal = ZERO
+        self._reconcile_blocked = False
 
     def request_stop(self, *_args: object) -> None:
         slog("BOOT", "shutdown requested")
@@ -254,6 +275,7 @@ class Engine:
             crossed_up=last.crossed_up,
             crossed_down=last.crossed_down,
         )
+        self._update_regime(closes, state, last.close)
         signal = Signal.hold("no_eval")
         for i, snap in enumerate(snaps):
             is_last = i == len(snaps) - 1
@@ -266,9 +288,37 @@ class Engine:
             signal = strategy.evaluate(snap, state.position)
             self.strategy_evaluations += 1
             slog("STRATEGY", "signal", kind=signal.kind, reason=signal.reason, side=signal.side)
+            if heartbeat and execute and state.position and not state.pending:
+                mark = self._mark_price(snap.close)
+                if self.cfg.enable_intrabar_exits:
+                    exit_sig = strategy.evaluate_mark(mark, state.position)
+                    if exit_sig.side == "sell":
+                        slog(
+                            "STRATEGY",
+                            "intrabar exit",
+                            kind=exit_sig.kind,
+                            reason=exit_sig.reason,
+                            mark=str(mark),
+                        )
+                        signal = exit_sig
+                        self._execute(exit_sig, mark, snap.index, snap.timestamp_ms, state)
+                        if persist:
+                            save_state(self.cfg.state_path, state)
+                        self.last_signal = signal
+                        return signal
+                if self._maybe_emergency_flatten(state, mark, snap):
+                    signal = Signal("EMERGENCY_STOP", "sell", None, "kill_flatten")
+                    if persist:
+                        save_state(self.cfg.state_path, state)
+                    self.last_signal = signal
+                    return signal
             if not execute or heartbeat:
                 if heartbeat:
-                    slog("STRATEGY", "candle already processed", candle_ts=snap.timestamp_ms)
+                    slog(
+                        "STRATEGY",
+                        "candle already processed; waiting next closed bar",
+                        candle_ts=snap.timestamp_ms,
+                    )
                 continue
             if signal.side in {"buy", "sell"}:
                 if not is_last:
@@ -281,6 +331,13 @@ class Engine:
                     if persist:
                         save_state(self.cfg.state_path, state)
                     continue
+                if self._reconcile_blocked and self.cfg.require_reconcile and self.cfg.may_place_live_orders:
+                    self.last_block_reason = f"reconcile_{state.reconcile_reason}"
+                    signal = Signal.hold(self.last_block_reason)
+                    state.last_candle_ts = snap.timestamp_ms
+                    if persist:
+                        save_state(self.cfg.state_path, state)
+                    continue
                 if state.pending:
                     slog("ORDER_STATUS", "pending live order; skip new signal")
                     self.last_block_reason = "pending_order"
@@ -289,31 +346,125 @@ class Engine:
                     if persist:
                         save_state(self.cfg.state_path, state)
                     continue
-                if (
-                    signal.side == "buy"
-                    and self.cfg.enable_htf_filter
-                    and not self._explicit_synthetic
-                ):
-                    verdict = evaluate_htf(self._rest(), self.cfg)
-                    if not verdict.allow_buy:
-                        self.last_block_reason = verdict.reason
-                        slog("STRATEGY", "BUY blocked by HTF", reason=verdict.reason)
-                        signal = Signal.hold(verdict.reason)
+                if signal.side == "buy":
+                    gated = self._buy_soft_gates(signal, state)
+                    if gated is not None:
+                        signal = gated
                         state.last_candle_ts = snap.timestamp_ms
                         if persist:
                             save_state(self.cfg.state_path, state)
                         continue
+                    if self.cfg.enable_htf_filter and not self._explicit_synthetic:
+                        verdict = evaluate_htf(self._rest(), self.cfg)
+                        if not verdict.allow_buy:
+                            self.last_block_reason = verdict.reason
+                            slog("STRATEGY", "BUY blocked by HTF", reason=verdict.reason)
+                            signal = Signal.hold(verdict.reason)
+                            state.last_candle_ts = snap.timestamp_ms
+                            if persist:
+                                save_state(self.cfg.state_path, state)
+                            continue
                 if self.ws is not None and self.cfg.enable_websocket and self.ws.is_stale():
                     slog("WEBSOCKET", "stale data; skipping orders")
                     self.last_block_reason = "stale_websocket"
                     signal = Signal.hold("stale_websocket")
                     break
-                self._execute(signal, snap.close, snap.index, snap.timestamp_ms, state)
+                price = snap.close
+                if signal.kind in {"TP", "STOP", "EMERGENCY_STOP"}:
+                    price = self._mark_price(snap.close)
+                self._execute(signal, price, snap.index, snap.timestamp_ms, state)
             state.last_candle_ts = snap.timestamp_ms
             if persist:
                 save_state(self.cfg.state_path, state)
         self.last_signal = signal
         return signal
+
+    def _mark_price(self, fallback: Decimal) -> Decimal:
+        if self.ws is not None and not self.ws.is_stale():
+            last = self.ws.last_price()
+            if last is not None and last > ZERO:
+                return last
+        if self.last_public_last not in {"-", "", None}:
+            try:
+                mark = D(self.last_public_last)
+                if mark > ZERO:
+                    return mark
+            except Exception:
+                pass
+        return D(fallback)
+
+    def _update_regime(
+        self, closes: list[Decimal], state: BotState, mark: Decimal
+    ) -> None:
+        window = max(int(self.cfg.entropy_window), 2)
+        series = closes[-window:] if len(closes) >= 2 else closes
+        returns = simple_returns(series)
+        self.last_entropy = shannon_entropy(returns, bins=int(self.cfg.entropy_bins))
+        self.last_entropy_regime = entropy_regime(
+            self.last_entropy,
+            high=self.cfg.entropy_high,
+            low=self.cfg.entropy_low,
+        )
+        pos = state.position
+        self.last_daily_pnl = realtime_daily_pnl(
+            state.risk.daily_pnl,
+            mark,
+            pos.amount if pos else ZERO,
+            pos.average_price if pos else ZERO,
+        )
+        self.last_daily_pnl_score = daily_pnl_score(
+            self.last_daily_pnl, self.cfg.pnl_score_scale_jpy
+        )
+        slog(
+            "REGIME",
+            "entropy_and_pnl",
+            entropy=str(self.last_entropy),
+            regime=self.last_entropy_regime,
+            daily_pnl=str(self.last_daily_pnl),
+            daily_pnl_score=str(self.last_daily_pnl_score),
+        )
+
+    def _buy_soft_gates(self, signal: Signal, state: BotState) -> Signal | None:
+        tp = signal.tp_pct if signal.tp_pct is not None else self.cfg.buy1_tp
+        if self.cfg.enable_fee_aware_entry and not tp_covers_fees(tp, self.cfg.fee_buffer):
+            reason = "tp_below_round_trip_fees"
+            self.last_block_reason = reason
+            slog("RISK", "BUY blocked; TP cannot clear fees", tp=str(tp), fee=str(self.cfg.fee_buffer))
+            return Signal.hold(reason)
+        if (
+            self.cfg.enable_entropy_buy_gate
+            and self.last_entropy_regime == "CHOP"
+            and self.last_entropy >= self.cfg.entropy_high
+        ):
+            reason = "high_entropy_chop"
+            self.last_block_reason = reason
+            slog("STRATEGY", "BUY blocked by entropy gate", entropy=str(self.last_entropy))
+            return Signal.hold(reason)
+        if self.cfg.enable_pnl_buy_gate and self.last_daily_pnl_score < D("-0.5"):
+            reason = "daily_pnl_soft_gate"
+            self.last_block_reason = reason
+            slog(
+                "STRATEGY",
+                "BUY blocked by daily PnL soft gate (Granville still authoritative)",
+                daily_pnl=str(self.last_daily_pnl),
+                score=str(self.last_daily_pnl_score),
+            )
+            return Signal.hold(reason)
+        return None
+
+    def _maybe_emergency_flatten(
+        self, state: BotState, mark: Decimal, snap: Any
+    ) -> bool:
+        if not self.cfg.emergency_flatten_on_kill:
+            return False
+        if state.position is None or state.pending is not None:
+            return False
+        if state.risk.halt_reason() != "kill_switch":
+            return False
+        slog("RISK", "emergency market flatten on kill", mark=str(mark))
+        signal = Signal("EMERGENCY_STOP", "sell", None, "kill_flatten")
+        self._execute(signal, mark, snap.index, snap.timestamp_ms, state)
+        return state.position is None
 
     def _execute(
         self,
@@ -351,7 +502,12 @@ class Engine:
         if signal.side == "buy":
             plan = sizer.plan_buy(available_jpy=jpy, available_btc=btc, price=price)
         else:
-            plan = sizer.plan_sell(available_jpy=jpy, available_btc=btc, price=price)
+            plan = sizer.plan_sell(
+                available_jpy=jpy,
+                available_btc=btc,
+                price=price,
+                allow_kill_flatten=signal.kind == "EMERGENCY_STOP",
+            )
         slog(
             "RISK",
             "RISK MANAGER OK",
@@ -398,26 +554,63 @@ class Engine:
                 order_id=pending.order_id,
             )
             return
-        if result.executed_amount <= pending.filled_amount:
+        if result.reason == "canceled" and result.executed_amount <= pending.filled_amount:
+            slog(
+                "ORDER_STATUS",
+                "pending canceled; clearing",
+                order_id=pending.order_id,
+            )
+            state.pending = None
+            return
+        if (
+            result.executed_amount <= pending.filled_amount
+            and result.reason not in {"canceled", "canceled_partial"}
+        ):
             slog(
                 "ORDER_STATUS",
                 "pending still unfilled; skip new orders",
                 order_id=pending.order_id,
             )
             return
+        cum_notional = (
+            result.executed_amount * result.average_price
+            if result.average_price
+            else ZERO
+        )
         delta = result.executed_amount - pending.filled_amount
-        avg = result.average_price
+        delta_notional = cum_notional - pending.filled_notional
+        if delta <= ZERO and result.reason == "canceled":
+            state.pending = None
+            return
+        if delta <= ZERO:
+            slog(
+                "ORDER_STATUS",
+                "pending still unfilled; skip new orders",
+                order_id=pending.order_id,
+            )
+            return
+        fee_delta = result.fee_jpy
+        if pending.filled_amount > ZERO and result.executed_amount > ZERO:
+            # Attribute only the incremental share of reported cumulative fee when present.
+            fee_delta = (
+                result.fee_jpy * (delta / result.executed_amount)
+                if result.fee_jpy > ZERO
+                else ZERO
+            )
         delta_result = OrderResult(
             True,
-            result.reason,
+            "partial_fill" if result.reason == "partial_fill" else (
+                "canceled_partial" if result.reason == "canceled_partial" else "fill"
+            ),
             False,
             False,
             pending.order_id,
             result.status,
             delta,
-            avg,
-            delta * avg if avg else ZERO,
+            (delta_notional / delta) if delta > ZERO else result.average_price,
+            delta_notional,
             result.raw,
+            fee_delta,
         )
         signal = Signal(pending.kind, pending.side, pending.tp_pct, "pending_fill")
         plan = AmountPlan(
@@ -439,13 +632,18 @@ class Engine:
         except Exception:
             jpy, btc = ZERO, ZERO
         pending.filled_amount = result.executed_amount
-        if result.reason != "partial_fill":
+        pending.filled_notional = cum_notional
+        if result.reason == "partial_fill":
+            state.pending = pending
+        else:
             state.pending = None
         self._apply_fill(
             signal, plan, delta_result, pending.index, pending.timestamp_ms, state, jpy, btc
         )
         if result.reason == "partial_fill":
             state.pending = pending
+        else:
+            state.pending = None
 
     def _set_watchdog(
         self,
@@ -483,6 +681,10 @@ class Engine:
         jpy: Decimal,
         btc: Decimal,
     ) -> None:
+        if result.reason == "canceled" and result.executed_amount <= ZERO:
+            state.pending = None
+            slog("ORDER_STATUS", "cleared canceled pending", order_id=result.order_id)
+            return
         if result.reason == "accepted_unfilled" and result.order_id:
             state.pending = PendingOrder(
                 order_id=result.order_id,
@@ -493,6 +695,7 @@ class Engine:
                 timestamp_ms=ts,
                 amount=plan.amount,
                 filled_amount=ZERO,
+                filled_notional=ZERO,
             )
             slog(
                 "ORDER_STATUS",
@@ -507,6 +710,7 @@ class Engine:
         if actual_jpy is None:
             slog("ERROR", "fill missing actual_execution_jpy; ignoring TARGET/PLANNED")
             return
+        fee = D(result.fee_jpy or 0)
         stage = "SIMULATED_FILL" if result.simulated or self.cfg.dry_run else "FILL"
         slog(
             stage,
@@ -514,6 +718,7 @@ class Engine:
             target_jpy=str(plan.target_jpy),
             planned_order_jpy=str(plan.planned_order_jpy),
             actual_execution_jpy=str(actual_jpy),
+            fee_jpy=str(fee),
             actual_balance_jpy=str(jpy),
             actual_balance_btc=str(btc),
             bitbank_jpy_unchanged=bool(self.cfg.dry_run or result.simulated),
@@ -524,10 +729,10 @@ class Engine:
                 state.paper_btc = btc
             if signal.side == "buy":
                 state.paper_btc += result.executed_amount
-                state.paper_jpy = max(ZERO, state.paper_jpy - actual_jpy)
+                state.paper_jpy = max(ZERO, state.paper_jpy - actual_jpy - fee)
             elif signal.side == "sell":
                 state.paper_btc = max(ZERO, state.paper_btc - result.executed_amount)
-                state.paper_jpy += actual_jpy
+                state.paper_jpy += max(ZERO, actual_jpy - fee)
         if signal.side == "buy":
             tp = signal.tp_pct if signal.tp_pct is not None else self.cfg.buy1_tp
             if state.position:
@@ -542,6 +747,7 @@ class Engine:
                     entry_candle_ts=state.position.entry_candle_ts,
                     actual_execution_jpy=total_jpy,
                     kind=state.position.kind,
+                    fees_paid=state.position.fees_paid + fee,
                 )
             else:
                 state.position = Position(
@@ -552,19 +758,27 @@ class Engine:
                     entry_candle_ts=ts,
                     actual_execution_jpy=actual_jpy,
                     kind=signal.kind,
+                    fees_paid=fee,
                 )
         elif signal.side == "sell" and state.position:
             pos_amt = state.position.amount
+            buy_fees = state.position.fees_paid
             if pos_amt <= ZERO or result.executed_amount >= pos_amt:
-                state.risk.record_realized_pnl(actual_jpy - state.position.actual_execution_jpy)
+                pnl = actual_jpy - state.position.actual_execution_jpy - fee - buy_fees
+                state.risk.record_realized_pnl(pnl)
                 state.position = None
             else:
-                cost = state.position.actual_execution_jpy * (result.executed_amount / pos_amt)
-                state.risk.record_realized_pnl(actual_jpy - cost)
+                fraction = result.executed_amount / pos_amt
+                cost = state.position.actual_execution_jpy * fraction
+                allocated_buy_fee = buy_fees * fraction
+                pnl = actual_jpy - cost - fee - allocated_buy_fee
+                state.risk.record_realized_pnl(pnl)
                 state.position.amount = pos_amt - result.executed_amount
                 state.position.actual_execution_jpy -= cost
+                state.position.fees_paid = buy_fees - allocated_buy_fee
         if result.reason == "partial_fill" and result.order_id:
             already = state.pending.filled_amount if state.pending else ZERO
+            already_notional = state.pending.filled_notional if state.pending else ZERO
             state.pending = PendingOrder(
                 order_id=result.order_id,
                 side=signal.side or "",
@@ -574,6 +788,7 @@ class Engine:
                 timestamp_ms=ts,
                 amount=plan.amount,
                 filled_amount=already + result.executed_amount,
+                filled_notional=already_notional + actual_jpy,
             )
         elif result.reason != "partial_fill":
             state.pending = None
@@ -670,6 +885,8 @@ class Engine:
         if self.cfg.enable_websocket:
             self._maybe_ws()
         state = load_state(self.cfg.state_path, self.cfg)
+        if not synthetic:
+            self._startup_reconcile(state)
         if synthetic:
             state.last_candle_ts = 0
         last_ok = time.monotonic()
@@ -777,10 +994,97 @@ class Engine:
         except Exception as exc:
             self.last_error = type(exc).__name__
 
+    def _startup_reconcile(self, state: BotState) -> None:
+        if not self.cfg.has_keys:
+            state.reconcile_ok = True
+            state.reconcile_reason = "no_keys_skip"
+            self._reconcile_blocked = False
+            return
+        rest = self._rest()
+        try:
+            jpy, btc = self._balances(rest, state)
+            active = rest.get_active_orders(self.cfg.pair)
+        except Exception as exc:
+            slog("RECONCILE", "startup reconcile failed", error=type(exc).__name__)
+            state.reconcile_ok = False
+            state.reconcile_reason = "reconcile_fetch_failed"
+            self._reconcile_blocked = bool(
+                self.cfg.require_reconcile and self.cfg.may_place_live_orders
+            )
+            return
+        bot_btc = state.position.amount if state.position else ZERO
+        report = reconcile(
+            exchange_jpy=jpy,
+            exchange_btc=btc,
+            open_orders=active,
+            bot_position_btc=bot_btc,
+            pending=state.pending is not None,
+            min_amount=self.cfg.min_amount_btc,
+        )
+        state.reconcile_ok = report.ok
+        state.reconcile_reason = report.reason
+        if report.reason == "pending_without_exchange_order":
+            slog("ORDER_STATUS", "clearing stale pending absent on exchange")
+            state.pending = None
+            state.reconcile_ok = True
+            state.reconcile_reason = "cleared_stale_pending"
+        elif report.reason == "exchange_open_order_adopted" and report.adopted_order_id:
+            row = active[0]
+            state.pending = PendingOrder(
+                order_id=report.adopted_order_id,
+                side=str(row.get("side") or ""),
+                kind="RECONCILED",
+                tp_pct=None,
+                index=0,
+                timestamp_ms=0,
+                amount=D(row.get("start_amount") or row.get("remaining_amount") or 0),
+                filled_amount=D(row.get("executed_amount") or 0),
+                filled_notional=ZERO,
+            )
+            state.reconcile_ok = True
+        elif (
+            report.reason == "btc_position_mismatch"
+            and state.position is None
+            and btc >= self.cfg.min_amount_btc
+        ):
+            mark = self._mark_price(D("1"))
+            adopted = adopt_position_from_exchange(
+                btc,
+                mark,
+                min_amount=self.cfg.min_amount_btc,
+                default_tp=self.cfg.buy1_tp,
+            )
+            if adopted:
+                amount, price = adopted
+                state.position = Position(
+                    amount=amount,
+                    average_price=price,
+                    tp_pct=self.cfg.buy1_tp,
+                    entry_candle_index=0,
+                    entry_candle_ts=0,
+                    actual_execution_jpy=amount * price,
+                    kind="RECONCILED",
+                    fees_paid=ZERO,
+                )
+                state.reconcile_ok = True
+                state.reconcile_reason = "adopted_exchange_btc"
+                slog("POSITION_RECONCILED", "adopted exchange BTC", amount=str(amount))
+        self._reconcile_blocked = bool(
+            self.cfg.require_reconcile
+            and self.cfg.may_place_live_orders
+            and not state.reconcile_ok
+        )
+        save_state(self.cfg.state_path, state)
+
     def _paint(self, state: BotState, signal: Signal, last: str = "-") -> None:
         if self.screen is None:
             return
         pos = state.position
+        note = "HOLD/待機は正常です。Ctrl-C で停止"
+        if signal.reason == "no_buy_setup":
+            note = "次の確定足でセットアップ待ち（HOLDは正常）"
+        elif signal.reason.startswith("mark_") or signal.kind in {"TP", "STOP"}:
+            note = "建玉監視中: 足内TP/損切りを有効化"
         view = view_from_engine(
             pair=self.cfg.pair,
             dry_run=self.cfg.dry_run,
@@ -802,6 +1106,10 @@ class Engine:
             block_reason=self.last_block_reason,
             error=self.last_error,
             candle_type=self.cfg.candle_type,
+            daily_pnl=self.last_daily_pnl,
+            entropy=self.last_entropy,
+            entropy_regime=self.last_entropy_regime,
+            note=note,
         )
         self.screen.render(view)
 

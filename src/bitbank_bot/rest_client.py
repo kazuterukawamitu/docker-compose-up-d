@@ -325,3 +325,10 @@ class RestClient:
     def get_active_orders(self, pair: str) -> list[dict[str, Any]]:
         data = self.private_get("/user/spot/active_orders", {"pair": pair})
         return list(data.get("orders") or [])
+
+    def cancel_order(self, pair: str, order_id: str) -> dict[str, Any]:
+        return self.private_post(
+            "/user/spot/cancel_order",
+            {"pair": pair, "order_id": int(order_id) if str(order_id).isdigit() else order_id},
+            update=True,
+        )

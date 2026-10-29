@@ -197,3 +197,47 @@ def test_poll_failed() -> None:
     result = OrderExecutor(c, client).poll("42", Decimal("0.001"))
     assert not result.ok
     assert result.reason == "poll_failed"
+
+
+def test_poll_canceled_unfilled() -> None:
+    client = MagicMock()
+    client.get_order.return_value = {
+        "order_id": "42",
+        "status": "CANCELED_UNFILLED",
+        "executed_amount": "0",
+        "average_price": "0",
+        "start_amount": "0.001",
+    }
+    c = cfg(dry_run=False, live_trading=True, api_key="k", api_secret="s")
+    result = OrderExecutor(c, client).poll("42", Decimal("0.001"))
+    assert result.ok
+    assert result.reason == "canceled"
+    assert result.status == "CANCELED"
+
+
+def test_live_sell_uses_exit_order_type_market() -> None:
+    client = MagicMock()
+    client.get_active_orders.return_value = []
+    client.create_order.return_value = {
+        "order_id": "1",
+        "status": "FULLY_FILLED",
+        "executed_amount": "0.001",
+        "average_price": "10000000",
+        "start_amount": "0.001",
+    }
+    c = cfg(
+        dry_run=False,
+        live_trading=True,
+        api_key="k",
+        api_secret="s",
+        order_type="limit",
+        exit_order_type="market",
+    )
+    plan = _plan()
+    plan.side = "sell"
+    result = OrderExecutor(c, client).place(
+        Signal("TP", "sell", Decimal("0.03"), "test"), plan
+    )
+    assert result.ok
+    assert client.create_order.call_args.kwargs["order_type"] == "market"
+    assert client.create_order.call_args.kwargs["price"] is None
