@@ -1,18 +1,21 @@
 #!/usr/bin/env bash
 # Package a deliverable archive (source + scripts + docs; no secrets / no wiki HTML).
-# Default format is tar.gz (zip-free). Override with FORMAT=tar.gz|tar.xz|tgz
+# Formats: zip (default for delivery), tar.gz, tar.xz, tar
+#   FORMAT=zip bash scripts/make_archive.sh
+#   FORMAT=tar.gz bash scripts/make_archive.sh
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT_DIR="${1:-/opt/cursor/artifacts}"
-FORMAT="${FORMAT:-tar.gz}"
+FORMAT="${FORMAT:-zip}"
 mkdir -p "$OUT_DIR" "$ROOT/dist"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 case "$FORMAT" in
+  zip)        EXT="zip" ;;
   tar.gz|tgz) EXT="tar.gz"; TAR_FLAGS=(-czf) ;;
   tar.xz|txz) EXT="tar.xz"; TAR_FLAGS=(-cJf) ;;
   tar)        EXT="tar";    TAR_FLAGS=(-cf) ;;
   *)
-    echo "unsupported FORMAT=$FORMAT (use tar.gz, tar.xz, or tar)" >&2
+    echo "unsupported FORMAT=$FORMAT (use zip, tar.gz, tar.xz, or tar)" >&2
     exit 2
     ;;
 esac
@@ -50,7 +53,11 @@ done < <(find "$ROOT" -mindepth 1 \( \
 
 (
   cd "$TMP"
-  tar "${TAR_FLAGS[@]}" "$OUT_DIR/$NAME" bitbank-btc-jpy-bot
+  if [[ "$EXT" == "zip" ]]; then
+    zip -qr "$OUT_DIR/$NAME" bitbank-btc-jpy-bot
+  else
+    tar "${TAR_FLAGS[@]}" "$OUT_DIR/$NAME" bitbank-btc-jpy-bot
+  fi
   cp -f "$OUT_DIR/$NAME" "$ROOT/dist/$NAME"
 )
 echo "$OUT_DIR/$NAME"

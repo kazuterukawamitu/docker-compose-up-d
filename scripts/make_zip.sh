@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
-# Compatibility wrapper. Prefer tar.gz (zip-free) via make_archive.sh.
-# Usage: bash scripts/make_zip.sh [out_dir]
-#        FORMAT=tar.xz bash scripts/make_zip.sh [out_dir]
+# Deliverable zip (requested). Also: FORMAT=tar.gz bash scripts/make_archive.sh
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-export FORMAT="${FORMAT:-tar.gz}"
+export FORMAT=zip
 exec bash "$ROOT/scripts/make_archive.sh" "$@"
