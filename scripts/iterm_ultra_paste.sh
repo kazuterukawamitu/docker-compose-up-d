@@ -13,8 +13,8 @@ case "$CMD" in
     # Patch/depac smoke: synthetic once, no live orders
     export DRY_RUN=true
     export LIVE_TRADING=false
-    if [[ -d "$ROOT/src/bitbank_bot" ]] && python3 -c 'import httpx' 2>/dev/null; then
-      PYTHONPATH="$ROOT/src" exec python3 -m bitbank_bot --once --synthetic --no-screen
+    if [[ -d "$ROOT/src/bitbank_bot" ]] && [[ -x "$ROOT/.venv/bin/python" ]] && "$ROOT/.venv/bin/python" -c 'import httpx' 2>/dev/null; then
+      PYTHONPATH="$ROOT/src" exec "$ROOT/.venv/bin/python" -m bitbank_bot --once --synthetic --no-screen --skip-lock
     fi
     exec python3 "$ROOT/run.py" --once --synthetic --no-screen
     ;;
