@@ -29,7 +29,10 @@ def test_run_py_once_synthetic_no_deps(tmp_path) -> None:
     assert proc.returncode == 0, proc.stderr + proc.stdout
     assert "取引画面" in proc.stdout
     assert "DRY_RUN" in proc.stdout
+    assert "日時損益" in proc.stdout
+    assert "エントロピー" in proc.stdout
     assert "run complete" in proc.stdout
+    assert "create_order(" not in (root / "run.py").read_text(encoding="utf-8")
 
 
 def test_run_py_works_without_repo_src(tmp_path) -> None:
