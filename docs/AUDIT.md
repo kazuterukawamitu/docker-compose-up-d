@@ -76,6 +76,12 @@ bitFlyer, Coincheck, and GMO are not imported and are not executed.
     history. Dry-run does not rewrite state from the account.
 17. **Stale sell limits.** A live sell still open after `SELL_UNFILLED_SEC`
     (default 20) is canceled and resent as a market order.
+18. **V31 / OOS dual.** `DualRun` evaluates production + shadow each bar.
+    Shadow never receives an order client. Missing `v31.py` / `oos.py` is
+    `Not Detected` and is not invented.
+19. **Gap audit.** `python -m bitbank_bot --audit` and
+    `docker/audit_agent.py` scan the tree for the five SELL patches, dual
+    wiring, Docker secret hygiene, and LIVE defaults. No orders, no secrets.
 
 ## What this bot does not do
 

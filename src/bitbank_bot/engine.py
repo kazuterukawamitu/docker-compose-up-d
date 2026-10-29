@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import signal
 import time
 from dataclasses import dataclass
@@ -15,7 +16,9 @@ from typing import Any
 from bitbank_bot.amounts import AmountPlan, PositionSizer
 from bitbank_bot.config import Config
 from bitbank_bot.decision import buy_block_reason, price_exit, shannon_entropy, unrealized_jpy
+from bitbank_bot.dual_run import DualRun
 from bitbank_bot.logging_setup import slog
+from bitbank_bot.loop_timers import LoopEvidence, ShadowGuardTimers
 from bitbank_bot.market_data import (
     Candle,
     CandleCache,
@@ -178,6 +181,7 @@ class Engine:
         cfg: Config,
         client: RestClient | None = None,
         screen: TradingScreen | None = None,
+        dual: DualRun | None = None,
     ) -> None:
         self.cfg = cfg
         self.client = client
@@ -187,6 +191,7 @@ class Engine:
         self.cache = CandleCache(cfg.ma_period)
         self.last_block_reason = ""
         self.strategy_evaluations = 0
+        self.oos_evaluations = 0
         self.cycles = 0
         self.used_synthetic_fallback = False
         self._explicit_synthetic = False
@@ -199,6 +204,9 @@ class Engine:
         self.last_error = ""
         self.last_entropy: Decimal = ZERO
         self.last_unrealized: Decimal = ZERO
+        self.dual = dual or DualRun.discover()
+        self.loop_evidence = LoopEvidence()
+        self.timers = ShadowGuardTimers(self.loop_evidence)
 
     def request_stop(self, *_args: object) -> None:
         slog("BOOT", "shutdown requested")
@@ -269,7 +277,8 @@ class Engine:
             self._maybe_replace_stale_sell(state, closes[-1])
             if persist:
                 save_state(self.cfg.state_path, state)
-        strategy = Strategy(self.cfg)
+        production = self.dual.make_production(self.cfg)
+        shadow = self.dual.make_shadow(self.cfg)
         last = snaps[-1]
         self.last_close = last.close
         self.last_ma = last.ma
@@ -282,20 +291,42 @@ class Engine:
             trend=last.ma_trend.value,
             crossed_up=last.crossed_up,
             crossed_down=last.crossed_down,
+            production=self.dual.production_name,
+            oos_shadow=self.dual.shadow_name,
         )
         signal = Signal.hold("no_eval")
+        oos_signal = Signal.hold("oos_no_eval")
         for i, snap in enumerate(snaps):
             is_last = i == len(snaps) - 1
             is_new = state.last_candle_ts > 0 and snap.timestamp_ms > state.last_candle_ts
             is_bootstrap = state.last_candle_ts <= 0 and is_last
             heartbeat = is_last and not is_new and not is_bootstrap
             if not (is_new or is_bootstrap or heartbeat):
-                strategy.observe(snap)
+                production.observe(snap)
+                try:
+                    shadow.observe(snap)
+                except Exception:
+                    pass
                 continue
-            signal = strategy.evaluate(snap, state.position)
+            signal = production.evaluate(snap, state.position)
             self.strategy_evaluations += 1
+            try:
+                oos_signal = shadow.evaluate(snap, state.position)
+                self.dual.note_shadow(oos_signal)
+                self.oos_evaluations = self.dual.shadow_evaluations
+            except Exception as exc:
+                slog("OOS_SHADOW", "shadow eval failed", error=type(exc).__name__)
+                oos_signal = Signal.hold("oos_error")
             self._log_decision_context(signal, snap.close, state)
             slog("STRATEGY", "signal", kind=signal.kind, reason=signal.reason, side=signal.side)
+            slog(
+                "OOS_SHADOW",
+                "shadow signal (never orders)",
+                kind=oos_signal.kind,
+                reason=oos_signal.reason,
+                side=oos_signal.side,
+                execute=False,
+            )
             if execute and is_last and state.position is not None and self.cfg.enable_protective_exits:
                 protected = self._protective_signal(state, snap.close)
                 if protected is not None:
@@ -1108,75 +1139,98 @@ class Engine:
         elif self.cfg.may_place_live_orders:
             self._refresh_public_last(rest)
             self.reconcile(state)
+        self.dual.probe(self.cfg)
+        status = self.dual.safe_status()
+        slog(
+            "DUAL_RUN",
+            "production+oos",
+            production=status.get("production"),
+            oos_shadow=status.get("shadow"),
+            oos_execute=False,
+            v31_wired=status.get("v31_wired"),
+            oos_wired=status.get("oos_wired"),
+            shadow_evaluations=status.get("shadow_evaluations"),
+        )
+        self.loop_evidence.begin(
+            pid=os.getpid(),
+            poll_sec=float(self.cfg.poll_sec),
+            lock_path=self.cfg.lock_path,
+        )
         last_ok = time.monotonic()
         timeout = float(self.cfg.no_trade_timeout_seconds)
-        while not self._stop:
-            try:
-                latest_only = bool(self.cache.candles) and not synthetic
-                incoming = self._candles_for_cycle(
-                    rest, latest_only=latest_only, force_synthetic=synthetic
-                )
-                self._refresh_public_last(rest)
-                accidental_synthetic = (
-                    self.used_synthetic_fallback and not self._explicit_synthetic
-                )
-                if accidental_synthetic:
-                    slog(
-                        "WATCHDOG",
-                        "FAIL",
-                        reason="synthetic_fallback_no_orders",
+        try:
+            while not self._stop:
+                try:
+                    latest_only = bool(self.cache.candles) and not synthetic
+                    incoming = self._candles_for_cycle(
+                        rest, latest_only=latest_only, force_synthetic=synthetic
                     )
-                    candles = list(self.cache.candles) if self.cache.candles else incoming
-                else:
-                    candles = self.cache.merge(incoming)
-                signal = self.process_candles(
-                    candles,
-                    state,
-                    execute=not accidental_synthetic,
-                    persist=not (synthetic or self.used_synthetic_fallback),
-                )
-                last_ok = time.monotonic()
-                last = str(candles[-1].close) if candles else "-"
-                fail_reason = (
-                    "synthetic_fallback_no_orders" if accidental_synthetic else ""
-                )
-                self._set_watchdog(
-                    state,
-                    signal,
-                    fail_reason=fail_reason,
-                    market_ok=bool(candles) and not accidental_synthetic,
-                )
-                self.cycles += 1
-                self._heartbeat(state, signal, last)
-                if max_cycles is not None and self.cycles >= max_cycles:
-                    slog("BOOT", "max_cycles reached", cycles=self.cycles)
+                    self._refresh_public_last(rest)
+                    accidental_synthetic = (
+                        self.used_synthetic_fallback and not self._explicit_synthetic
+                    )
+                    if accidental_synthetic:
+                        slog(
+                            "WATCHDOG",
+                            "FAIL",
+                            reason="synthetic_fallback_no_orders",
+                        )
+                        candles = list(self.cache.candles) if self.cache.candles else incoming
+                    else:
+                        candles = self.cache.merge(incoming)
+                    signal = self.process_candles(
+                        candles,
+                        state,
+                        execute=not accidental_synthetic,
+                        persist=not (synthetic or self.used_synthetic_fallback),
+                    )
+                    last_ok = time.monotonic()
+                    last = str(candles[-1].close) if candles else "-"
+                    fail_reason = (
+                        "synthetic_fallback_no_orders" if accidental_synthetic else ""
+                    )
+                    self._set_watchdog(
+                        state,
+                        signal,
+                        fail_reason=fail_reason,
+                        market_ok=bool(candles) and not accidental_synthetic,
+                    )
+                    self.cycles += 1
+                    self.loop_evidence.note_cycle()
+                    self.timers.tick_shadow()
+                    self.timers.tick_guard(self.cfg, self.dual)
+                    self._heartbeat(state, signal, last)
+                    if max_cycles is not None and self.cycles >= max_cycles:
+                        slog("BOOT", "max_cycles reached", cycles=self.cycles)
+                        break
+                except KeyboardInterrupt:
+                    slog("BOOT", "keyboard interrupt")
+                    self._stop = True
                     break
-            except KeyboardInterrupt:
-                slog("BOOT", "keyboard interrupt")
-                self._stop = True
-                break
-            except Exception as exc:
-                _LOG.exception("loop error")
-                slog("ERROR", "loop error", error=type(exc).__name__, detail=str(exc)[:200])
-                idle = time.monotonic() - last_ok
-                slog("WATCHDOG", "FAIL", reason="loop_error", idle_sec=int(idle))
-                self.last_watchdog = "FAIL"
-                if idle >= timeout:
-                    slog("WATCHDOG", "FAIL stuck errors; still not exiting on HOLD")
-                self.cycles += 1
-                if max_cycles is not None and self.cycles >= max_cycles:
-                    break
-            try:
-                if max_cycles is not None:
-                    time.sleep(0.05)
-                else:
-                    for _ in range(int(max(1, self.cfg.poll_sec))):
-                        if self._stop:
-                            break
-                        time.sleep(1)
-            except KeyboardInterrupt:
-                slog("BOOT", "keyboard interrupt")
-                self._stop = True
+                except Exception as exc:
+                    _LOG.exception("loop error")
+                    slog("ERROR", "loop error", error=type(exc).__name__, detail=str(exc)[:200])
+                    idle = time.monotonic() - last_ok
+                    slog("WATCHDOG", "FAIL", reason="loop_error", idle_sec=int(idle))
+                    self.last_watchdog = "FAIL"
+                    if idle >= timeout:
+                        slog("WATCHDOG", "FAIL stuck errors; still not exiting on HOLD")
+                    self.cycles += 1
+                    if max_cycles is not None and self.cycles >= max_cycles:
+                        break
+                try:
+                    if max_cycles is not None:
+                        time.sleep(0.05)
+                    else:
+                        for _ in range(int(max(1, self.cfg.poll_sec))):
+                            if self._stop:
+                                break
+                            time.sleep(1)
+                except KeyboardInterrupt:
+                    slog("BOOT", "keyboard interrupt")
+                    self._stop = True
+        finally:
+            self.loop_evidence.end()
         if self.ws:
             self.ws.stop()
         slog("BOOT", "stopped")

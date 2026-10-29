@@ -30,6 +30,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--preflight", action="store_true", help="run preflight and exit")
     parser.add_argument("--check-config", action="store_true", help="load config and exit")
     parser.add_argument(
+        "--audit",
+        action="store_true",
+        help="run gap/bug audit (no orders, no secrets) and exit",
+    )
+    parser.add_argument(
         "--backtest",
         action="store_true",
         help="replay README rules on synthetic candles (no orders) and exit",
@@ -71,7 +76,12 @@ def main(argv: list[str] | None = None) -> int:
         cfg.dry_run = True
         cfg.live_trading = False
     use_screen = should_use_screen(args, sys.stdout)
-    setup_logging(cfg.log_level, cfg.log_dir, console=not use_screen)
+    # Audit prints one JSON document to stdout; keep slog off the console.
+    setup_logging(
+        cfg.log_level,
+        cfg.log_dir,
+        console=(not use_screen) and not bool(args.audit),
+    )
     slog("BOOT", "starting", **cfg.safe_dict())
     slog(
         "BOOT",
@@ -81,6 +91,7 @@ def main(argv: list[str] | None = None) -> int:
         loop=not args.once,
         dry_run=cfg.dry_run,
         screen=use_screen,
+        audit=bool(args.audit),
     )
     rest = RestClient(
         public_url=cfg.public_url,
@@ -97,6 +108,31 @@ def main(argv: list[str] | None = None) -> int:
         slog("BOOT", "config ok", **cfg.safe_dict())
         rest.close()
         return 0
+    if args.audit:
+        import json
+
+        from bitbank_bot.dual_run import DualRun
+        from bitbank_bot.evidence import report_flags
+        from bitbank_bot.gap_audit import run_gap_audit
+        from bitbank_bot.loop_timers import LoopEvidence, ShadowGuardTimers
+
+        dual = DualRun.discover()
+        dual.probe(cfg)
+        loop = LoopEvidence()
+        timers = ShadowGuardTimers(loop)
+        slog("DUAL_RUN", "check", **dual.safe_status())
+        slog(
+            "EVIDENCE",
+            "flags",
+            **report_flags(cfg, dual=dual, loop=loop, timers=timers),
+        )
+        report = run_gap_audit()
+        print(json.dumps(report.as_dict(), indent=2, default=str))
+        rest.close()
+        fails = [c for c in report.criteria if c.status == "FAIL"]
+        if report.has_secret_values or report.live == "YES":
+            return 2
+        return 1 if fails else 0
     if args.backtest:
         from bitbank_bot.backtest import report_lines, run_backtest
         from bitbank_bot.market_data import synthetic_candles

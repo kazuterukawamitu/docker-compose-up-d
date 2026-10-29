@@ -16,8 +16,14 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install deps
-        run: pip install -r requirements-dev.txt
+        run: |
+          pip install -r requirements-dev.txt
+          pip install ruff
       - name: Compile
-        run: python -m compileall -q src main.py diagnostics.py
+        run: python -m compileall -q src main.py diagnostics.py scripts docker
       - name: Pytest
         run: PYTHONPATH=src pytest -q
+      - name: Ruff (safe select)
+        run: python -m ruff check --select E9,F63,F7,F82 src tests scripts docker main.py run.py diagnostics.py
+      - name: Gap audit
+        run: PYTHONPATH=src python -m bitbank_bot --audit
