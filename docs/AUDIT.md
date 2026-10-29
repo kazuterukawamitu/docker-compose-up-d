@@ -56,7 +56,8 @@ bitFlyer, Coincheck, and GMO are not imported and are not executed.
    `CandleCache`, so a later real fetch cannot trade on mixed fake MAs.
 10. **Partial fills.** `PARTIALLY_FILLED` stays in `state.pending` and is polled
     until the remainder fills.
-11. **Kill file.** `data/KILL` blocks sells as well as buys.
+11. **Kill file.** `data/KILL` blocks new buys. Sells (flatten) stay allowed so
+    inventory is not trapped.
 12. **Intra-bar exits.** A processed 1h candle used to skip every later poll.
     Stop (`STOP_LOSS_PCT`, default 2%) and take-profit now use the public last
     price on each loop and send a market sell. Pattern SELL1–4 still fire once
@@ -82,6 +83,11 @@ bitFlyer, Coincheck, and GMO are not imported and are not executed.
 19. **Gap audit.** `python -m bitbank_bot --audit` and
     `docker/audit_agent.py` scan the tree for the five SELL patches, dual
     wiring, Docker secret hygiene, and LIVE defaults. No orders, no secrets.
+20. **DRY_RUN + keys.** Paper sizing ignores exchange free BTC so simulated
+    sells can flatten the paper position.
+21. **Pending vs SELL.** A pattern sell releases/cancels a pending order
+    before placing the flatten; `last_candle_ts` is not advanced while the
+    release fails.
 
 ## What this bot does not do
 

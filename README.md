@@ -76,5 +76,5 @@ python3 scripts/quality_pipeline.py
 ## Security
 
 - Never commit `.env`. Rotate keys if they were pasted into chat.
-- `data/KILL` blocks new buys and sells.
+- `data/KILL` blocks new buys; sells (flatten) remain allowed.
 - This repo does **not** SSH into your VPS or turn LIVE on for you.

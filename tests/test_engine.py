@@ -191,7 +191,8 @@ def test_engine_skips_order_when_balance_fetch_fails(tmp_path) -> None:
         enable_websocket=False,
         api_key="k",
         api_secret="s",
-        dry_run=True,
+        dry_run=False,
+        live_trading=True,
     )
     rest = MagicMock()
     rest.free_amount.side_effect = RuntimeError("boom")

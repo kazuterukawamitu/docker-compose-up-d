@@ -18,7 +18,7 @@ def test_daily_pnl_floor_blocks_buy_not_sell(tmp_path: Path) -> None:
     assert sell.allowed
 
 
-def test_kill_file_blocks(tmp_path: Path) -> None:
+def test_kill_file_blocks_buy_allows_sell(tmp_path: Path) -> None:
     kill = tmp_path / "KILL"
     kill.write_text("1")
     c = cfg(kill_switch_path=str(kill), daily_pnl_floor=Decimal("0"))
@@ -27,8 +27,8 @@ def test_kill_file_blocks(tmp_path: Path) -> None:
     assert not buy.allowed
     assert buy.reason == "kill_switch"
     sell = r.check_sell(Decimal("0.01"))
-    assert not sell.allowed
-    assert sell.reason == "kill_switch"
+    assert sell.allowed
+    assert sell.reason == "ok"
 
 
 def test_max_position() -> None:

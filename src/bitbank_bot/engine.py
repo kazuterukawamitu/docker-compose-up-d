@@ -228,7 +228,10 @@ class Engine:
         return self.client
 
     def _balances(self, rest: RestClient, state: BotState | None = None) -> tuple[Decimal, Decimal]:
-        if self.cfg.has_keys:
+        # DRY_RUN must size from the paper ledger even when keys exist for
+        # read-only private GETs. Using exchange free BTC here made paper
+        # BUY succeed and paper SELL fail with insufficient.
+        if self.cfg.has_keys and not self.cfg.dry_run:
             jpy = rest.free_amount("jpy")
             btc = rest.free_amount("btc")
             slog("ASSET", "free_amount", jpy=str(jpy), btc=str(btc))
@@ -375,13 +378,28 @@ class Engine:
                         save_state(self.cfg.state_path, state)
                     continue
                 if state.pending:
-                    slog("ORDER_STATUS", "pending live order; skip new signal")
-                    self.last_block_reason = "pending_order"
-                    signal = Signal.hold("pending_order")
-                    state.last_candle_ts = snap.timestamp_ms
-                    if persist:
-                        save_state(self.cfg.state_path, state)
-                    continue
+                    if signal.side == "sell":
+                        slog(
+                            "ORDER_STATUS",
+                            "sell waiting; releasing pending before flatten",
+                            pending_side=state.pending.side,
+                            pending_id=state.pending.order_id,
+                        )
+                        if not self._release_pending(state):
+                            self.last_block_reason = "pending_order"
+                            signal = Signal.hold("pending_order")
+                            # Do not advance last_candle_ts: retry the sell next poll.
+                            if persist:
+                                save_state(self.cfg.state_path, state)
+                            continue
+                    else:
+                        slog("ORDER_STATUS", "pending live order; skip new signal")
+                        self.last_block_reason = "pending_order"
+                        signal = Signal.hold("pending_order")
+                        state.last_candle_ts = snap.timestamp_ms
+                        if persist:
+                            save_state(self.cfg.state_path, state)
+                        continue
                 if (
                     signal.side == "buy"
                     and self.cfg.enable_htf_filter
@@ -673,7 +691,7 @@ class Engine:
         received = result.executed_amount - (result.fee_btc if result.fee_btc > ZERO else ZERO)
         if received < ZERO:
             received = ZERO
-        if result.simulated or (self.cfg.dry_run and not self.cfg.has_keys):
+        if result.simulated or self.cfg.dry_run:
             if state.paper_jpy <= ZERO and state.paper_btc <= ZERO:
                 state.paper_jpy = jpy
                 state.paper_btc = btc

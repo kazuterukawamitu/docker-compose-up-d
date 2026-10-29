@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 from bitbank_bot.engine import BotState, Engine, PendingOrder
 from bitbank_bot.market_data import synthetic_candles
-from bitbank_bot.money import D
+from bitbank_bot.money import D, ZERO
 from bitbank_bot.orders import OrderResult
 from bitbank_bot.risk import RiskManager
 from bitbank_bot.strategy import Position, Signal
@@ -199,6 +199,105 @@ def test_reconcile_adopts_exchange_btc_and_ignores_dry_run(tmp_path) -> None:
     assert state.position.amount == D("0.01")
     assert state.position.average_price == D("10000000")
     assert state.position.fee_jpy == D("100")
+
+
+def test_dry_run_with_keys_sells_from_paper_not_exchange(tmp_path) -> None:
+    engine = _engine(
+        tmp_path,
+        dry_run=True,
+        live_trading=False,
+        api_key="k",
+        api_secret="s",
+        simulate_fill=True,
+    )
+    rest = engine.client
+    rest.free_amount.side_effect = lambda asset: D("100000") if asset == "jpy" else D("0")
+    rest.get_active_orders.return_value = []
+    candles = synthetic_candles(40)
+    state = BotState(
+        _position(),
+        RiskManager(engine.cfg),
+        0,
+        0.0,
+        paper_jpy=D("90000"),
+        paper_btc=D("0.001"),
+    )
+    with patch(
+        "bitbank_bot.strategy.Strategy.evaluate",
+        return_value=Signal("SELL1", "sell", None, "test_sell"),
+    ):
+        signal = engine.process_candles(candles, state, execute=True, persist=False)
+    assert signal.kind == "SELL1"
+    assert state.position is None
+    assert state.paper_btc == ZERO
+    rest.create_order.assert_not_called()
+    rest.free_amount.assert_not_called()
+
+
+def test_pattern_sell_releases_pending_buy(tmp_path) -> None:
+    engine = _engine(
+        tmp_path,
+        dry_run=False,
+        live_trading=True,
+        api_key="k",
+        api_secret="s",
+        enable_protective_exits=False,
+    )
+    rest = engine.client
+    rest.free_amount.side_effect = lambda asset: D("50000") if asset == "jpy" else D("0.001")
+    rest.get_active_orders.return_value = []
+    open_order = {
+        "order_id": "42",
+        "status": "UNFILLED",
+        "executed_amount": "0",
+        "average_price": "0",
+        "start_amount": "0.001",
+    }
+    canceled = {
+        "order_id": "42",
+        "status": "CANCELED_UNFILLED",
+        "executed_amount": "0",
+        "average_price": "0",
+        "start_amount": "0.001",
+    }
+    # First poll keeps pending open; cancel + follow-up poll clear it.
+    rest.get_order.side_effect = [open_order, canceled]
+    rest.cancel_order.return_value = canceled
+    rest.create_order.return_value = {
+        "order_id": "99",
+        "status": "FULLY_FILLED",
+        "executed_amount": "0.001",
+        "average_price": "10000000",
+        "start_amount": "0.001",
+        "fee_amount_quote": "12",
+    }
+    candles = synthetic_candles(40)
+    state = BotState(
+        _position(),
+        RiskManager(engine.cfg),
+        0,
+        0.0,
+        pending=PendingOrder(
+            order_id="42",
+            side="buy",
+            kind="BUY1",
+            tp_pct=D("0.03"),
+            index=1,
+            timestamp_ms=1,
+            amount=D("0.001"),
+        ),
+    )
+    with patch(
+        "bitbank_bot.strategy.Strategy.evaluate",
+        return_value=Signal("SELL1", "sell", None, "pattern_sell"),
+    ):
+        signal = engine.process_candles(candles, state, execute=True, persist=False)
+    assert signal.kind == "SELL1"
+    assert state.position is None
+    assert state.pending is None
+    rest.cancel_order.assert_called()
+    rest.create_order.assert_called()
+    assert rest.create_order.call_args.kwargs.get("side") == "sell"
 
 
 def test_apply_fill_sell_subtracts_both_fees(tmp_path) -> None:

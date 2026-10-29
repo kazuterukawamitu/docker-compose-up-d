@@ -146,12 +146,16 @@ class RiskManager:
         return RiskDecision(True, capped, "ok", False)
 
     def check_sell(self, requested_btc: Decimal) -> RiskDecision:
+        """Allow flatten even when the operator kill file is set.
+
+        Kill must stop new risk (buys) without trapping inventory. Auth and
+        circuit-breaker failures still block sells because the exchange path
+        is not trustworthy.
+        """
         if self._auth_failed:
             return RiskDecision(False, ZERO, "auth_failure", True)
         limit = int(self.cfg.circuit_breaker_errors or 0)
         if limit > 0 and self._consecutive_errors >= limit:
             return RiskDecision(False, ZERO, "circuit_breaker", True)
-        if self.operator_killed or Path(self.cfg.kill_switch_path).exists():
-            return RiskDecision(False, ZERO, "kill_switch", True)
         capped = min(D(requested_btc), self.max_order_btc)
         return RiskDecision(True, capped, "ok", self.killed)
