@@ -274,6 +274,8 @@ class Strategy:
         return Signal.hold("no_buy_setup")
 
     def _tp_signal(self, snap: MarketSnapshot, position: Position) -> Signal:
+        if self.cfg.enable_protective_exits:
+            return Signal.hold("tp_deferred_to_protective")
         target = pct_offset(position.average_price, position.tp_pct)
         if snap.close >= target:
             return Signal(

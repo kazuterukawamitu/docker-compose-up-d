@@ -324,8 +324,8 @@ class Engine:
                         signal = protected
                         if not heartbeat:
                             state.last_candle_ts = snap.timestamp_ms
-                            if persist:
-                                save_state(self.cfg.state_path, state)
+                        if persist:
+                            save_state(self.cfg.state_path, state)
                         self.last_signal = signal
                         continue
             if not execute or heartbeat:
@@ -870,46 +870,55 @@ class Engine:
         slog("RECONCILE", "exchange snapshot", jpy=str(jpy), btc=str(btc), active=len(active))
         if state.pending is not None:
             self._poll_pending(state)
-        if state.pending is None and active:
-            row = active[0] if isinstance(active[0], dict) else {}
-            order_id = str(row.get("order_id") or "")
-            if order_id:
+        adopted_active = False
+        if active:
+            for row in active:
+                if not isinstance(row, dict):
+                    continue
+                order_id = str(row.get("order_id") or "")
+                if not order_id:
+                    continue
+                side = str(row.get("side") or "")
+                if side != "buy":
+                    continue
                 executed = D(row.get("executed_amount") or 0)
                 average = D(row.get("average_price") or 0)
-                side = str(row.get("side") or "")
-                if executed > ZERO and average > ZERO and side == "buy":
-                    received = executed
-                    notional = executed * average
-                    if state.position:
-                        total_amt = state.position.amount + received
-                        total_jpy = state.position.actual_execution_jpy + notional
-                        total_fee = state.position.fee_jpy
-                        avg = (total_jpy / total_amt) if total_amt > ZERO else average
-                        state.position = Position(
-                            amount=total_amt,
-                            average_price=avg,
-                            tp_pct=state.position.tp_pct,
-                            entry_candle_index=state.position.entry_candle_index,
-                            entry_candle_ts=state.position.entry_candle_ts,
-                            actual_execution_jpy=total_jpy,
-                            kind=state.position.kind,
-                            fee_jpy=total_fee,
-                        )
-                        slog("RECONCILE", "added adopted fill to position", executed=str(executed))
-                    else:
-                        state.position = Position(
-                            amount=received,
-                            average_price=average,
-                            tp_pct=self.cfg.buy1_tp,
-                            entry_candle_index=-1,
-                            entry_candle_ts=0,
-                            actual_execution_jpy=notional,
-                            kind="RECONCILED",
-                            fee_jpy=ZERO,
-                        )
-                        slog("RECONCILE", "created position from adopted fill", executed=str(executed))
+                if executed <= ZERO or average <= ZERO:
+                    continue
+                if state.pending is not None and state.pending.order_id == order_id:
+                    continue
+                received = executed
+                notional = executed * average
+                if state.position:
+                    total_amt = state.position.amount + received
+                    total_jpy = state.position.actual_execution_jpy + notional
+                    total_fee = state.position.fee_jpy
+                    avg = (total_jpy / total_amt) if total_amt > ZERO else average
+                    state.position = Position(
+                        amount=total_amt,
+                        average_price=avg,
+                        tp_pct=state.position.tp_pct,
+                        entry_candle_index=state.position.entry_candle_index,
+                        entry_candle_ts=state.position.entry_candle_ts,
+                        actual_execution_jpy=total_jpy,
+                        kind=state.position.kind,
+                        fee_jpy=total_fee,
+                    )
+                    slog("RECONCILE", "added adopted fill to position", executed=str(executed))
+                else:
+                    state.position = Position(
+                        amount=received,
+                        average_price=average,
+                        tp_pct=self.cfg.buy1_tp,
+                        entry_candle_index=-1,
+                        entry_candle_ts=0,
+                        actual_execution_jpy=notional,
+                        kind="RECONCILED",
+                        fee_jpy=ZERO,
+                    )
+                    slog("RECONCILE", "created position from adopted fill", executed=str(executed))
                 remainder = D(row.get("start_amount") or 0) - executed
-                if remainder > self.cfg.amount_precision:
+                if state.pending is None and remainder > self.cfg.amount_precision:
                     state.pending = PendingOrder(
                         order_id=order_id,
                         side=side,
@@ -923,7 +932,9 @@ class Engine:
                         placed_at_ms=int(time.time() * 1000),
                     )
                     slog("RECONCILE", "adopted active order with remainder", order_id=order_id, side=side)
-        if state.position is None and btc >= self.cfg.min_amount_btc and state.pending is None:
+                adopted_active = True
+                break
+        if state.position is None and btc >= self.cfg.min_amount_btc and not adopted_active:
             average, cost, fee = self._basis_from_trades(rest, btc)
             if average <= ZERO:
                 mark = self._mark_price(ZERO)

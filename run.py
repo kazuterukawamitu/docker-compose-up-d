@@ -317,6 +317,7 @@ def main(argv: list[str] | None = None) -> int:
     tp = BUY1_TP
     daily_pnl = Decimal("0")
     last_error = ""
+    last_candle_ts = 0
     print(
         "Bitbank BTC/JPY DRY_RUN を起動します"
         "（紙トレード / ティッカー利確・損切り / pip不要）",
@@ -326,6 +327,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             rows = synthetic_closes() if args.synthetic else fetch_hourly_closes()
             closes = [c for _, c in rows]
+            candle_ts = rows[-1][0] if rows else 0
             ticker = {"last": str(closes[-1]) if closes else ""}
             if not args.synthetic:
                 ticker = fetch_ticker()
@@ -336,7 +338,8 @@ def main(argv: list[str] | None = None) -> int:
             last = ticker.get("last") or (str(closes[-1]) if closes else "-")
             mark = D(last) if last not in {"", "-"} else (closes[-1] if closes else Decimal("0"))
 
-            signal, reason = decide_bar(closes, in_position, entry, tp)
+            is_new_candle = candle_ts > last_candle_ts
+            signal, reason = decide_bar(closes, in_position, entry, tp) if is_new_candle or in_position else ("HOLD", "heartbeat")
             protective = decide_ticker(
                 in_position=in_position,
                 entry=entry,
@@ -390,6 +393,9 @@ def main(argv: list[str] | None = None) -> int:
                 proceeds = amount * mark
                 exit_fee = proceeds * TAKER_FEE
                 unrealized = proceeds - exit_fee - (amount * entry) - fee_paid
+
+            if is_new_candle:
+                last_candle_ts = candle_ts
 
             uptime = int(time.monotonic() - started)
             watchdog = "LONG_WAIT" if uptime >= LONG_WAIT_SEC else "NORMAL WAIT"
