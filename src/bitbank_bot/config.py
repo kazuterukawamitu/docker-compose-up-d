@@ -15,7 +15,7 @@ except ImportError:  # system python without venv; start.sh installs dotenv
     def load_dotenv(*_args: object, **_kwargs: object) -> bool:
         return False
 
-from bitbank_bot.money import D
+from bitbank_bot.money import D, ZERO
 
 PAIR = "btc_jpy"
 PUBLIC_URL = "https://public.bitbank.cc"
@@ -60,6 +60,20 @@ DEFAULT_LOOKBACK_DAYS = 14
 DEFAULT_ACCESS_WINDOW_MS = 5000
 DEFAULT_CIRCUIT_BREAKER_ERRORS = 5
 DEFAULT_MAX_DRAWDOWN_JPY = "0"
+DEFAULT_STOP_LOSS_PCT = "0.03"
+DEFAULT_EXIT_ORDER_TYPE = "market"
+DEFAULT_STOP_ORDER_TYPE = "market"
+DEFAULT_ENTROPY_WINDOW = 20
+DEFAULT_ENTROPY_BINS = 8
+DEFAULT_ENTROPY_HIGH = "0.70"
+DEFAULT_ENTROPY_LOW = "0.30"
+DEFAULT_PNL_SCORE_SCALE = "10000"
+DEFAULT_REQUIRE_RECONCILE = True
+DEFAULT_INTRABAR_EXITS = True
+DEFAULT_ENTROPY_BUY_GATE = False
+DEFAULT_PNL_BUY_GATE = False
+DEFAULT_FEE_AWARE_ENTRY = True
+DEFAULT_EMERGENCY_FLATTEN_ON_KILL = True
 
 SHORT_CANDLE_TYPES = frozenset({"1min", "5min", "15min", "30min", "1hour"})
 LONG_CANDLE_TYPES = frozenset({"4hour", "8hour", "12hour", "1day", "1week", "1month"})
@@ -172,6 +186,20 @@ class Config:
     candle_lookback_days: int = DEFAULT_LOOKBACK_DAYS
     circuit_breaker_errors: int = DEFAULT_CIRCUIT_BREAKER_ERRORS
     max_drawdown_jpy: Decimal = D(DEFAULT_MAX_DRAWDOWN_JPY)
+    stop_loss_pct: Decimal = D(DEFAULT_STOP_LOSS_PCT)
+    exit_order_type: str = DEFAULT_EXIT_ORDER_TYPE
+    stop_order_type: str = DEFAULT_STOP_ORDER_TYPE
+    entropy_window: int = DEFAULT_ENTROPY_WINDOW
+    entropy_bins: int = DEFAULT_ENTROPY_BINS
+    entropy_high: Decimal = D(DEFAULT_ENTROPY_HIGH)
+    entropy_low: Decimal = D(DEFAULT_ENTROPY_LOW)
+    pnl_score_scale_jpy: Decimal = D(DEFAULT_PNL_SCORE_SCALE)
+    require_reconcile: bool = DEFAULT_REQUIRE_RECONCILE
+    enable_intrabar_exits: bool = DEFAULT_INTRABAR_EXITS
+    enable_entropy_buy_gate: bool = DEFAULT_ENTROPY_BUY_GATE
+    enable_pnl_buy_gate: bool = DEFAULT_PNL_BUY_GATE
+    enable_fee_aware_entry: bool = DEFAULT_FEE_AWARE_ENTRY
+    emergency_flatten_on_kill: bool = DEFAULT_EMERGENCY_FLATTEN_ON_KILL
     ws_rooms: tuple[str, ...] = ("ticker_btc_jpy",)
 
     def __str__(self) -> str:
@@ -214,6 +242,12 @@ class Config:
             "min_amount_btc": str(self.min_amount_btc),
             "circuit_breaker_errors": self.circuit_breaker_errors,
             "max_drawdown_jpy": str(self.max_drawdown_jpy),
+            "stop_loss_pct": str(self.stop_loss_pct),
+            "exit_order_type": self.exit_order_type,
+            "stop_order_type": self.stop_order_type,
+            "entropy_window": self.entropy_window,
+            "enable_intrabar_exits": self.enable_intrabar_exits,
+            "require_reconcile": self.require_reconcile,
         }
 
 
@@ -253,6 +287,12 @@ def load_config(
     ).lower()
     if order_type not in {"market", "limit"}:
         raise ConfigError("ORDER_TYPE must be market or limit")
+    exit_order_type = (_env(env, "EXIT_ORDER_TYPE", DEFAULT_EXIT_ORDER_TYPE) or DEFAULT_EXIT_ORDER_TYPE).lower()
+    if exit_order_type not in {"market", "limit"}:
+        raise ConfigError("EXIT_ORDER_TYPE must be market or limit")
+    stop_order_type = (_env(env, "STOP_ORDER_TYPE", DEFAULT_STOP_ORDER_TYPE) or DEFAULT_STOP_ORDER_TYPE).lower()
+    if stop_order_type not in {"market", "limit"}:
+        raise ConfigError("STOP_ORDER_TYPE must be market or limit")
 
     window = _int(
         env, "ACCESS_TIME_WINDOW_MS", _int(env, "ACCESS_TIME_WINDOW", DEFAULT_ACCESS_WINDOW_MS)
@@ -335,6 +375,22 @@ def load_config(
             env, "CIRCUIT_BREAKER_ERRORS", DEFAULT_CIRCUIT_BREAKER_ERRORS
         ),
         max_drawdown_jpy=_dec(env, "MAX_DRAWDOWN_JPY", DEFAULT_MAX_DRAWDOWN_JPY),
+        stop_loss_pct=_dec(env, "STOP_LOSS_PCT", DEFAULT_STOP_LOSS_PCT),
+        exit_order_type=exit_order_type,
+        stop_order_type=stop_order_type,
+        entropy_window=_int(env, "ENTROPY_WINDOW", DEFAULT_ENTROPY_WINDOW),
+        entropy_bins=_int(env, "ENTROPY_BINS", DEFAULT_ENTROPY_BINS),
+        entropy_high=_dec(env, "ENTROPY_HIGH", DEFAULT_ENTROPY_HIGH),
+        entropy_low=_dec(env, "ENTROPY_LOW", DEFAULT_ENTROPY_LOW),
+        pnl_score_scale_jpy=_dec(env, "PNL_SCORE_SCALE_JPY", DEFAULT_PNL_SCORE_SCALE),
+        require_reconcile=_bool(env, "REQUIRE_RECONCILE", DEFAULT_REQUIRE_RECONCILE),
+        enable_intrabar_exits=_bool(env, "ENABLE_INTRABAR_EXITS", DEFAULT_INTRABAR_EXITS),
+        enable_entropy_buy_gate=_bool(env, "ENABLE_ENTROPY_BUY_GATE", DEFAULT_ENTROPY_BUY_GATE),
+        enable_pnl_buy_gate=_bool(env, "ENABLE_PNL_BUY_GATE", DEFAULT_PNL_BUY_GATE),
+        enable_fee_aware_entry=_bool(env, "ENABLE_FEE_AWARE_ENTRY", DEFAULT_FEE_AWARE_ENTRY),
+        emergency_flatten_on_kill=_bool(
+            env, "EMERGENCY_FLATTEN_ON_KILL", DEFAULT_EMERGENCY_FLATTEN_ON_KILL
+        ),
     )
     if live_trading and not cfg.has_keys:
         raise ConfigError("LIVE_TRADING requires BITBANK_API_KEY and BITBANK_API_SECRET")
@@ -342,4 +398,8 @@ def load_config(
         raise ConfigError("MA periods must be >= 2")
     if cfg.long_ma_period < cfg.short_ma_period:
         raise ConfigError("LONG_MA_PERIOD must be >= SHORT_MA_PERIOD")
+    if cfg.entropy_window < 2 or cfg.entropy_bins < 2:
+        raise ConfigError("ENTROPY_WINDOW and ENTROPY_BINS must be >= 2")
+    if cfg.stop_loss_pct < ZERO:
+        raise ConfigError("STOP_LOSS_PCT must be >= 0")
     return cfg

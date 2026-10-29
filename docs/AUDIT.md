@@ -58,12 +58,29 @@ bitFlyer, Coincheck, and GMO are not imported and are not executed.
     until the remainder fills.
 11. **Kill file.** `data/KILL` blocks sells as well as buys.
 
+## Execution hardening (this PR)
+
+| Gap | Fix |
+| --- | --- |
+| SELL / TP only on closed 1h bars | `ENABLE_INTRABAR_EXITS` checks ticker/WS mark every poll for TP + `STOP_LOSS_PCT` |
+| No stop / emergency flatten | `STOP` signal + `STOP_ORDER_TYPE=market`; `EMERGENCY_FLATTEN_ON_KILL` |
+| Cancel ignored → stuck pending | `_fill_status` honors `CANCELED_*`; pending cleared |
+| Partial fill `delta * cum_avg` | `PendingOrder.filled_notional`; incremental notional = cum − prior |
+| PnL ignores fees | `fees_paid` on position; realized PnL deducts buy+sell fees |
+| No startup exchange sync | `reconciliation.py` + adopt/clear stale pending; live blocked if `REQUIRE_RECONCILE` fails |
+| Fee vs tiny TP | `ENABLE_FEE_AWARE_ENTRY` blocks buys whose TP cannot clear round-trip fees |
+| Granville + daily PnL | Both shown; soft PnL/entropy BUY gates optional (off by default) |
+
+Docker: `Dockerfile` + `docker-compose.yml`. VPS unit: `deploy/bitbank-bot.service`.
+Syntax sweep: `python3 scripts/ast_audit.py`.
+
 ## What this bot does not do
 
 - Does not SSH to a VPS or install systemd for you.
-- Does not implement quantum / multi-exchange / guaranteed fills or profits.
+- Does not guarantee fills, profits, or “quantum” certainty (entropy is a regime meter only).
 - Does not log API keys or secrets (`safe_dict` / `Config.__repr__`).
 - Does not place a live order unless both flags and keys are set.
+- Cannot complete Bitbank LIVE fills in CI/Cloud Agent without your API keys.
 
 If keys were pasted into chat, rotate them in the bitbank console. Do not put
 them in git, screenshots, or logs.

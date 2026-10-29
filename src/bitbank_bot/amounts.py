@@ -100,13 +100,14 @@ def plan_sell(
     price: Decimal,
     cfg: Config,
     risk: RiskManager,
+    allow_kill_flatten: bool = False,
 ) -> AmountPlan:
     available_jpy = D(available_jpy)
     available_btc = D(available_btc)
     price = D(price)
     target_jpy = available_btc * price
     raw = available_btc * cfg.sell_safety_factor
-    decision = risk.check_sell(raw)
+    decision = risk.check_sell(raw, allow_kill_flatten=allow_kill_flatten)
     raw = min(raw, decision.capped_btc) if decision.allowed else ZERO
     amount = truncate(raw, cfg.amount_precision)
     leftover = available_btc - amount
@@ -168,6 +169,7 @@ class PositionSizer:
         available_jpy: Decimal,
         available_btc: Decimal,
         price: Decimal,
+        allow_kill_flatten: bool = False,
     ) -> AmountPlan:
         return plan_sell(
             available_jpy=available_jpy,
@@ -175,4 +177,5 @@ class PositionSizer:
             price=price,
             cfg=self.cfg,
             risk=self.risk,
+            allow_kill_flatten=allow_kill_flatten,
         )

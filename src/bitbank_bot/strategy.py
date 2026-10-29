@@ -18,7 +18,7 @@ from bitbank_bot.indicators import (
     ma_trend,
     moving_average,
 )
-from bitbank_bot.money import ONE, pct_offset
+from bitbank_bot.money import ONE, ZERO, pct_offset
 
 
 @dataclass
@@ -52,6 +52,7 @@ class Position:
     entry_candle_ts: int
     actual_execution_jpy: Decimal
     kind: str
+    fees_paid: Decimal = ZERO
 
 
 @dataclass
@@ -272,19 +273,39 @@ class Strategy:
             return buy
         return Signal.hold("no_buy_setup")
 
+    def evaluate_mark(self, mark: Decimal, position: Position) -> Signal:
+        """Intrabar TP / stop using live mark (ticker/WS). Does not advance machines."""
+        return self._exit_on_price(mark, position, source="mark")
+
     def _tp_signal(self, snap: MarketSnapshot, position: Position) -> Signal:
+        return self._exit_on_price(snap.close, position, source="close")
+
+    def _exit_on_price(self, price: Decimal, position: Position, *, source: str) -> Signal:
         target = pct_offset(position.average_price, position.tp_pct)
-        if snap.close >= target:
+        if price >= target:
             return Signal(
                 kind="TP",
                 side="sell",
                 tp_pct=position.tp_pct,
                 reason=(
-                    f"take profit close={snap.close} >= "
+                    f"take profit {source}={price} >= "
                     f"{target} (fill_avg={position.average_price} + {position.tp_pct})"
                 ),
             )
-        return Signal.hold("tp_not_hit")
+        stop_pct = self.cfg.stop_loss_pct
+        if stop_pct > ZERO:
+            stop = pct_offset(position.average_price, -stop_pct)
+            if price <= stop:
+                return Signal(
+                    kind="STOP",
+                    side="sell",
+                    tp_pct=None,
+                    reason=(
+                        f"stop loss {source}={price} <= "
+                        f"{stop} (fill_avg={position.average_price} - {stop_pct})"
+                    ),
+                )
+        return Signal.hold("tp_not_hit" if source == "close" else "mark_no_exit")
 
     def _sell_signal(self, snap: MarketSnapshot) -> Signal:
         if self._sell1:

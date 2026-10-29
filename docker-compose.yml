@@ -1,0 +1,20 @@
+services:
+  bitbank-bot:
+    build: .
+    container_name: bitbank-btc-jpy-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PYTHONPATH: /app/src
+      STATE_PATH: /app/data/state.json
+      LOCK_PATH: /app/data/bot.lock
+      KILL_SWITCH_PATH: /app/data/KILL
+      LOG_DIR: /app/logs
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./.env:/app/.env:ro
+    # Entrypoint runs as root briefly to chown mounts, then drops to uid 10001.
+    # Keep DRY_RUN=true until Bitbank keys + LIVE_TRADING are verified.
+    # docker compose up -d
