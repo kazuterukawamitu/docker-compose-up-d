@@ -6,6 +6,7 @@ cd "$(dirname "$0")/.."
 cp -n .env.example .env || true
 mkdir -p data logs
 if command -v docker >/dev/null 2>&1; then
+  chmod -R a+w data logs
   docker compose up -d --build
   docker compose logs --tail=50 bitbank-bot
 else

@@ -289,7 +289,12 @@ class Engine:
             self.strategy_evaluations += 1
             slog("STRATEGY", "signal", kind=signal.kind, reason=signal.reason, side=signal.side)
             if heartbeat and execute and state.position and not state.pending:
+                if self._reconcile_blocked and self.cfg.require_reconcile and self.cfg.may_place_live_orders:
+                    self.last_block_reason = f"reconcile_{state.reconcile_reason}"
+                    signal = Signal.hold(self.last_block_reason)
+                    continue
                 mark = self._mark_price(snap.close)
+                exit_attempted = False
                 if self.cfg.enable_intrabar_exits:
                     exit_sig = strategy.evaluate_mark(mark, state.position)
                     if exit_sig.side == "sell":
@@ -302,14 +307,17 @@ class Engine:
                         )
                         signal = exit_sig
                         self._execute(exit_sig, mark, snap.index, snap.timestamp_ms, state)
+                        exit_attempted = True
+                        if persist:
+                            save_state(self.cfg.state_path, state)
+                if not exit_attempted or state.position is not None:
+                    if self._maybe_emergency_flatten(state, mark, snap):
+                        signal = Signal("EMERGENCY_STOP", "sell", None, "kill_flatten")
                         if persist:
                             save_state(self.cfg.state_path, state)
                         self.last_signal = signal
                         return signal
-                if self._maybe_emergency_flatten(state, mark, snap):
-                    signal = Signal("EMERGENCY_STOP", "sell", None, "kill_flatten")
-                    if persist:
-                        save_state(self.cfg.state_path, state)
+                if exit_attempted:
                     self.last_signal = signal
                     return signal
             if not execute or heartbeat:
@@ -580,6 +588,14 @@ class Engine:
         delta = result.executed_amount - pending.filled_amount
         delta_notional = cum_notional - pending.filled_notional
         if delta <= ZERO and result.reason == "canceled":
+            state.pending = None
+            return
+        if delta <= ZERO and result.reason == "canceled_partial":
+            slog(
+                "ORDER_STATUS",
+                "pending canceled_partial; clearing",
+                order_id=pending.order_id,
+            )
             state.pending = None
             return
         if delta <= ZERO:
@@ -1024,12 +1040,20 @@ class Engine:
         state.reconcile_ok = report.ok
         state.reconcile_reason = report.reason
         if report.reason == "pending_without_exchange_order":
-            slog("ORDER_STATUS", "clearing stale pending absent on exchange")
-            state.pending = None
-            state.reconcile_ok = True
-            state.reconcile_reason = "cleared_stale_pending"
+            slog("ORDER_STATUS", "pending absent on exchange; polling to check fill status")
+            self._poll_pending(state)
+            if state.pending is None:
+                state.reconcile_ok = True
+                state.reconcile_reason = "cleared_stale_pending"
+            else:
+                slog("ORDER_STATUS", "pending still present after poll; keeping for next cycle")
+                state.reconcile_ok = True
+                state.reconcile_reason = "pending_polled_on_reconcile"
         elif report.reason == "exchange_open_order_adopted" and report.adopted_order_id:
             row = active[0]
+            executed = D(row.get("executed_amount") or 0)
+            avg_price = D(row.get("average_price") or 0)
+            filled_notional = executed * avg_price if avg_price > ZERO else ZERO
             state.pending = PendingOrder(
                 order_id=report.adopted_order_id,
                 side=str(row.get("side") or ""),
@@ -1038,8 +1062,8 @@ class Engine:
                 index=0,
                 timestamp_ms=0,
                 amount=D(row.get("start_amount") or row.get("remaining_amount") or 0),
-                filled_amount=D(row.get("executed_amount") or 0),
-                filled_notional=ZERO,
+                filled_amount=executed,
+                filled_notional=filled_notional,
             )
             state.reconcile_ok = True
         elif (
@@ -1047,7 +1071,15 @@ class Engine:
             and state.position is None
             and btc >= self.cfg.min_amount_btc
         ):
-            mark = self._mark_price(D("1"))
+            try:
+                ticker = rest.get_ticker(self.cfg.pair)
+                mark_price = D(ticker.get("last") or 0)
+            except Exception:
+                mark_price = ZERO
+            if mark_price <= ZERO:
+                self._refresh_public_last(rest)
+                mark_price = self._mark_price(ZERO)
+            mark = mark_price
             adopted = adopt_position_from_exchange(
                 btc,
                 mark,
