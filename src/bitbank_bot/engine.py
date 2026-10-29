@@ -924,6 +924,20 @@ class Engine:
                 # Adopt open sell limits into pending so we do not double-sell.
                 if side == "sell":
                     if state.pending is None and start_amount > self.cfg.amount_precision:
+                        # Apply already-filled portion to position/PnL before tracking remainder
+                        if executed > ZERO and average > ZERO and state.position:
+                            pos_amt = state.position.amount
+                            if pos_amt > ZERO and executed <= pos_amt:
+                                fraction = executed / pos_amt
+                                cost = state.position.actual_execution_jpy * fraction
+                                buy_fee = state.position.fee_jpy * fraction
+                                actual_jpy = executed * average
+                                state.risk.record_realized_pnl(actual_jpy - cost - buy_fee)
+                                state.position.amount = pos_amt - executed
+                                state.position.actual_execution_jpy -= cost
+                                state.position.fee_jpy -= buy_fee
+                                if state.position.amount < self.cfg.min_amount_btc:
+                                    state.position = None
                         state.pending = PendingOrder(
                             order_id=order_id,
                             side=side,
@@ -943,7 +957,6 @@ class Engine:
                             filled=str(executed),
                         )
                         adopted_active = True
-                        break
                     continue
                 if executed <= ZERO or average <= ZERO:
                     continue
