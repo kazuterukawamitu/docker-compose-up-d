@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Bitbank BTC/JPY DRY_RUN bot — standard library only.
 
-This file is the program that must run on a Mac with only python3.
-It never places orders. It never needs pip, venv, httpx, or dotenv.
+Paper-trades Granville setups with ticker stop/take-profit, Shannon entropy,
+and fee-aware daily PnL. Never calls Bitbank create_order. No pip needed.
 
     python3 run.py
 
@@ -13,20 +13,23 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import ssl
 import sys
 import time
-import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
-from typing import Any
+from typing import Any, Sequence
 
 PAIR = "btc_jpy"
 PUBLIC = "https://public.bitbank.cc"
 MA_PERIOD = 20
 SLOPE = Decimal("0.0005")
 BUY1_TP = Decimal("0.03")
+BUY2_TP = Decimal("0.05")
+STOP_LOSS_PCT = Decimal("0.02")
+TAKER_FEE = Decimal("0.0012")
 MIN_BTC = Decimal("0.0001")
 PAPER_JPY = Decimal("100000")
 POLL_SEC = 5
@@ -146,12 +149,53 @@ def trend_of(ma: Decimal, prev: Decimal) -> str:
     return "FLAT"
 
 
-def decide(
+def shannon_entropy(closes: Sequence[Decimal], bins: int = 8) -> Decimal:
+    if bins < 2 or len(closes) < 3:
+        return Decimal("0")
+    returns: list[float] = []
+    for prev, close in zip(closes, closes[1:]):
+        if prev == 0:
+            continue
+        returns.append(float((close - prev) / prev))
+    if len(returns) < 2:
+        return Decimal("0")
+    lo, hi = -0.02, 0.02
+    width = (hi - lo) / bins
+    counts = [0] * bins
+    for value in returns:
+        if value <= lo:
+            index = 0
+        elif value >= hi:
+            index = bins - 1
+        else:
+            index = min(bins - 1, int((value - lo) / width))
+        counts[index] += 1
+    total = sum(counts)
+    if total <= 0:
+        return Decimal("0")
+    entropy = 0.0
+    for count in counts:
+        if count <= 0:
+            continue
+        probability = count / total
+        entropy -= probability * math.log2(probability)
+    scale = math.log2(bins)
+    if scale <= 0:
+        return Decimal("0")
+    return D(str(entropy / scale))
+
+
+def required_edge(fee_rate: Decimal, entropy: Decimal) -> Decimal:
+    return (fee_rate * 2) * (Decimal("1") + entropy)
+
+
+def decide_bar(
     closes: list[Decimal],
     in_position: bool,
     entry: Decimal,
     tp: Decimal,
 ) -> tuple[str, str]:
+    """Granville / MA rules on confirmed hourly closes."""
     if len(closes) < MA_PERIOD + 1:
         return "HOLD", "not_enough_candles"
     ma = sma(closes, MA_PERIOD)
@@ -165,9 +209,6 @@ def decide(
     crossed_up = prev_close <= prev_ma and close > ma
     crossed_down = prev_close >= prev_ma and close < ma
     if in_position:
-        target = entry * (Decimal("1") + tp)
-        if close >= target:
-            return "TP", f"take_profit {commas(close)} >= {commas(target)}"
         if trend == "DOWN" and crossed_up:
             return "SELL3", "downtrend_ma_cross_up"
         if crossed_down and close < prev_close:
@@ -178,6 +219,33 @@ def decide(
     if trend == "UP" and crossed_down:
         return "BUY2", "uptrend_cross_down"
     return "HOLD", "no_buy_setup"
+
+
+def decide_ticker(
+    *,
+    in_position: bool,
+    entry: Decimal,
+    amount: Decimal,
+    tp: Decimal,
+    mark: Decimal,
+    daily_pnl: Decimal,
+    fee_paid: Decimal,
+) -> tuple[str, str] | None:
+    """Protective exits from the live last price — do not wait for the next hour."""
+    if not in_position or amount <= 0 or entry <= 0 or mark <= 0:
+        return None
+    stop_px = entry * (Decimal("1") - STOP_LOSS_PCT)
+    if STOP_LOSS_PCT > 0 and mark <= stop_px:
+        return "STOP", f"stop mark={commas(mark)} <= {commas(stop_px)}"
+    target = entry * (Decimal("1") + tp)
+    if mark >= target:
+        proceeds = amount * mark
+        exit_fee = proceeds * TAKER_FEE
+        open_pnl = proceeds - exit_fee - (amount * entry) - fee_paid
+        if open_pnl <= 0:
+            return None
+        return "TP", f"take_profit mark={commas(mark)} >= {commas(target)} net={commas(open_pnl)}"
+    return None
 
 
 def screen(
@@ -194,6 +262,9 @@ def screen(
     in_position: bool,
     amount: Decimal,
     entry: Decimal,
+    daily_pnl: Decimal,
+    unrealized: Decimal,
+    entropy: Decimal,
 ) -> str:
     pos = "なし"
     if in_position:
@@ -210,10 +281,12 @@ def screen(
             f"  移動平均     {commas(ma)}    トレンド {trend}",
             f"  シグナル     {signal}    {reason}",
             f"  建玉         {pos}",
+            f"  日時損益     {commas(daily_pnl)} JPY    評価 {commas(unrealized)}",
+            f"  エントロピー {entropy}",
             f"  監視         {watchdog}",
             f"  エラー       {error or 'なし'}",
             bar,
-            "  HOLD/待機は正常です。このプログラムは注文しません。Ctrl-C で停止",
+            "  HOLD/待機は正常です。紙トレードのみ（Bitbank create_order は呼ばない）。Ctrl-C で停止",
             f"  {jst}",
             bar,
         ]
@@ -240,9 +313,15 @@ def main(argv: list[str] | None = None) -> int:
     in_position = False
     entry = Decimal("0")
     amount = Decimal("0")
+    fee_paid = Decimal("0")
     tp = BUY1_TP
+    daily_pnl = Decimal("0")
     last_error = ""
-    print("Bitbank BTC/JPY DRY_RUN を起動します（実注文なし / pip不要）", flush=True)
+    print(
+        "Bitbank BTC/JPY DRY_RUN を起動します"
+        "（紙トレード / ティッカー利確・損切り / pip不要）",
+        flush=True,
+    )
     while True:
         try:
             rows = synthetic_closes() if args.synthetic else fetch_hourly_closes()
@@ -253,30 +332,65 @@ def main(argv: list[str] | None = None) -> int:
             ma = sma(closes, MA_PERIOD)
             prev_ma = sma(closes[:-1], MA_PERIOD) if len(closes) > MA_PERIOD else None
             trend = trend_of(ma, prev_ma) if ma is not None and prev_ma is not None else "-"
-            signal, reason = decide(closes, in_position, entry, tp)
+            entropy = shannon_entropy(closes)
             last = ticker.get("last") or (str(closes[-1]) if closes else "-")
-            if signal == "BUY1" or signal == "BUY2":
-                price = D(last)
-                if price > 0:
-                    raw = (PAPER_JPY * Decimal("0.95")) / price
-                    amount = (raw // MIN_BTC) * MIN_BTC
-                    if amount >= MIN_BTC:
+            mark = D(last) if last not in {"", "-"} else (closes[-1] if closes else Decimal("0"))
+
+            signal, reason = decide_bar(closes, in_position, entry, tp)
+            protective = decide_ticker(
+                in_position=in_position,
+                entry=entry,
+                amount=amount,
+                tp=tp,
+                mark=mark,
+                daily_pnl=daily_pnl,
+                fee_paid=fee_paid,
+            )
+            if protective is not None:
+                signal, reason = protective
+
+            if signal in {"BUY1", "BUY2"}:
+                edge = required_edge(TAKER_FEE, entropy)
+                need = BUY1_TP if signal == "BUY1" else BUY2_TP
+                if need <= edge:
+                    signal, reason = "HOLD", "fee_exceeds_edge"
+                elif mark > 0:
+                    raw = (PAPER_JPY * Decimal("0.95")) / mark
+                    sized = (raw // MIN_BTC) * MIN_BTC
+                    if sized >= MIN_BTC:
                         in_position = True
-                        entry = price
-                        tp = BUY1_TP
+                        entry = mark
+                        amount = sized
+                        fee_paid = sized * mark * TAKER_FEE
+                        tp = need
                         print(
-                            f"ORDER_INTENT paper {signal} {amount} BTC @ {commas(price)} "
-                            "(DRY_RUN: Bitbank create_order は呼ばない)",
+                            f"ORDER_INTENT paper {signal} {amount} BTC @ {commas(mark)} "
+                            f"fee~{commas(fee_paid)} (DRY_RUN: Bitbank create_order は呼ばない)",
                             flush=True,
                         )
-            elif signal in {"SELL2", "SELL3", "TP"} and in_position:
+            elif signal in {"SELL2", "SELL3", "TP", "STOP"} and in_position:
+                proceeds = amount * mark
+                exit_fee = proceeds * TAKER_FEE
+                cost = amount * entry
+                pnl = proceeds - exit_fee - cost - fee_paid
+                daily_pnl += pnl
                 print(
-                    f"ORDER_INTENT paper {signal} flatten {amount} BTC "
+                    f"ORDER_INTENT paper {signal} flatten {amount} BTC @ {commas(mark)} "
+                    f"pnl={commas(pnl)} daily={commas(daily_pnl)} "
                     "(DRY_RUN: Bitbank create_order は呼ばない)",
                     flush=True,
                 )
                 in_position = False
                 amount = Decimal("0")
+                entry = Decimal("0")
+                fee_paid = Decimal("0")
+
+            unrealized = Decimal("0")
+            if in_position and mark > 0:
+                proceeds = amount * mark
+                exit_fee = proceeds * TAKER_FEE
+                unrealized = proceeds - exit_fee - (amount * entry) - fee_paid
+
             uptime = int(time.monotonic() - started)
             watchdog = "LONG_WAIT" if uptime >= LONG_WAIT_SEC else "NORMAL WAIT"
             text = screen(
@@ -292,6 +406,9 @@ def main(argv: list[str] | None = None) -> int:
                 in_position=in_position,
                 amount=amount,
                 entry=entry,
+                daily_pnl=daily_pnl,
+                unrealized=unrealized,
+                entropy=entropy,
             )
             if use_screen:
                 sys.stdout.write(CLEAR + text + "\n")

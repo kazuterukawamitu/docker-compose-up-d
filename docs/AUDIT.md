@@ -21,7 +21,10 @@ runnable bot lives in `src/bitbank_bot/`. This branch is Bitbank `btc_jpy` only.
 
 `run.py` is a stdlib-only DRY_RUN 取引画面. It is the program that
 runs with plain `python3` when pip/httpx/the feature-branch checkout
-are missing. It never calls `create_order`.
+are missing. It never calls `create_order`. Paper mode mirrors the
+patched exits: ticker STOP/TP, Shannon entropy, fee-aware daily PnL.
+Use `scripts/gap_agent.py` and `scripts/bug_scan.py` to re-verify the
+six production gaps after edits.
 
 bitFlyer, Coincheck, and GMO are not imported and are not executed.
 
