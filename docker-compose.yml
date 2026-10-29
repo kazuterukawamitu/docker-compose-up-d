@@ -15,5 +15,6 @@ services:
       - ./data:/app/data
       - ./logs:/app/logs
       - ./.env:/app/.env:ro
+    # Entrypoint runs as root briefly to chown mounts, then drops to uid 10001.
     # Keep DRY_RUN=true until Bitbank keys + LIVE_TRADING are verified.
     # docker compose up -d

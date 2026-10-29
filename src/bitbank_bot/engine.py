@@ -294,8 +294,15 @@ class Engine:
                     signal = Signal.hold(self.last_block_reason)
                     continue
                 mark = self._mark_price(snap.close)
-                exit_attempted = False
-                if self.cfg.enable_intrabar_exits:
+                # Kill flatten before mark TP/STOP: check_sell blocks TP under kill,
+                # so flatten must not wait behind a no-op mark exit.
+                if self._maybe_emergency_flatten(state, mark, snap):
+                    signal = Signal("EMERGENCY_STOP", "sell", None, "kill_flatten")
+                    if persist:
+                        save_state(self.cfg.state_path, state)
+                    self.last_signal = signal
+                    return signal
+                if self.cfg.enable_intrabar_exits and state.position is not None:
                     exit_sig = strategy.evaluate_mark(mark, state.position)
                     if exit_sig.side == "sell":
                         slog(
@@ -307,19 +314,10 @@ class Engine:
                         )
                         signal = exit_sig
                         self._execute(exit_sig, mark, snap.index, snap.timestamp_ms, state)
-                        exit_attempted = True
-                        if persist:
-                            save_state(self.cfg.state_path, state)
-                if not exit_attempted or state.position is not None:
-                    if self._maybe_emergency_flatten(state, mark, snap):
-                        signal = Signal("EMERGENCY_STOP", "sell", None, "kill_flatten")
                         if persist:
                             save_state(self.cfg.state_path, state)
                         self.last_signal = signal
                         return signal
-                if exit_attempted:
-                    self.last_signal = signal
-                    return signal
             if not execute or heartbeat:
                 if heartbeat:
                     slog(
@@ -482,6 +480,20 @@ class Engine:
         ts: int,
         state: BotState,
     ) -> None:
+        # Defense in depth: every live path (closed-bar, intrabar, kill) must honor reconcile.
+        if (
+            self._reconcile_blocked
+            and self.cfg.require_reconcile
+            and self.cfg.may_place_live_orders
+        ):
+            self.last_block_reason = f"reconcile_{state.reconcile_reason}"
+            slog(
+                "TRADE_BLOCKED",
+                "EXECUTION_BLOCKED",
+                reason=self.last_block_reason,
+                kind=signal.kind,
+            )
+            return
         rest = self._rest()
         if self.ws is not None and not self.ws.is_stale() and self.ws.last_price():
             price = self.ws.last_price() or price
@@ -562,18 +574,20 @@ class Engine:
                 order_id=pending.order_id,
             )
             return
-        if result.reason == "canceled" and result.executed_amount <= pending.filled_amount:
+        # Terminal cancel with no new size: clear pending so TP/stop/kill can proceed.
+        if (
+            result.reason in {"canceled", "canceled_partial"}
+            and result.executed_amount <= pending.filled_amount
+        ):
             slog(
                 "ORDER_STATUS",
                 "pending canceled; clearing",
                 order_id=pending.order_id,
+                reason=result.reason,
             )
             state.pending = None
             return
-        if (
-            result.executed_amount <= pending.filled_amount
-            and result.reason not in {"canceled", "canceled_partial"}
-        ):
+        if result.executed_amount <= pending.filled_amount:
             slog(
                 "ORDER_STATUS",
                 "pending still unfilled; skip new orders",
@@ -587,17 +601,6 @@ class Engine:
         )
         delta = result.executed_amount - pending.filled_amount
         delta_notional = cum_notional - pending.filled_notional
-        if delta <= ZERO and result.reason == "canceled":
-            state.pending = None
-            return
-        if delta <= ZERO and result.reason == "canceled_partial":
-            slog(
-                "ORDER_STATUS",
-                "pending canceled_partial; clearing",
-                order_id=pending.order_id,
-            )
-            state.pending = None
-            return
         if delta <= ZERO:
             slog(
                 "ORDER_STATUS",
@@ -1042,71 +1045,197 @@ class Engine:
         if report.reason == "pending_without_exchange_order":
             slog("ORDER_STATUS", "pending absent on exchange; polling to check fill status")
             self._poll_pending(state)
-            if state.pending is None:
-                state.reconcile_ok = True
-                state.reconcile_reason = "cleared_stale_pending"
+            # Never treat "absent from active list" as cancel-only: fills must be booked
+            # via get_order/_poll_pending first, then re-check BTC vs exchange.
+            try:
+                jpy, btc = self._balances(rest, state)
+                active = rest.get_active_orders(self.cfg.pair)
+            except Exception as exc:
+                slog("RECONCILE", "post-poll reconcile failed", error=type(exc).__name__)
+                state.reconcile_ok = False
+                state.reconcile_reason = "reconcile_fetch_failed"
             else:
-                slog("ORDER_STATUS", "pending still present after poll; keeping for next cycle")
-                state.reconcile_ok = True
-                state.reconcile_reason = "pending_polled_on_reconcile"
-        elif report.reason == "exchange_open_order_adopted" and report.adopted_order_id:
-            row = active[0]
-            executed = D(row.get("executed_amount") or 0)
-            avg_price = D(row.get("average_price") or 0)
-            filled_notional = executed * avg_price if avg_price > ZERO else ZERO
-            state.pending = PendingOrder(
-                order_id=report.adopted_order_id,
-                side=str(row.get("side") or ""),
-                kind="RECONCILED",
-                tp_pct=None,
-                index=0,
-                timestamp_ms=0,
-                amount=D(row.get("start_amount") or row.get("remaining_amount") or 0),
-                filled_amount=executed,
-                filled_notional=filled_notional,
+                bot_btc = state.position.amount if state.position else ZERO
+                report = reconcile(
+                    exchange_jpy=jpy,
+                    exchange_btc=btc,
+                    open_orders=active,
+                    bot_position_btc=bot_btc,
+                    pending=state.pending is not None,
+                    min_amount=self.cfg.min_amount_btc,
+                )
+                state.reconcile_ok = report.ok
+                state.reconcile_reason = (
+                    "cleared_stale_pending"
+                    if state.pending is None and report.ok
+                    else report.reason
+                )
+        if report.reason == "exchange_open_order_adopted" and report.adopted_order_id:
+            row = next(
+                (
+                    item
+                    for item in active
+                    if str(item.get("order_id") or "") == report.adopted_order_id
+                ),
+                active[0] if active else {},
             )
+            self._adopt_exchange_order(state, row, jpy=jpy, btc=btc)
             state.reconcile_ok = True
+            state.reconcile_reason = "exchange_open_order_adopted"
         elif (
             report.reason == "btc_position_mismatch"
             and state.position is None
             and btc >= self.cfg.min_amount_btc
         ):
-            try:
-                ticker = rest.get_ticker(self.cfg.pair)
-                mark_price = D(ticker.get("last") or 0)
-            except Exception:
-                mark_price = ZERO
+            mark_price = self._safe_mark_for_adopt(rest)
             if mark_price <= ZERO:
-                self._refresh_public_last(rest)
-                mark_price = self._mark_price(ZERO)
-            mark = mark_price
-            adopted = adopt_position_from_exchange(
-                btc,
-                mark,
-                min_amount=self.cfg.min_amount_btc,
-                default_tp=self.cfg.buy1_tp,
-            )
-            if adopted:
-                amount, price = adopted
-                state.position = Position(
-                    amount=amount,
-                    average_price=price,
-                    tp_pct=self.cfg.buy1_tp,
-                    entry_candle_index=0,
-                    entry_candle_ts=0,
-                    actual_execution_jpy=amount * price,
-                    kind="RECONCILED",
-                    fees_paid=ZERO,
+                slog(
+                    "RECONCILE",
+                    "refuse adopt without real mark; leaving blocked",
+                    btc=str(btc),
                 )
-                state.reconcile_ok = True
-                state.reconcile_reason = "adopted_exchange_btc"
-                slog("POSITION_RECONCILED", "adopted exchange BTC", amount=str(amount))
+                state.reconcile_ok = False
+                state.reconcile_reason = "adopt_mark_unavailable"
+            else:
+                adopted = adopt_position_from_exchange(
+                    btc,
+                    mark_price,
+                    min_amount=self.cfg.min_amount_btc,
+                    default_tp=self.cfg.buy1_tp,
+                )
+                if adopted:
+                    amount, price = adopted
+                    state.position = Position(
+                        amount=amount,
+                        average_price=price,
+                        tp_pct=self.cfg.buy1_tp,
+                        entry_candle_index=0,
+                        entry_candle_ts=0,
+                        actual_execution_jpy=amount * price,
+                        kind="RECONCILED",
+                        fees_paid=ZERO,
+                    )
+                    state.reconcile_ok = True
+                    state.reconcile_reason = "adopted_exchange_btc"
+                    slog(
+                        "POSITION_RECONCILED",
+                        "adopted exchange BTC",
+                        amount=str(amount),
+                        mark=str(price),
+                    )
         self._reconcile_blocked = bool(
             self.cfg.require_reconcile
             and self.cfg.may_place_live_orders
             and not state.reconcile_ok
         )
         save_state(self.cfg.state_path, state)
+
+    def _safe_mark_for_adopt(self, rest: RestClient) -> Decimal:
+        """Real ticker/WS mark only — never invent a 1 JPY placeholder cost basis."""
+        try:
+            ticker = rest.get_ticker(self.cfg.pair)
+            mark_price = D(ticker.get("last") or 0)
+            if mark_price > ZERO:
+                self.last_public_last = str(mark_price)
+                return mark_price
+        except Exception as exc:
+            slog("RECONCILE", "ticker mark failed", error=type(exc).__name__)
+        self._refresh_public_last(rest)
+        mark_price = self._mark_price(ZERO)
+        return mark_price if mark_price > ZERO else ZERO
+
+    def _adopt_exchange_order(
+        self,
+        state: BotState,
+        row: dict[str, Any],
+        *,
+        jpy: Decimal,
+        btc: Decimal,
+    ) -> None:
+        """Track an open exchange order and book any already-executed size into position."""
+        order_id = str(row.get("order_id") or "")
+        side = str(row.get("side") or "")
+        executed = D(row.get("executed_amount") or 0)
+        remaining = D(row.get("remaining_amount") or 0)
+        start = D(row.get("start_amount") or 0)
+        if start <= ZERO:
+            start = executed + remaining
+        amount = start if start > ZERO else executed
+        avg_price = D(row.get("average_price") or 0)
+        filled_notional = executed * avg_price if avg_price > ZERO else ZERO
+        still_open = remaining > ZERO or (amount > executed and amount > ZERO)
+        state.pending = PendingOrder(
+            order_id=order_id,
+            side=side,
+            kind="RECONCILED",
+            tp_pct=self.cfg.buy1_tp if side == "buy" else None,
+            index=0,
+            timestamp_ms=0,
+            amount=amount if amount > ZERO else executed,
+            filled_amount=ZERO,
+            filled_notional=ZERO,
+        )
+        if executed <= ZERO or avg_price <= ZERO or side not in {"buy", "sell"}:
+            state.pending.filled_amount = executed
+            state.pending.filled_notional = filled_notional
+            return
+        # Book the already-filled slice so later poll deltas stay incremental.
+        fill = OrderResult(
+            True,
+            "partial_fill" if still_open else "fill",
+            False,
+            False,
+            order_id,
+            str(row.get("status") or ""),
+            executed,
+            avg_price,
+            filled_notional,
+            row,
+            ZERO,
+        )
+        plan = AmountPlan(
+            side=side,
+            amount=amount if amount > ZERO else executed,
+            price=avg_price,
+            available_jpy=jpy,
+            available_btc=btc,
+            target_jpy=ZERO,
+            planned_order_jpy=ZERO,
+            actual_execution_jpy=filled_notional,
+            actual_balance_jpy=jpy,
+            actual_balance_btc=btc,
+            ok=True,
+            reason="reconcile_adopt",
+        )
+        signal = Signal(
+            "RECONCILED",
+            side,
+            self.cfg.buy1_tp if side == "buy" else None,
+            "adopted_fill",
+        )
+        self._apply_fill(signal, plan, fill, 0, 0, state, jpy, btc)
+        if still_open:
+            state.pending = PendingOrder(
+                order_id=order_id,
+                side=side,
+                kind="RECONCILED",
+                tp_pct=self.cfg.buy1_tp if side == "buy" else None,
+                index=0,
+                timestamp_ms=0,
+                amount=amount,
+                filled_amount=executed,
+                filled_notional=filled_notional,
+            )
+        else:
+            state.pending = None
+        slog(
+            "ORDER_STATUS",
+            "adopted exchange open order",
+            order_id=order_id,
+            side=side,
+            executed=str(executed),
+            filled_notional=str(filled_notional),
+        )
 
     def _paint(self, state: BotState, signal: Signal, last: str = "-") -> None:
         if self.screen is None:

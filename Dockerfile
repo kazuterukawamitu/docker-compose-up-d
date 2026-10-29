@@ -19,9 +19,10 @@ COPY scripts ./scripts
 
 RUN useradd --create-home --uid 10001 bot \
     && mkdir -p /app/data /app/logs \
-    && chown -R bot:bot /app
+    && chown -R bot:bot /app \
+    && chmod +x /app/deploy/docker-entrypoint.sh /app/start.sh
 
-USER bot
-
+# Stay root in the image so the entrypoint can chown bind mounts, then drop to bot.
+ENTRYPOINT ["/app/deploy/docker-entrypoint.sh"]
 # Default stays DRY_RUN. Live needs DRY_RUN=false LIVE_TRADING=true and keys via env.
 CMD ["python", "-m", "bitbank_bot"]
