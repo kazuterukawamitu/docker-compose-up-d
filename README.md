@@ -74,15 +74,28 @@ Granville / README MA rules decide BUY1–4 and pattern SELL1–4. Daily PnL and
 
 State-machine mapping: [docs/STRATEGY.md](docs/STRATEGY.md). Audit: [docs/AUDIT.md](docs/AUDIT.md).
 
-## Tests / archive (tar.gz, not zip)
+## Tests / deliverable
 
 ```bash
 PYTHONPATH=src python3 -m pytest -q
 python3 run.py --once --synthetic --no-screen
 python3 scripts/gap_agent.py
-bash scripts/make_archive.sh              # → .tar.gz
-FORMAT=tar.xz bash scripts/make_archive.sh
+bash scripts/make_zip.sh                  # → .zip (送付用)
+FORMAT=tar.gz bash scripts/make_archive.sh
+bash scripts/iterm_ultra_paste.sh patch   # 超高速パッチ検証
 ```
+
+## Sentry on iTerm (do not paste Python into zsh)
+
+`import sentry_sdk` is Python, not a shell command. Use:
+
+```bash
+export SENTRY_DSN='https://YOUR_KEY@oXXXX.ingest.sentry.io/YYYY'
+bash scripts/sentry_verify.sh
+# optional: SENTRY_VERIFY_ERROR=1 bash scripts/sentry_verify.sh
+```
+
+Or put `SENTRY_DSN=...` in `.env` and run the bot normally.
 
 ## Security
 
