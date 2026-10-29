@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from bitbank_bot.engine import BotState, Engine, PendingOrder, load_state, save_state
@@ -292,6 +293,15 @@ def test_resolve_fee_prefers_raw() -> None:
     assert fee == Decimal("12.5")
 
 
+def test_entrypoint_su_preserves_command_argv() -> None:
+    text = (Path(__file__).resolve().parents[1] / "deploy" / "docker-entrypoint.sh").read_text(
+        encoding="utf-8"
+    )
+    assert "exec \"$0\" \"$@\"" in text
+    assert "a+rwX" not in text
+    assert "o-rwx" in text
+
+
 def test_poll_canceled_partial_clears_when_delta_zero(tmp_path) -> None:
     c = cfg(
         state_path=str(tmp_path / "state.json"),
@@ -506,6 +516,152 @@ def test_execute_blocked_when_reconcile_required(tmp_path) -> None:
     )
     assert state.position is not None
     assert engine.last_block_reason.startswith("reconcile_")
+
+
+def test_kill_flatten_cancels_pending_then_exits(tmp_path) -> None:
+    c = cfg(
+        state_path=str(tmp_path / "state.json"),
+        lock_path=str(tmp_path / "bot.lock"),
+        log_dir=str(tmp_path / "logs"),
+        kill_switch_path=str(tmp_path / "KILL"),
+        enable_websocket=False,
+        dry_run=False,
+        live_trading=True,
+        api_key="k",
+        api_secret="s",
+        enable_intrabar_exits=True,
+        enable_htf_filter=False,
+        emergency_flatten_on_kill=True,
+        require_reconcile=False,
+        simulate_fill=False,
+        ma_period=3,
+        short_ma_period=3,
+        long_ma_period=5,
+        stop_order_type="market",
+        exit_order_type="market",
+    )
+    (tmp_path / "KILL").write_text("1", encoding="utf-8")
+    rest = MagicMock()
+    rest.free_amount.side_effect = lambda asset: (
+        Decimal("0") if asset == "jpy" else Decimal("0.001")
+    )
+    rest.get_active_orders.return_value = []
+    rest.get_order.return_value = {
+        "order_id": "pend-1",
+        "status": "UNFILLED",
+        "executed_amount": "0",
+        "average_price": "0",
+        "start_amount": "0.001",
+    }
+    rest.cancel_order.return_value = {
+        "order_id": "pend-1",
+        "status": "CANCELED_UNFILLED",
+        "executed_amount": "0",
+        "average_price": "0",
+        "start_amount": "0.001",
+    }
+    rest.create_order.return_value = {
+        "order_id": "flat-1",
+        "status": "FULLY_FILLED",
+        "executed_amount": "0.001",
+        "average_price": "10000000",
+        "start_amount": "0.001",
+        "fee_amount_quote": "0",
+    }
+    engine = Engine(c, client=rest)
+    candles = synthetic_candles(40)
+    from bitbank_bot.strategy import build_snapshots
+
+    snaps = build_snapshots([x.close for x in candles], [x.timestamp_ms for x in candles], c)
+    last = snaps[-1]
+    entry = last.close
+    state = BotState(
+        Position(
+            amount=Decimal("0.001"),
+            average_price=entry,
+            tp_pct=Decimal("0.03"),
+            entry_candle_index=last.index - 1,
+            entry_candle_ts=last.timestamp_ms - 1,
+            actual_execution_jpy=entry * Decimal("0.001"),
+            kind="BUY1",
+        ),
+        RiskManager(c, killed=True),
+        last.timestamp_ms,
+        0.0,
+        pending=PendingOrder(
+            order_id="pend-1",
+            side="buy",
+            kind="BUY1",
+            tp_pct=Decimal("0.03"),
+            index=1,
+            timestamp_ms=1,
+            amount=Decimal("0.001"),
+        ),
+    )
+    engine.last_public_last = str(entry)
+    signal = engine.process_candles(candles, state, execute=True, persist=False)
+    assert state.pending is None
+    assert state.position is None
+    assert signal.kind == "EMERGENCY_STOP"
+    rest.cancel_order.assert_called()
+    rest.create_order.assert_called()
+
+
+def test_kill_flatten_overrides_circuit_breaker(tmp_path) -> None:
+    c = cfg(
+        kill_switch_path=str(tmp_path / "KILL"),
+        circuit_breaker_errors=2,
+        daily_pnl_floor=Decimal("0"),
+    )
+    (tmp_path / "KILL").write_text("1", encoding="utf-8")
+    risk = RiskManager(c)
+    risk.note_api_error()
+    risk.note_api_error()
+    assert risk.halt_reason() == "kill_switch"
+    sell = risk.check_sell(Decimal("0.001"), allow_kill_flatten=True)
+    assert sell.allowed
+
+
+def test_emergency_stop_bypasses_reconcile_block(tmp_path) -> None:
+    c = cfg(
+        state_path=str(tmp_path / "state.json"),
+        lock_path=str(tmp_path / "bot.lock"),
+        log_dir=str(tmp_path / "logs"),
+        enable_websocket=False,
+        dry_run=True,
+        live_trading=False,
+        require_reconcile=True,
+        simulate_fill=True,
+        emergency_flatten_on_kill=True,
+    )
+    engine = Engine(c, client=MagicMock())
+    engine._reconcile_blocked = True
+    state = BotState(
+        Position(
+            amount=Decimal("0.001"),
+            average_price=Decimal("10000000"),
+            tp_pct=Decimal("0.03"),
+            entry_candle_index=1,
+            entry_candle_ts=1,
+            actual_execution_jpy=Decimal("10000"),
+            kind="BUY1",
+        ),
+        RiskManager(c),
+        0,
+        0.0,
+        reconcile_ok=False,
+        reconcile_reason="btc_position_mismatch",
+        paper_jpy=Decimal("0"),
+        paper_btc=Decimal("0.001"),
+    )
+    engine._execute(
+        Signal("EMERGENCY_STOP", "sell", None, "kill_flatten"),
+        Decimal("10000000"),
+        2,
+        2,
+        state,
+    )
+    assert state.position is None
 
 
 def test_kill_flatten_runs_before_mark_tp(tmp_path) -> None:

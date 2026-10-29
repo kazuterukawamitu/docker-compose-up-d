@@ -288,20 +288,22 @@ class Engine:
             signal = strategy.evaluate(snap, state.position)
             self.strategy_evaluations += 1
             slog("STRATEGY", "signal", kind=signal.kind, reason=signal.reason, side=signal.side)
-            if heartbeat and execute and state.position and not state.pending:
-                if self._reconcile_blocked and self.cfg.require_reconcile and self.cfg.may_place_live_orders:
-                    self.last_block_reason = f"reconcile_{state.reconcile_reason}"
-                    signal = Signal.hold(self.last_block_reason)
-                    continue
+            if heartbeat and execute and state.position:
                 mark = self._mark_price(snap.close)
-                # Kill flatten before mark TP/STOP: check_sell blocks TP under kill,
-                # so flatten must not wait behind a no-op mark exit.
+                # Kill flatten may cancel a resting pending first — do not gate on
+                # `not state.pending` or the cancel path inside never runs.
                 if self._maybe_emergency_flatten(state, mark, snap):
                     signal = Signal("EMERGENCY_STOP", "sell", None, "kill_flatten")
                     if persist:
                         save_state(self.cfg.state_path, state)
                     self.last_signal = signal
                     return signal
+                if state.pending is not None:
+                    continue
+                if self._reconcile_blocked and self.cfg.require_reconcile and self.cfg.may_place_live_orders:
+                    self.last_block_reason = f"reconcile_{state.reconcile_reason}"
+                    signal = Signal.hold(self.last_block_reason)
+                    continue
                 if self.cfg.enable_intrabar_exits and state.position is not None:
                     exit_sig = strategy.evaluate_mark(mark, state.position)
                     if exit_sig.side == "sell":
@@ -467,39 +469,94 @@ class Engine:
             return False
         if state.risk.halt_reason() != "kill_switch":
             return False
-        if state.pending is not None:
-            rest = self._rest()
-            executor = OrderExecutor(self.cfg, rest if self.cfg.has_keys else None)
-            result = executor.cancel(state.pending.order_id)
-            if result.ok and result.executed_amount > ZERO:
-                self._apply_fill(
-                    Signal(state.pending.kind, state.pending.side, state.pending.tp_pct, "cancel_fill"),
-                    AmountPlan(
-                        side=state.pending.side,
-                        amount=state.pending.amount,
-                        price=result.average_price,
-                        available_jpy=ZERO,
-                        available_btc=ZERO,
-                        target_jpy=ZERO,
-                        planned_order_jpy=ZERO,
-                        actual_execution_jpy=result.actual_execution_jpy,
-                        actual_balance_jpy=ZERO,
-                        actual_balance_btc=ZERO,
-                        ok=True,
-                        reason="kill_cancel",
-                    ),
-                    result,
-                    state.pending.index,
-                    state.pending.timestamp_ms,
-                    state,
-                    ZERO,
-                    ZERO,
-                )
-            state.pending = None
+        if state.pending is not None and not self._cancel_pending_for_kill(state):
+            return False
         slog("RISK", "emergency market flatten on kill", mark=str(mark))
         signal = Signal("EMERGENCY_STOP", "sell", None, "kill_flatten")
         self._execute(signal, mark, snap.index, snap.timestamp_ms, state)
         return state.position is None
+
+    def _cancel_pending_for_kill(self, state: BotState) -> bool:
+        """Cancel a resting order so kill flatten can place a market sell.
+
+        Returns True once pending is cleared (or was paper-only). False if the
+        exchange order is still live — flatten would be refused as active_orders.
+        """
+        pending = state.pending
+        if pending is None:
+            return True
+        if not (self.cfg.has_keys and self.cfg.may_place_live_orders):
+            slog(
+                "ORDER_STATUS",
+                "clearing local pending for kill flatten",
+                order_id=pending.order_id,
+            )
+            state.pending = None
+            return True
+        rest = self._rest()
+        executor = OrderExecutor(self.cfg, rest)
+        result = executor.cancel(pending.order_id)
+        if not result.ok:
+            polled = executor.poll(pending.order_id, pending.amount)
+            if polled.ok and polled.reason in {"canceled", "canceled_partial", "fill"}:
+                result = polled
+            else:
+                slog(
+                    "RISK",
+                    "kill flatten blocked; pending still live",
+                    order_id=pending.order_id,
+                    cancel_reason=result.reason,
+                    poll_reason=polled.reason if polled else "n/a",
+                )
+                return False
+        already = pending.filled_amount
+        if result.executed_amount > already:
+            delta = result.executed_amount - already
+            cum_notional = (
+                result.executed_amount * result.average_price
+                if result.average_price > ZERO
+                else ZERO
+            )
+            delta_notional = cum_notional - pending.filled_notional
+            fill = OrderResult(
+                True,
+                result.reason,
+                False,
+                False,
+                pending.order_id,
+                result.status,
+                delta,
+                (delta_notional / delta) if delta > ZERO else result.average_price,
+                delta_notional if delta_notional > ZERO else result.actual_execution_jpy,
+                result.raw,
+                result.fee_jpy,
+            )
+            plan = AmountPlan(
+                side=pending.side,
+                amount=pending.amount,
+                price=result.average_price,
+                available_jpy=ZERO,
+                available_btc=ZERO,
+                target_jpy=ZERO,
+                planned_order_jpy=ZERO,
+                actual_execution_jpy=fill.actual_execution_jpy,
+                actual_balance_jpy=ZERO,
+                actual_balance_btc=ZERO,
+                ok=True,
+                reason="kill_cancel",
+            )
+            self._apply_fill(
+                Signal(pending.kind, pending.side, pending.tp_pct, "cancel_fill"),
+                plan,
+                fill,
+                pending.index,
+                pending.timestamp_ms,
+                state,
+                ZERO,
+                ZERO,
+            )
+        state.pending = None
+        return True
 
     def _execute(
         self,
@@ -509,11 +566,13 @@ class Engine:
         ts: int,
         state: BotState,
     ) -> None:
-        # Defense in depth: every live path (closed-bar, intrabar, kill) must honor reconcile.
+        # Defense in depth: live paths honor reconcile. Operator kill flatten is
+        # the exception — explicit intent to exit even after a BTC mismatch.
         if (
             self._reconcile_blocked
             and self.cfg.require_reconcile
             and self.cfg.may_place_live_orders
+            and signal.kind != "EMERGENCY_STOP"
         ):
             self.last_block_reason = f"reconcile_{state.reconcile_reason}"
             slog(
