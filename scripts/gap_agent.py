@@ -98,6 +98,40 @@ def c_entropy() -> tuple[bool, str]:
     return ok, "entropy + daily_pnl wired" if ok else "missing entropy/PnL signals"
 
 
+@check("QUANTUM_ENGINE", "Quantum-inspired adaptive layer must exist and be wired")
+def c_quantum() -> tuple[bool, str]:
+    path = SRC / "quantum_engine.py"
+    if not path.exists():
+        return False, "quantum_engine.py missing"
+    q = path.read_text(encoding="utf-8")
+    engine = _read("engine.py")
+    ok = _has(
+        q,
+        "probability_state_updater",
+        "gravity_well_escape_optimizer",
+        "multi_scenario_inference",
+        "self_healing_execution_guard",
+    ) and _has(engine, "build_quantum_view", "last_quantum")
+    return ok, "quantum_engine wired" if ok else "quantum not wired"
+
+
+@check("SELL_RECONCILE", "Live reconcile must adopt open sell orders into pending")
+def c_sell_reconcile() -> tuple[bool, str]:
+    engine = _read("engine.py")
+    ok = _has(engine, "RECONCILED_SELL", "adopted active sell order")
+    return ok, "sell adopt path" if ok else "sell orders not adopted"
+
+
+@check("SENTRY_OPTIONAL", "Sentry must be optional via SENTRY_DSN")
+def c_sentry() -> tuple[bool, str]:
+    path = SRC / "sentry_setup.py"
+    if not path.exists():
+        return False, "sentry_setup.py missing"
+    text = path.read_text(encoding="utf-8")
+    ok = "SENTRY_DSN" in text and "sentry_sdk.init" in text
+    return ok, "SENTRY_DSN gated" if ok else "sentry missing"
+
+
 @check("SYNTAX", "All package modules must parse")
 def c_syntax() -> tuple[bool, str]:
     bad: list[str] = []

@@ -68,7 +68,13 @@ def test_hold_in_position_same_candle() -> None:
 
 
 def test_take_profit_sells() -> None:
-    c = cfg(ma_period=3, short_ma_period=3, long_ma_period=5)
+    # Candle-path TP only when protective exits are off. Default is ticker TP.
+    c = cfg(
+        ma_period=3,
+        short_ma_period=3,
+        long_ma_period=5,
+        enable_protective_exits=False,
+    )
     closes = [D("100")] * 8 + [D("104")]
     snaps = build_snapshots(closes, list(range(len(closes))), c)
     pos = Position(
@@ -86,6 +92,27 @@ def test_take_profit_sells() -> None:
     sig = strat.evaluate(snaps[-1], pos)
     assert sig.kind == "TP"
     assert sig.side == "sell"
+
+
+def test_take_profit_deferred_when_protective_exits_on() -> None:
+    c = cfg(ma_period=3, short_ma_period=3, long_ma_period=5, enable_protective_exits=True)
+    closes = [D("100")] * 8 + [D("104")]
+    snaps = build_snapshots(closes, list(range(len(closes))), c)
+    pos = Position(
+        amount=D("0.01"),
+        average_price=D("100"),
+        tp_pct=D("0.03"),
+        entry_candle_index=0,
+        entry_candle_ts=0,
+        actual_execution_jpy=D("1000"),
+        kind="BUY1",
+    )
+    strat = Strategy(c)
+    for snap in snaps[:-1]:
+        strat.observe(snap)
+    sig = strat.evaluate(snaps[-1], pos)
+    assert sig.kind == "HOLD"
+    assert sig.reason == "tp_deferred_to_protective"
 
 
 def test_hold_requires_reason() -> None:

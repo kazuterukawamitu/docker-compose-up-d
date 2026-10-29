@@ -14,10 +14,16 @@ runnable bot lives in `src/bitbank_bot/`. This branch is Bitbank `btc_jpy` only.
 | Risk | `risk.py` | Kill switch, daily loss, position cap, circuit breaker |
 | Orders | `orders.py` | DRY_RUN never calls `create_order`; live unfilled is polled |
 | Loop | `engine.py` | Candles → signal → size → order; state in `data/state.json` |
+| Decision | `decision.py` | Shannon entropy, fee-edge gate, ticker STOP/TP + daily PnL flatten |
+| Quantum layer | `quantum_engine.py` | Bayesian scenarios, HOLD stagnation advice, anneal edge, self-heal guard |
 | Screen | `screen.py` | iTerm 取引画面; JSON stays in `logs/bot.log` |
 | 4h+1d filter | `multi_timeframe.py` | Hard BUY block when both HTF SMAs slope down, or HTF data missing |
 | Watchdog | `watchdog.py` | HOLD past 15 minutes is `LONG_WAIT`, not `FAIL` |
+| Sentry | `sentry_setup.py` | Optional via `SENTRY_DSN` (never hard-coded) |
 | Read-only audit | `scripts/bitbank_execution_audit.py` | ticker / assets / active_orders / trade_history |
+| Gap / bug agents | `scripts/gap_agent.py`, `bug_scan.py` | Purpose vs package; chan-pro style one finding per hit |
+| Verify Docker agent | `scripts/verify_agent_loop.py` + compose profile `verify` | Continuous gap/bug/purpose checks on VPS |
+| Purpose index | `scripts/purpose_index.py` | Python ↔ JSON instant search of module purposes |
 
 `run.py` is a stdlib-only DRY_RUN 取引画面. It is the program that
 runs with plain `python3` when pip/httpx/the feature-branch checkout
@@ -75,10 +81,16 @@ bitFlyer, Coincheck, and GMO are not imported and are not executed.
     Buys whose take-profit does not clear that round trip (widened by return
     entropy) are not sent.
 16. **Startup reconcile.** Live mode polls a saved order, adopts an unknown
-    active order, and adopts or resizes BTC from `free_amount` plus trade
-    history. Dry-run does not rewrite state from the account.
+    active order (buy remainder **or open sell**), and adopts or resizes BTC
+    from `free_amount` plus trade history. Dry-run does not rewrite state from
+    the account.
 17. **Stale sell limits.** A live sell still open after `SELL_UNFILLED_SEC`
     (default 20) is canceled and resent as a market order.
+18. **Quantum-inspired layer.** Scenario probabilities, HOLD stagnation advice,
+    anneal edge multiplier, and a self-healing guard are logged every decision.
+    They never bypass risk or force a trade.
+19. **Optional Sentry.** `SENTRY_DSN` only. Initialize from Python / `.env`,
+    never by pasting `import` into zsh.
 
 ## What this bot does not do
 
@@ -87,6 +99,8 @@ bitFlyer, Coincheck, and GMO are not imported and are not executed.
 - Does not promise a profit. A long `HOLD` / `no_buy_setup` streak means the MA rules were not met.
 - Does not implement multi-exchange routing or guaranteed fills.
 - Does not log API keys or secrets (`safe_dict` / `Config.__repr__`).
+- Does not solve the halting problem; correctness is runtime-verified continuously.
+- Does not use quantum hardware; `quantum_engine.py` is classical adaptive search.
 
 If keys were pasted into chat, rotate them in the bitbank console. Do not put
 them in git, screenshots, or logs.

@@ -265,6 +265,9 @@ class Strategy:
             tp = self._tp_signal(snap, position)
             if tp.kind != "HOLD":
                 return tp
+            # Preserve deferred-TP reason so ticker exits stay the documented path.
+            if tp.reason == "tp_deferred_to_protective":
+                return tp
             return Signal.hold("in_position_no_sell_or_tp")
         if position is not None and same_entry:
             return Signal.hold("same_entry_candle_no_sell")
