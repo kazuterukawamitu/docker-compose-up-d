@@ -145,13 +145,17 @@ class RiskManager:
             return RiskDecision(False, ZERO, "capped_to_zero", False)
         return RiskDecision(True, capped, "ok", False)
 
-    def check_sell(self, requested_btc: Decimal) -> RiskDecision:
+    def check_sell(
+        self, requested_btc: Decimal, *, allow_kill_flatten: bool = False
+    ) -> RiskDecision:
         if self._auth_failed:
             return RiskDecision(False, ZERO, "auth_failure", True)
         limit = int(self.cfg.circuit_breaker_errors or 0)
         if limit > 0 and self._consecutive_errors >= limit:
             return RiskDecision(False, ZERO, "circuit_breaker", True)
-        if self.operator_killed or Path(self.cfg.kill_switch_path).exists():
+        if not allow_kill_flatten and (
+            self.operator_killed or Path(self.cfg.kill_switch_path).exists()
+        ):
             return RiskDecision(False, ZERO, "kill_switch", True)
         capped = min(D(requested_btc), self.max_order_btc)
         return RiskDecision(True, capped, "ok", self.killed)

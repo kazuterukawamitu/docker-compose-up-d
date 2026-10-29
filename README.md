@@ -30,6 +30,16 @@ Live trading stays **off** unless `.env` has `DRY_RUN=false` **and** `LIVE_TRADI
 
 `--once --synthetic` is a one-cycle smoke test that **exits on purpose**. The launcher above does **not** use `--once`.
 
+## Docker (Sakura VPS)
+
+```bash
+cp .env.example .env   # set keys only when going live
+docker compose up -d --build
+docker compose logs -f bitbank-bot
+```
+
+Default image stays DRY_RUN. For LIVE: set `DRY_RUN=false`, `LIVE_TRADING=true`, keys, then recreate. Exits use `EXIT_ORDER_TYPE=market` and intrabar TP/stop by default.
+
 
 ## Strategy (from original README)
 
