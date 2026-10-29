@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Package a deliverable archive (source + scripts + docs; no secrets / no wiki HTML).
-# Formats: zip (default for delivery), tar.gz, tar.xz, tar
-#   FORMAT=zip bash scripts/make_archive.sh
-#   FORMAT=tar.gz bash scripts/make_archive.sh
+# Default: tar.gz (zip以外). Also: tar.xz, tar, zip
+#   bash scripts/make_archive.sh
+#   FORMAT=tar.xz bash scripts/make_archive.sh
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT_DIR="${1:-/opt/cursor/artifacts}"
-FORMAT="${FORMAT:-zip}"
+FORMAT="${FORMAT:-tar.gz}"
 mkdir -p "$OUT_DIR" "$ROOT/dist"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 case "$FORMAT" in

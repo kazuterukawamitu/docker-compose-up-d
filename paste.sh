@@ -5,6 +5,7 @@
 #   bash paste.sh patch    # synthetic once (patch/depac smoke)
 #   bash paste.sh agents   # gap + bug + purpose in parallel
 #   bash paste.sh sentry   # needs SENTRY_DSN in env
+#   bash paste.sh archive  # tar.gz deliverable (zip以外)
 # Or paste the curl one-liner from README into iTerm.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"

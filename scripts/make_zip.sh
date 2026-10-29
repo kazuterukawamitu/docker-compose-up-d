@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# Deliverable zip (requested). Also: FORMAT=tar.gz bash scripts/make_archive.sh
+# Compatibility wrapper. Deliverable is tar.gz (zip以外) by default.
+#   bash scripts/make_zip.sh
+#   FORMAT=tar.xz bash scripts/make_zip.sh
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-export FORMAT=zip
+export FORMAT="${FORMAT:-tar.gz}"
 exec bash "$ROOT/scripts/make_archive.sh" "$@"

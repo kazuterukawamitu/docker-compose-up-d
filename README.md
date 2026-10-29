@@ -74,15 +74,16 @@ Granville / README MA rules decide BUY1–4 and pattern SELL1–4. Daily PnL and
 
 State-machine mapping: [docs/STRATEGY.md](docs/STRATEGY.md). Audit: [docs/AUDIT.md](docs/AUDIT.md).
 
-## Tests / deliverable
+## Tests / deliverable (zip以外)
 
 ```bash
 PYTHONPATH=src python3 -m pytest -q
 python3 run.py --once --synthetic --no-screen
 python3 scripts/gap_agent.py
-bash scripts/make_zip.sh                  # → .zip (送付用)
-FORMAT=tar.gz bash scripts/make_archive.sh
+bash scripts/make_archive.sh              # → .tar.gz（送付用）
+FORMAT=tar.xz bash scripts/make_archive.sh
 bash scripts/iterm_ultra_paste.sh patch   # 超高速パッチ検証
+bash paste.sh archive                     # tar.gz 作成
 ```
 
 ## Sentry on iTerm (do not paste Python into zsh)
