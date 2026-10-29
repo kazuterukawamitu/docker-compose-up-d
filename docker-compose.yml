@@ -6,4 +6,30 @@ services:
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
+      - ./scripts:/app/scripts:ro
     restart: unless-stopped
+
+  # Verification agent (chan-pro style): purpose vs package, no orders.
+  # Sakura VPS: docker compose --profile verify up -d --build
+  verify-agent:
+    build: .
+    profiles: ["verify"]
+    environment:
+      VERIFY_INTERVAL_SEC: "300"
+      VERIFY_ONCE: "0"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./scripts:/app/scripts:ro
+    command: ["python", "scripts/verify_agent_loop.py"]
+    restart: unless-stopped
+
+  # One-shot gap check (exits). Useful in CI / after deploy.
+  gap-agent:
+    build: .
+    profiles: ["verify"]
+    volumes:
+      - ./scripts:/app/scripts:ro
+      - ./src:/app/src:ro
+    command: ["python", "scripts/gap_agent.py"]
+    restart: "no"

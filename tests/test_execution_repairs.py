@@ -166,6 +166,48 @@ def test_second_partial_uses_incremental_notional(tmp_path) -> None:
     assert state.pending.filled_notional == D("8800")
 
 
+def test_reconcile_adopts_active_sell_into_pending(tmp_path) -> None:
+    live = _engine(
+        tmp_path,
+        dry_run=False,
+        live_trading=True,
+        api_key="k",
+        api_secret="s",
+    )
+    live.client.free_amount.side_effect = lambda asset: D("50000") if asset == "jpy" else D("0.01")
+    live.client.get_active_orders.return_value = [
+        {
+            "order_id": "77",
+            "side": "sell",
+            "status": "UNFILLED",
+            "executed_amount": "0",
+            "average_price": "0",
+            "start_amount": "0.01",
+            "ordered_at": 1,
+        }
+    ]
+    live.client.get_trade_history.return_value = []
+    state = BotState(
+        Position(
+            amount=D("0.01"),
+            average_price=D("10000000"),
+            tp_pct=D("0.03"),
+            entry_candle_index=1,
+            entry_candle_ts=1,
+            actual_execution_jpy=D("100000"),
+            kind="BUY1",
+        ),
+        RiskManager(live.cfg),
+        0,
+        0.0,
+    )
+    live.reconcile(state)
+    assert state.pending is not None
+    assert state.pending.order_id == "77"
+    assert state.pending.side == "sell"
+    assert state.pending.kind == "RECONCILED_SELL"
+
+
 def test_reconcile_adopts_exchange_btc_and_ignores_dry_run(tmp_path) -> None:
     dry = _engine(tmp_path)
     dry_state = BotState(None, RiskManager(dry.cfg), 0, 0.0)

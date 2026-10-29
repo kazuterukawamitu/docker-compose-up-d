@@ -12,6 +12,7 @@ from bitbank_bot.logging_setup import setup_logging, slog
 from bitbank_bot.preflight import preflight
 from bitbank_bot.rest_client import RestClient
 from bitbank_bot.screen import TradingScreen, should_use_screen
+from bitbank_bot.sentry_setup import init_sentry
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -72,7 +73,8 @@ def main(argv: list[str] | None = None) -> int:
         cfg.live_trading = False
     use_screen = should_use_screen(args, sys.stdout)
     setup_logging(cfg.log_level, cfg.log_dir, console=not use_screen)
-    slog("BOOT", "starting", **cfg.safe_dict())
+    sentry_on = init_sentry(release="bitbank-btc-jpy-bot@0.1.0")
+    slog("BOOT", "starting", **cfg.safe_dict(), sentry=sentry_on)
     slog(
         "BOOT",
         "mode",
@@ -81,6 +83,14 @@ def main(argv: list[str] | None = None) -> int:
         loop=not args.once,
         dry_run=cfg.dry_run,
         screen=use_screen,
+        patch_mode=True,
+        patches=(
+            "intrabar_stop_tp",
+            "cancel_clears_pending",
+            "incremental_partial_notional",
+            "fee_aware_pnl",
+            "startup_reconcile",
+        ),
     )
     rest = RestClient(
         public_url=cfg.public_url,

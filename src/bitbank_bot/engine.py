@@ -16,6 +16,7 @@ from bitbank_bot.amounts import AmountPlan, PositionSizer
 from bitbank_bot.config import Config
 from bitbank_bot.decision import buy_block_reason, price_exit, shannon_entropy, unrealized_jpy
 from bitbank_bot.logging_setup import slog
+from bitbank_bot.quantum_engine import QuantumView, build_quantum_view
 from bitbank_bot.market_data import (
     Candle,
     CandleCache,
@@ -199,6 +200,8 @@ class Engine:
         self.last_error = ""
         self.last_entropy: Decimal = ZERO
         self.last_unrealized: Decimal = ZERO
+        self.consecutive_holds = 0
+        self.last_quantum: QuantumView | None = None
 
     def request_stop(self, *_args: object) -> None:
         slog("BOOT", "shutdown requested")
@@ -294,7 +297,7 @@ class Engine:
                 continue
             signal = strategy.evaluate(snap, state.position)
             self.strategy_evaluations += 1
-            self._log_decision_context(signal, snap.close, state)
+            self._log_decision_context(signal, snap.close, state, closes=closes)
             slog("STRATEGY", "signal", kind=signal.kind, reason=signal.reason, side=signal.side)
             if execute and is_last and state.position is not None and self.cfg.enable_protective_exits:
                 protected = self._protective_signal(state, snap.close)
@@ -763,13 +766,40 @@ class Engine:
                 return parsed
         return D(fallback)
 
-    def _log_decision_context(self, signal: Signal, close: Decimal, state: BotState) -> None:
+    def _log_decision_context(
+        self,
+        signal: Signal,
+        close: Decimal,
+        state: BotState,
+        closes: list[Decimal] | None = None,
+    ) -> None:
         unrealized = ZERO
+        mark = self._mark_price(close)
         if state.position is not None:
             unrealized = unrealized_jpy(
-                state.position, self._mark_price(close), self.cfg.taker_fee_rate
+                state.position, mark, self.cfg.taker_fee_rate
             )
             self.last_unrealized = unrealized
+        if signal.kind == "HOLD" or signal.side not in {"buy", "sell"}:
+            self.consecutive_holds += 1
+        else:
+            self.consecutive_holds = 0
+        series = closes if closes is not None else [close]
+        view = build_quantum_view(
+            series,
+            state.position,
+            signal,
+            entropy=self.last_entropy,
+            fee_rate=self.cfg.taker_fee_rate,
+            mark=mark,
+            consecutive_holds=self.consecutive_holds,
+            pending=state.pending is not None,
+            kill_switch=bool(state.risk.operator_killed or self.cfg.kill_switch),
+            may_place_live=self.cfg.may_place_live_orders,
+            dry_run=self.cfg.dry_run,
+        )
+        self.last_quantum = view
+        top = view.scenarios[0] if view.scenarios else None
         slog(
             "STRATEGY",
             "decision_inputs",
@@ -778,6 +808,11 @@ class Engine:
             unrealized_jpy=str(unrealized),
             entropy=str(self.last_entropy),
             taker_fee_rate=str(self.cfg.taker_fee_rate),
+            scenario=top.name if top else "-",
+            scenario_p=str(top.probability) if top else "0",
+            hold_stagnation=view.hold_stagnation,
+            explore_advice=view.explore_advice,
+            guard=view.guard_reason,
         )
 
     def _protective_signal(self, state: BotState, fallback: Decimal) -> Signal | None:
@@ -879,13 +914,38 @@ class Engine:
                 if not order_id:
                     continue
                 side = str(row.get("side") or "")
-                if side != "buy":
+                if side not in {"buy", "sell"}:
+                    continue
+                if state.pending is not None and state.pending.order_id == order_id:
                     continue
                 executed = D(row.get("executed_amount") or 0)
                 average = D(row.get("average_price") or 0)
-                if executed <= ZERO or average <= ZERO:
+                start_amount = D(row.get("start_amount") or 0)
+                # Adopt open sell limits into pending so we do not double-sell.
+                if side == "sell":
+                    if state.pending is None and start_amount > self.cfg.amount_precision:
+                        state.pending = PendingOrder(
+                            order_id=order_id,
+                            side=side,
+                            kind="RECONCILED_SELL",
+                            tp_pct=None,
+                            index=0,
+                            timestamp_ms=int(row.get("ordered_at") or 0),
+                            amount=start_amount,
+                            filled_amount=executed,
+                            filled_notional=(executed * average) if average > ZERO else ZERO,
+                            placed_at_ms=int(time.time() * 1000),
+                        )
+                        slog(
+                            "RECONCILE",
+                            "adopted active sell order",
+                            order_id=order_id,
+                            filled=str(executed),
+                        )
+                        adopted_active = True
+                        break
                     continue
-                if state.pending is not None and state.pending.order_id == order_id:
+                if executed <= ZERO or average <= ZERO:
                     continue
                 received = executed
                 notional = executed * average
@@ -917,7 +977,7 @@ class Engine:
                         fee_jpy=ZERO,
                     )
                     slog("RECONCILE", "created position from adopted fill", executed=str(executed))
-                remainder = D(row.get("start_amount") or 0) - executed
+                remainder = start_amount - executed
                 if state.pending is None and remainder > self.cfg.amount_precision:
                     state.pending = PendingOrder(
                         order_id=order_id,
@@ -926,7 +986,7 @@ class Engine:
                         tp_pct=None,
                         index=0,
                         timestamp_ms=int(row.get("ordered_at") or 0),
-                        amount=D(row.get("start_amount") or 0),
+                        amount=start_amount,
                         filled_amount=executed,
                         filled_notional=executed * average,
                         placed_at_ms=int(time.time() * 1000),
