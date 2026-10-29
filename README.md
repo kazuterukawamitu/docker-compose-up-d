@@ -74,13 +74,14 @@ Granville / README MA rules decide BUY1–4 and pattern SELL1–4. Daily PnL and
 
 State-machine mapping: [docs/STRATEGY.md](docs/STRATEGY.md). Audit: [docs/AUDIT.md](docs/AUDIT.md).
 
-## Tests / zip
+## Tests / archive (tar.gz, not zip)
 
 ```bash
 PYTHONPATH=src python3 -m pytest -q
 python3 run.py --once --synthetic --no-screen
 python3 scripts/gap_agent.py
-bash scripts/make_zip.sh
+bash scripts/make_archive.sh              # → .tar.gz
+FORMAT=tar.xz bash scripts/make_archive.sh
 ```
 
 ## Security
