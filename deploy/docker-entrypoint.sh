@@ -18,7 +18,7 @@ if [ "$(id -u)" -eq 0 ]; then
   if command -v runuser >/dev/null 2>&1; then
     exec runuser -u bot -- "$@"
   fi
-  exec su -s /bin/sh bot -c 'exec "$@"' -- "$@"
+  exec su -s /bin/sh bot -c 'exec "$0" "$@"' -- "$@"
 fi
 
 exec "$@"

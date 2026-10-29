@@ -463,10 +463,39 @@ class Engine:
     ) -> bool:
         if not self.cfg.emergency_flatten_on_kill:
             return False
-        if state.position is None or state.pending is not None:
+        if state.position is None:
             return False
         if state.risk.halt_reason() != "kill_switch":
             return False
+        if state.pending is not None:
+            rest = self._rest()
+            executor = OrderExecutor(self.cfg, rest if self.cfg.has_keys else None)
+            result = executor.cancel(state.pending.order_id)
+            if result.ok and result.executed_amount > ZERO:
+                self._apply_fill(
+                    Signal(state.pending.kind, state.pending.side, state.pending.tp_pct, "cancel_fill"),
+                    AmountPlan(
+                        side=state.pending.side,
+                        amount=state.pending.amount,
+                        price=result.average_price,
+                        available_jpy=ZERO,
+                        available_btc=ZERO,
+                        target_jpy=ZERO,
+                        planned_order_jpy=ZERO,
+                        actual_execution_jpy=result.actual_execution_jpy,
+                        actual_balance_jpy=ZERO,
+                        actual_balance_btc=ZERO,
+                        ok=True,
+                        reason="kill_cancel",
+                    ),
+                    result,
+                    state.pending.index,
+                    state.pending.timestamp_ms,
+                    state,
+                    ZERO,
+                    ZERO,
+                )
+            state.pending = None
         slog("RISK", "emergency market flatten on kill", mark=str(mark))
         signal = Signal("EMERGENCY_STOP", "sell", None, "kill_flatten")
         self._execute(signal, mark, snap.index, snap.timestamp_ms, state)
