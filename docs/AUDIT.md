@@ -7,7 +7,9 @@ runnable bot lives in `src/bitbank_bot/`. This branch is Bitbank `btc_jpy` only.
 
 | Area | Where | Role |
 | --- | --- | --- |
-| Config / dual live flags | `config.py` | `DRY_RUN` default; live needs `DRY_RUN=false` and `LIVE_TRADING=true` and keys |
+| Config / dual live flags | `config.py` | `DRY_RUN` default; live needs `DRY_RUN=false` and `LIVE_TRADING=true` and keys (or `TRADING_MODE=LIVE`) |
+| V31 + OOS dual | `dual_run.py`, `v31.py`, `oos.py` | Production + shadow evaluators; OOS never orders |
+| Evidence / timers | `evidence.py`, `loop_timers.py` | LIVE/private/order/OOS flags; shadow+guard active only while looping |
 | Public + private REST | `rest_client.py` | HMAC `ACCESS-TIME-WINDOW`; `create_order` requires `live_confirmed` |
 | README MA rules | `strategy.py`, `docs/STRATEGY.md` | BUY1–4 / SELL1–4; HOLD always has a reason |
 | Size | `amounts.py` | Only place that sets quantity; TARGET vs PLANNED; ACTUAL unset until fill |
