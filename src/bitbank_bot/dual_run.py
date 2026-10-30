@@ -158,13 +158,29 @@ class ShadowStrategy:
 def discover_plugin(kind: str, root: Path | None = None) -> PluginHit:
     if kind not in PLUGIN_FILENAMES:
         raise ValueError(f"unknown plugin kind {kind}")
-    base = root or repo_root()
     found: Path | None = None
-    for rel in PLUGIN_FILENAMES[kind]:
-        candidate = base / rel
+    # First check explicit root if provided (for tests and overrides)
+    if root is not None:
+        for rel in PLUGIN_FILENAMES[kind]:
+            candidate = root / rel
+            if candidate.is_file():
+                found = candidate
+                break
+    # Then check installed package directory (for pip-installed layout)
+    if found is None:
+        package_dir = Path(__file__).resolve().parent
+        plugin_name = f"{kind}.py"
+        candidate = package_dir / plugin_name
         if candidate.is_file():
             found = candidate
-            break
+    # Finally fall back to repo-root based search (for development layout)
+    if found is None:
+        base = repo_root()
+        for rel in PLUGIN_FILENAMES[kind]:
+            candidate = base / rel
+            if candidate.is_file():
+                found = candidate
+                break
     if found is None:
         return PluginHit(kind, None, "Not Detected", True, [])
     source = found.read_text(encoding="utf-8")
