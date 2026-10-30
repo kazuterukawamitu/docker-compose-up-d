@@ -34,6 +34,8 @@ HOLD always has a reason.
 
 | ID | When |
 | --- | --- |
+BUY3 / BUY4 dip-extend defaults are **1%** (`BUY3_EXTEND` / `BUY4_DIP`) so setups fire more often than the old 5% thresholds. Fee-edge and HTF filters still block uneconomic or HTF-down buys.
+
 | R5 / SELL1 | Price was **≥4% above** the MA, then declined |
 | R6 / SELL2 | Price declines **and** crosses below the MA, then keeps falling |
 | R7 / SELL3 | Price crosses **up** through a MA that is still in a **downtrend** |

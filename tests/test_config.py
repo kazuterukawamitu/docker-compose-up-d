@@ -50,6 +50,34 @@ def test_dual_flag_required_for_live() -> None:
         )
 
 
+def test_trading_mode_live_alias() -> None:
+    cfg = load_config(
+        environ={
+            "TRADING_MODE": "LIVE",
+            "BITBANK_API_KEY": "k",
+            "BITBANK_API_SECRET": "s",
+        },
+        load_default_dotenv=False,
+    )
+    assert cfg.dry_run is False
+    assert cfg.live_trading is True
+    assert cfg.may_place_live_orders is True
+    assert cfg.mode_status()["MODE"] == "LIVE"
+    assert cfg.mode_status()["BLOCK_REASON"] == ""
+
+
+def test_trading_mode_dry_alias() -> None:
+    cfg = load_config(environ={"MODE": "DRY_RUN"}, load_default_dotenv=False)
+    assert cfg.dry_run is True
+    assert cfg.mode_status()["BLOCK_REASON"] == "dry_run"
+
+
+def test_buy_dip_defaults_are_aggressive() -> None:
+    cfg = load_config(environ={}, load_default_dotenv=False)
+    assert cfg.buy3_extend == Decimal("0.01")
+    assert cfg.buy4_dip == Decimal("0.01")
+
+
 def test_balance_usage_alias() -> None:
     cfg = load_config(
         environ={"BALANCE_USAGE_RATIO": "0.8"}, load_default_dotenv=False

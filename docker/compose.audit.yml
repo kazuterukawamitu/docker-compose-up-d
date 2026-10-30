@@ -1,0 +1,19 @@
+# Audit/test agent only. Gap detection vs completion criteria.
+# Host secrets are not mounted. Does not place orders. LIVE stays false.
+services:
+  audit-agent:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.audit
+    environment:
+      DRY_RUN: "true"
+      LIVE_TRADING: "false"
+      AUDIT_REPORT_DIR: /tmp/bitbank-audit
+      AUDIT_LOOP_SEC: "30"
+    healthcheck:
+      test: ["CMD", "python3", "/app/docker/healthcheck.py"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 90s
+    restart: "no"
