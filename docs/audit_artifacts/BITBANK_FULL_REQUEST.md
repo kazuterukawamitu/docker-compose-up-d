@@ -51,6 +51,20 @@ Operator screen showed **FLAT** + `no_buy_setup`. BUY4 previously required
 used a 5% dip. This branch: BUY4 allows DOWN/**FLAT**, default dip/extend **1%**,
 size still `free_amount * MAX_BALANCE_USAGE` (realtime upper bound).
 
+Continuation (same day): live public candles still show price **above** a FLAT
+MA (~0.2%), so BUY4 has not dipped yet. BUY2 now also fires on **FLAT**
+cross-below-MA pullbacks (was UP-only), matching the operator regime. HOLD with
+price above MA remains a correct wait, not a crash.
+
+## Continuation evidence (cloud agent, 2026-10-31 ~20:52 JST)
+
+- `pytest` green; `gap_agent` ALL PASS; `bug_scan` 0 findings
+- Public Bitbank ticker/candles OK; private/LIVE NO (no keys)
+- SSH to Sakura VPS `rocky@49.212.212.148`: Permission denied (publickey)
+- Docker binary absent on this cloud VM; verify agent runs via
+  `VERIFY_ONCE=1 python3 scripts/verify_agent_loop.py` without Docker
+- Origin login on **operator Mac** succeeded; cloud agent still refuses stored Origin logins
+
 ## LIVE unlock procedure (operator host)
 
 ```bash

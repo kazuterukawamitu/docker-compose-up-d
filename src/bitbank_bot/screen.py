@@ -134,6 +134,19 @@ class TradingScreen:
             return
 
 
+def _default_note(*, dry_run: bool, live_orders: bool, signal_kind: str) -> str:
+    if dry_run or not live_orders:
+        if signal_kind in {"HOLD", "WAIT"}:
+            return (
+                "HOLD/待機は正常です。DRY_RUNのため実注文APIは呼びません。"
+                " LIVE化は bash scripts/enable_live.sh。Ctrl-C で停止"
+            )
+        return "DRY_RUN 紙約定のみ（実注文APIは呼ばない）。Ctrl-C で停止"
+    if signal_kind in {"HOLD", "WAIT"}:
+        return "HOLD/待機は正常です（LIVE・条件待ち）。Ctrl-C で停止"
+    return "LIVE 稼働中。Ctrl-C で停止"
+
+
 def view_from_engine(
     *,
     pair: str,
@@ -184,6 +197,9 @@ def view_from_engine(
         daily_pnl=str(daily_pnl),
         unrealized_jpy=str(unrealized_jpy),
         entropy=str(entropy),
+        note=_default_note(
+            dry_run=dry_run, live_orders=live_orders, signal_kind=signal_kind
+        ),
     )
 
 

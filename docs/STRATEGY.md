@@ -26,16 +26,16 @@ HOLD always has a reason.
 | ID | When | Take profit |
 | --- | --- | --- |
 | R1 / BUY1 | MA was in a downtrend, then flattened or turned up, **and** BTC crosses **above** the MA | +3% |
-| R2 / BUY2 | MA is in an **uptrend** and BTC crosses **below** the MA | +8% if golden cross, else +5% |
-| R3 / BUY3 | Price was **≥5% above** the MA, declined **without touching** the MA, then rose again | +4% |
-| R4 / BUY4 | Price was **≥5% below** a **downtrending** MA, then rose again | +5% |
+| R2 / BUY2 | MA is in an **uptrend or FLAT** and BTC crosses **below** the MA | +8% if golden cross, else +5% |
+| R3 / BUY3 | Price was **≥ BUY3_EXTEND above** the MA (default **1%**), declined **without touching** the MA, then rose again | +4% |
+| R4 / BUY4 | Price was **≥ BUY4_DIP below** a **DOWN or FLAT** MA (default **1%**), then rose again | +5% |
+
+BUY3 / BUY4 dip-extend defaults are **1%** (`BUY3_EXTEND` / `BUY4_DIP`; was 5%). BUY size uses realtime `free_amount * MAX_BALANCE_USAGE` (default 0.95). Fee-edge and HTF filters still block uneconomic or HTF-down buys.
 
 ### Sells (flatten)
 
 | ID | When |
 | --- | --- |
-BUY3 / BUY4 dip-extend defaults are **1%** (`BUY3_EXTEND` / `BUY4_DIP`) so setups fire more often than the old 5% thresholds. Fee-edge and HTF filters still block uneconomic or HTF-down buys.
-
 | R5 / SELL1 | Price was **≥4% above** the MA, then declined |
 | R6 / SELL2 | Price declines **and** crosses below the MA, then keeps falling |
 | R7 / SELL3 | Price crosses **up** through a MA that is still in a **downtrend** |

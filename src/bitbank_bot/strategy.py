@@ -348,13 +348,17 @@ class Strategy:
                 crossover_price_bp=snap.crossover_price_bp
                 or crossover_price_bp(snap.cross_price),
             )
-        if snap.ma_trend == Trend.UP and snap.crossed_down:
+        # UP or FLAT pullback: FLAT-only hours never fired BUY2 when it was
+        # UP-only, which left the Mac screen on permanent no_buy_setup while
+        # price sat slightly above the MA waiting for a 1% BUY4 dip.
+        if snap.ma_trend in {Trend.UP, Trend.FLAT} and snap.crossed_down:
             tp = self.cfg.buy2_golden_tp if snap.golden_cross else self.cfg.buy2_tp
+            trend_label = "uptrend" if snap.ma_trend == Trend.UP else "FLAT"
             return Signal(
                 "BUY2",
                 "buy",
                 tp,
-                "MA uptrend and price crossed below MA",
+                f"MA {trend_label} and price crossed below MA",
                 golden_cross=snap.golden_cross,
                 cross_price=snap.cross_price,
                 crossover_price_bp=snap.crossover_price_bp

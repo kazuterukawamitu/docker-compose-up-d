@@ -36,7 +36,7 @@ bash start.sh --screen        # full package
 python3 run.py                # stdlib DRY_RUN only
 ```
 
-You should see `Bitbank  BTC/JPY  取引画面` with 日時損益 and エントロピー. HOLD/待機 is normal when there is no Granville setup. BUY4 now fires on **DOWN or FLAT** dips (default 1%, was 5% DOWN-only). Stop with Ctrl-C.
+You should see `Bitbank  BTC/JPY  取引画面` with 日時損益 and エントロピー. HOLD/待機 is normal when there is no Granville setup. BUY4 fires on **DOWN or FLAT** dips (default 1%, was 5% DOWN-only); BUY2 also fires on **FLAT** cross-below-MA pullbacks. Stop with Ctrl-C. If your Mac still shows an old footer or endless FLAT HOLD above the MA, re-run `mac_one_paste.sh` so you are on this branch (not an old `iterm13` copy).
 
 Audit artifacts: [docs/audit_artifacts/REQUIREMENTS_MATRIX.md](docs/audit_artifacts/REQUIREMENTS_MATRIX.md).
 

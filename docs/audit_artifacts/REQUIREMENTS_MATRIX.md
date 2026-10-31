@@ -5,7 +5,7 @@ Status codes: `done` | `partial` | `blocked` | `n/a` | `verify_on_host`
 | ID | Request theme | Target | Evidence now | Gap vs purpose | Action | Status |
 | --- | --- | --- | --- | --- | --- | --- |
 | R01 | Save original request | `docs/audit_artifacts/` | BITBANK_FULL_REQUEST.md | — | keep verbatim intent | done |
-| R02 | Identify Mac vs VPS bot | deploy docs | Mac screen DRY_RUN; VPS SSH not available here | cannot prove VPS hash | `scripts/vps_deploy.sh` | blocked |
+| R02 | Identify Mac vs VPS bot | deploy docs | Mac screen DRY_RUN; SSH Permission denied; `identify_running_bot.py` | cannot prove VPS hash | operator SSH keys + identify script | blocked |
 | R03 | `bitbank_bot.config/rest_client/main/watchdog` exist | `src/bitbank_bot/` | files present; gap_agent SYNTAX | Mac may run old `run.py` only | `mac_one_paste.sh` | done |
 | R04 | SELL delay / intrabar exits | `decision.py` `engine.py` | gap SELL_INTRABAR PASS | — | keep ticker STOP/TP | done |
 | R05 | STOP / emergency market | `decision.py` `orders.py` | gap STOP_MARKET PASS | — | market protective sells | done |
@@ -13,7 +13,7 @@ Status codes: `done` | `partial` | `blocked` | `n/a` | `verify_on_host`
 | R07 | Partial fill incremental notional | `orders.py` `engine.py` | gap PARTIAL_NOTIONAL PASS | — | — | done |
 | R08 | Fee-aware PnL | `engine.py` `orders.py` | gap FEE_PNL PASS | — | TAKER_FEE_RATE fallback | done |
 | R09 | Startup reconcile incl. sells | `engine.py` | gap RECONCILE + SELL_RECONCILE PASS | needs LIVE keys on host | — | done |
-| R10 | BUY scarcity (5%→max%) | `strategy.py` `config.py` | BUY4 FLAT+1% dip; tests | still MA-gated | FLAT allowed | done |
+| R10 | BUY scarcity (5%→max%) | `strategy.py` `config.py` `run.py` | BUY4 FLAT+1% dip; BUY2 FLAT pullback; size=MAX_BALANCE_USAGE | still needs cross/dip vs MA | FLAT pullback added | done |
 | R11 | Unlock DRY_RUN → LIVE | `enable_live.sh` `config.py` | dual confirm + TRADING_MODE | keys missing in cloud | operator runs enable_live | verify_on_host |
 | R12 | V31 + OOS simultaneous | `v31.py` `oos.py` `dual_run.py` | dual_run wired; OOS execute=false | — | shadow never orders | done |
 | R13 | shadow/guard timers active | `loop_timers.py` | active only while run_forever | env YES alone ≠ active | evidence-based | done |
