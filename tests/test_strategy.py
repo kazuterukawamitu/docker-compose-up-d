@@ -121,6 +121,36 @@ def test_hold_requires_reason() -> None:
     assert Signal.hold("no_buy_setup").reason == "no_buy_setup"
 
 
+def test_buy4_fires_on_flat_dip_then_rise() -> None:
+    """FLAT markets must not starve BUY4 (was DOWN-only → permanent no_buy_setup)."""
+    from bitbank_bot.strategy import Buy4Machine
+
+    machine = Buy4Machine(D("0.01"))
+    ma = D("100")
+    assert machine.update(D("98.5"), ma, Trend.FLAT) is False  # dipped
+    assert machine.update(D("98.0"), ma, Trend.FLAT) is False  # still lower
+    assert machine.update(D("98.4"), ma, Trend.FLAT) is True  # rising after dip
+    assert machine.origin == D("98.0")
+
+
+def test_buy2_fires_on_flat_cross_down() -> None:
+    """FLAT pullback must buy when price crosses below MA (operator DRY_RUN regime)."""
+    from bitbank_bot.strategy import Signal, Strategy
+
+    c = cfg(ma_period=5, short_ma_period=5, long_ma_period=8, ma_slope_threshold=D("0.05"))
+    # Flat SMA then a clear cross below MA.
+    closes = [D("100")] * 20 + [D("100.2"), D("100.1"), D("99.7")]
+    snaps = build_snapshots(closes, list(range(len(closes))), c)
+    strat = Strategy(c)
+    last = None
+    for snap in snaps:
+        last = strat.evaluate(snap, None)
+    assert last is not None
+    assert last.kind == "BUY2"
+    assert last.side == "buy"
+    assert "FLAT" in last.reason
+
+
 def test_sell3_on_upcross_in_downtrend() -> None:
     # Bounce just through a still-falling SMA so trend stays DOWN (a large
     # bounce would flip SMA to UP and would not be SELL3).

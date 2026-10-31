@@ -7,7 +7,9 @@ runnable bot lives in `src/bitbank_bot/`. This branch is Bitbank `btc_jpy` only.
 
 | Area | Where | Role |
 | --- | --- | --- |
-| Config / dual live flags | `config.py` | `DRY_RUN` default; live needs `DRY_RUN=false` and `LIVE_TRADING=true` and keys |
+| Config / dual live flags | `config.py` | `DRY_RUN` default; live needs `DRY_RUN=false` and `LIVE_TRADING=true` and keys (or `TRADING_MODE=LIVE`) |
+| V31 + OOS dual | `dual_run.py`, `v31.py`, `oos.py` | Production + shadow evaluators; OOS never orders |
+| Evidence / timers | `evidence.py`, `loop_timers.py` | LIVE/private/order/OOS flags; shadow+guard active only while looping |
 | Public + private REST | `rest_client.py` | HMAC `ACCESS-TIME-WINDOW`; `create_order` requires `live_confirmed` |
 | README MA rules | `strategy.py`, `docs/STRATEGY.md` | BUY1–4 / SELL1–4; HOLD always has a reason |
 | Size | `amounts.py` | Only place that sets quantity; TARGET vs PLANNED; ACTUAL unset until fill |
@@ -92,6 +94,14 @@ bitFlyer, Coincheck, and GMO are not imported and are not executed.
 19. **Optional Sentry.** `SENTRY_DSN` only. Initialize from Python / `.env`,
     never by pasting `import` into zsh.
 
+## BUY scarcity (2026-10-31 operator screen)
+
+Operator Mac showed FLAT + `no_buy_setup` for ~14k cycles. Root cause: BUY4
+required `Trend.DOWN` only while the market sat in FLAT, and the default dip was
+5%. This branch allows BUY4 on DOWN/**FLAT** with default dip/extend **1%**.
+Fee-edge and HTF filters still gate new buys. Size remains
+`free_amount * MAX_BALANCE_USAGE` (realtime upper bound).
+
 ## What this bot does not do
 
 - Does not SSH to a VPS, install Docker there, or install systemd for you.
@@ -101,6 +111,7 @@ bitFlyer, Coincheck, and GMO are not imported and are not executed.
 - Does not log API keys or secrets (`safe_dict` / `Config.__repr__`).
 - Does not solve the halting problem; correctness is runtime-verified continuously.
 - Does not use quantum hardware; `quantum_engine.py` is classical adaptive search.
+- Does not report LIVE / Private API / shadow-timer YES without evidence (`evidence.py`).
 
 If keys were pasted into chat, rotate them in the bitbank console. Do not put
 them in git, screenshots, or logs.

@@ -10,44 +10,50 @@ Production five patches (always on in patch mode boot log):
 4. Realized PnL deducts quote fees (trade history or `TAKER_FEE_RATE`)
 5. Live startup reconciles assets + active orders (including open **sells**)
 
-Also: Shannon entropy fee-edge gate, daily PnL flatten coexisting with Granville BUY/SELL, quantum-inspired adaptive layer, optional Sentry, Docker verify agent.
+Also: Shannon entropy fee-edge gate, daily PnL flatten coexisting with Granville BUY/SELL, quantum-inspired adaptive layer, V31 production + OOS shadow (OOS never orders), optional Sentry, Docker verify agent.
+
+`bitbank_bot.config` / `rest_client` / `main` / `watchdog` live under `src/bitbank_bot/`. Always run with `PYTHONPATH=src` or `bash start.sh` (sets it). A bare `import bitbank_bot` from `$HOME` fails if that path is missing.
 
 ## Start (paste one line — ultra fast)
 
-DRY_RUN 取引画面 only (no Bitbank orders, no pip):
+Full package on Mac (recommended; DRY_RUN 取引画面):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/kazuterukawamitu/docker-compose-up-d/cursor/complete-bot-quantum-sentry-9d40/run.py -o "$HOME/bitbank_run.py" && python3 "$HOME/bitbank_run.py"
+curl -fsSL https://raw.githubusercontent.com/kazuterukawamitu/docker-compose-up-d/cursor/bitbank-live-complete-d4a7/scripts/mac_one_paste.sh | bash
+```
+
+Stdlib-only fallback (no pip, never live):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kazuterukawamitu/docker-compose-up-d/cursor/bitbank-live-complete-d4a7/run.py -o "$HOME/bitbank_run.py" && python3 "$HOME/bitbank_run.py"
 ```
 
 Checked-out repo:
 
 ```bash
-python3 run.py
-# or
-bash paste.sh
+bash paste.sh                 # prefers full package; falls back to run.py
+bash start.sh --screen        # full package
+python3 run.py                # stdlib DRY_RUN only
 ```
 
-You should see `Bitbank  BTC/JPY  取引画面` with 日時損益 and エントロピー. HOLD/待機 is normal when there is no Granville setup. Stop with Ctrl-C.
+You should see `Bitbank  BTC/JPY  取引画面` with 日時損益 and エントロピー. HOLD/待機 is normal when there is no Granville setup. BUY4 fires on **DOWN or FLAT** dips (default 1%, was 5% DOWN-only); BUY2 also fires on **FLAT** cross-below-MA pullbacks. Stop with Ctrl-C. If your Mac still shows an old footer or endless FLAT HOLD above the MA, re-run `mac_one_paste.sh` so you are on this branch (not an old `iterm13` copy).
 
-`python3 main.py` prefers the full package when httpx is installed; otherwise the same stdlib `run.py`.
+Audit artifacts: [docs/audit_artifacts/REQUIREMENTS_MATRIX.md](docs/audit_artifacts/REQUIREMENTS_MATRIX.md).
 
-## Live on Sakura VPS (Docker)
+## Unlock LIVE + Sakura VPS
 
 ```bash
 cp .env.example .env
 # set BITBANK_API_KEY / BITBANK_API_SECRET
-# DRY_RUN=false
-# LIVE_TRADING=true
-docker compose up -d --build
-docker compose logs -f bitbank-bot
-
-# verification agent (purpose vs package; no orders)
-docker compose --profile verify up -d --build verify-agent gap-agent
-docker compose logs -f verify-agent
+bash scripts/enable_live.sh          # DRY_RUN=false LIVE_TRADING=true TRADING_MODE=LIVE
+PYTHONPATH=src python3 -m bitbank_bot --check-config   # expect LIVE_ALLOWED=true
+bash scripts/vps_deploy.sh           # docker compose + verify agents (on VPS)
+# or: ENABLE_LIVE=1 bash scripts/vps_deploy.sh
 ```
 
-Live trading stays **off** unless `.env` has `DRY_RUN=false` **and** `LIVE_TRADING=true` **and** both API keys.
+Shadow/guard timers become **active** only while `run_forever` is looping. Private API / LIVE order flags become YES only with keys + dual confirm — they are not forced YES in DRY_RUN.
+
+Live trading stays **off** unless `.env` has `DRY_RUN=false` **and** `LIVE_TRADING=true` **and** both API keys (or `TRADING_MODE=LIVE` with keys when the dual flags are unset).
 
 ## Gap / bug agents (chan-pro style)
 
@@ -61,10 +67,13 @@ python3 scripts/bitbank_execution_audit.py
 
 ## Sentry (optional)
 
-Put the DSN in `.env` as `SENTRY_DSN=...` — do **not** paste Python `import` lines into zsh (that is why you saw `command not found: import`).
+Put the DSN in `.env` as `SENTRY_DSN=...` — do **not** paste Python `import` lines into zsh (that is why you saw `command not found: import` / `bad pattern`).
 
 ```bash
-# correct one-liner check
+# correct checks (Python, not zsh)
+export SENTRY_DSN='https://…@….ingest.sentry.io/…'
+python3 scripts/sentry_from_env.py
+# or
 python3 -c 'import os,sentry_sdk; sentry_sdk.init(dsn=os.environ["SENTRY_DSN"]); print("sentry ok")'
 ```
 

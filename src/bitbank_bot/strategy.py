@@ -126,7 +126,9 @@ class Buy4Machine:
 
     def update(self, close: Decimal, ma: Decimal, trend: Trend) -> bool:
         fired = False
-        if trend != Trend.DOWN:
+        # DOWN or FLAT: FLAT-only markets were starving BUY (no_buy_setup streaks).
+        # UP trend uses BUY2 pullbacks instead; reset the dip machine there.
+        if trend == Trend.UP:
             self.phase = "idle"
             self.low = None
             self.prev_close = close
@@ -346,13 +348,17 @@ class Strategy:
                 crossover_price_bp=snap.crossover_price_bp
                 or crossover_price_bp(snap.cross_price),
             )
-        if snap.ma_trend == Trend.UP and snap.crossed_down:
+        # UP or FLAT pullback: FLAT-only hours never fired BUY2 when it was
+        # UP-only, which left the Mac screen on permanent no_buy_setup while
+        # price sat slightly above the MA waiting for a 1% BUY4 dip.
+        if snap.ma_trend in {Trend.UP, Trend.FLAT} and snap.crossed_down:
             tp = self.cfg.buy2_golden_tp if snap.golden_cross else self.cfg.buy2_tp
+            trend_label = "uptrend" if snap.ma_trend == Trend.UP else "FLAT"
             return Signal(
                 "BUY2",
                 "buy",
                 tp,
-                "MA uptrend and price crossed below MA",
+                f"MA {trend_label} and price crossed below MA",
                 golden_cross=snap.golden_cross,
                 cross_price=snap.cross_price,
                 crossover_price_bp=snap.crossover_price_bp
@@ -367,11 +373,12 @@ class Strategy:
                 origin_price=self.buy3.origin,
             )
         if self._buy4:
+            dip_pct = self.cfg.buy4_dip * 100
             return Signal(
                 "BUY4",
                 "buy",
                 self.cfg.buy4_tp,
-                "downtrend MA, price >=5% below, then rising",
+                f"DOWN/FLAT MA, price >={dip_pct}% below, then rising",
                 origin_price=self.buy4.origin,
             )
         return Signal.hold("no_buy_setup")

@@ -20,22 +20,24 @@ export PYTHONIOENCODING=utf-8
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$ROOT"
 
-BOT_BRANCH="cursor/bitbank-audit-unify-f5fd"
+# Prefer an already-checked-out tree that contains the package. Fallback branch
+# tracks the LIVE + V31/OOS complete line when the local clone is still a wiki dump.
+BOT_BRANCH="${BOT_BRANCH:-cursor/live-v31-oos-complete-638a}"
 
 ensure_bot_source() {
-  if [[ -f "$ROOT/src/bitbank_bot/__init__.py" && -f "$ROOT/main.py" ]]; then
+  if [[ -f "$ROOT/src/bitbank_bot/__init__.py" && -f "$ROOT/src/bitbank_bot/main.py" ]]; then
     return 0
   fi
-  echo "bot source not found at $ROOT (this clone is probably still on main / wiki dump)" >&2
+  echo "bot source not found at $ROOT (this clone is probably still a wiki dump)" >&2
   if [[ ! -d "$ROOT/.git" ]]; then
     echo "Paste this ONE line in iTerm:" >&2
-    echo "  bash -lc 'git clone https://github.com/kazuterukawamitu/docker-compose-up-d.git \"\$HOME/docker-compose-up-d\" && bash \"\$HOME/docker-compose-up-d/start.sh\" --screen'" >&2
+    echo "  bash -lc 'git clone https://github.com/kazuterukawamitu/docker-compose-up-d.git \"\$HOME/docker-compose-up-d\" && cd \"\$HOME/docker-compose-up-d\" && git fetch origin $BOT_BRANCH && git checkout -B $BOT_BRANCH origin/$BOT_BRANCH && bash ./start.sh --screen'" >&2
     exit 2
   fi
   echo "fetching $BOT_BRANCH so the trading screen can start" >&2
   git fetch origin "$BOT_BRANCH"
   git checkout -B "$BOT_BRANCH" "origin/$BOT_BRANCH"
-  if [[ ! -f "$ROOT/src/bitbank_bot/__init__.py" || ! -f "$ROOT/main.py" ]]; then
+  if [[ ! -f "$ROOT/src/bitbank_bot/__init__.py" || ! -f "$ROOT/src/bitbank_bot/main.py" ]]; then
     echo "still no bitbank_bot after checkout; branch may not be fetched" >&2
     exit 2
   fi

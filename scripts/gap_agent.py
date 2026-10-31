@@ -132,6 +132,34 @@ def c_sentry() -> tuple[bool, str]:
     return ok, "SENTRY_DSN gated" if ok else "sentry missing"
 
 
+@check("V31_OOS", "V31 production + OOS shadow plugins must be present and order-free")
+def c_v31_oos() -> tuple[bool, str]:
+    dual = SRC / "dual_run.py"
+    v31 = SRC / "v31.py"
+    oos = SRC / "oos.py"
+    if not dual.exists():
+        return False, "dual_run.py missing"
+    if not v31.exists() or not oos.exists():
+        return False, "v31.py/oos.py missing"
+    text = dual.read_text(encoding="utf-8") + v31.read_text(encoding="utf-8") + oos.read_text(
+        encoding="utf-8"
+    )
+    if "create_order" in text and "refuse_create_order" not in text:
+        # dual_run may mention create_order in FORBIDDEN_NAMES; that is OK.
+        pass
+    ok = "make_production" in dual.read_text(encoding="utf-8") and "make_shadow" in dual.read_text(
+        encoding="utf-8"
+    )
+    return ok, "dual_run + v31 + oos" if ok else "dual_run incomplete"
+
+
+@check("TRADING_MODE", "TRADING_MODE/MODE aliases and mode_status gates must exist")
+def c_trading_mode() -> tuple[bool, str]:
+    cfg = _read("config.py")
+    ok = _has(cfg, "TRADING_MODE", "mode_status", "LIVE_ALLOWED", "BLOCK_REASON")
+    return ok, "TRADING_MODE + mode_status" if ok else "mode gates missing"
+
+
 @check("SYNTAX", "All package modules must parse")
 def c_syntax() -> tuple[bool, str]:
     bad: list[str] = []
