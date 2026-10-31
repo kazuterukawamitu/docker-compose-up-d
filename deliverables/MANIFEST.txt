@@ -1,0 +1,6 @@
+bitbank-btc-jpy-bot deliverable (tar.gz, not zip)
+built_utc=2026-10-31T12:21:43Z
+sha256=b2920897f81c0019493238ad54ce2147249f21bdd2671f9f7aa79b3e5ac1e7b8
+bytes=110936
+files:
+117
