@@ -218,6 +218,10 @@ def decide_bar(
         return "BUY1", "ma_left_downtrend_cross_up"
     if trend == "UP" and crossed_down:
         return "BUY2", "uptrend_cross_down"
+    # BUY4-lite: DOWN/FLAT dip >=1% below MA then rising (matches package default).
+    dip = ma * (Decimal("1") - Decimal("0.01"))
+    if trend in {"DOWN", "FLAT"} and prev_close <= dip and close > prev_close and close < ma:
+        return "BUY4", "flat_or_down_dip_then_rise"
     return "HOLD", "no_buy_setup"
 
 

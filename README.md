@@ -16,46 +16,42 @@ Also: Shannon entropy fee-edge gate, daily PnL flatten coexisting with Granville
 
 ## Start (paste one line — ultra fast)
 
-DRY_RUN 取引画面 only (no Bitbank orders, no pip):
+Full package on Mac (recommended; DRY_RUN 取引画面):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/kazuterukawamitu/docker-compose-up-d/cursor/live-v31-oos-complete-638a/run.py -o "$HOME/bitbank_run.py" && python3 "$HOME/bitbank_run.py"
+curl -fsSL https://raw.githubusercontent.com/kazuterukawamitu/docker-compose-up-d/cursor/bitbank-live-complete-d4a7/scripts/mac_one_paste.sh | bash
 ```
 
-Full package + 取引画面 (clone + branch + start):
+Stdlib-only fallback (no pip, never live):
 
 ```bash
-bash -lc 'REPO="$HOME/docker-compose-up-d"; set -euo pipefail; if [ ! -d "$REPO/.git" ]; then git clone https://github.com/kazuterukawamitu/docker-compose-up-d.git "$REPO"; fi; cd "$REPO"; git fetch origin cursor/live-v31-oos-complete-638a; git checkout -B cursor/live-v31-oos-complete-638a origin/cursor/live-v31-oos-complete-638a; exec bash ./start.sh --screen'
+curl -fsSL https://raw.githubusercontent.com/kazuterukawamitu/docker-compose-up-d/cursor/bitbank-live-complete-d4a7/run.py -o "$HOME/bitbank_run.py" && python3 "$HOME/bitbank_run.py"
 ```
 
 Checked-out repo:
 
 ```bash
-python3 run.py
-# or
-bash paste.sh
-# or full package
-bash start.sh --screen
+bash paste.sh                 # prefers full package; falls back to run.py
+bash start.sh --screen        # full package
+python3 run.py                # stdlib DRY_RUN only
 ```
 
-You should see `Bitbank  BTC/JPY  取引画面` with 日時損益 and エントロピー. HOLD/待機 is normal when there is no Granville setup. Stop with Ctrl-C.
+You should see `Bitbank  BTC/JPY  取引画面` with 日時損益 and エントロピー. HOLD/待機 is normal when there is no Granville setup. BUY4 now fires on **DOWN or FLAT** dips (default 1%, was 5% DOWN-only). Stop with Ctrl-C.
 
-`python3 main.py` prefers the full package when httpx is installed; otherwise the same stdlib `run.py`.
+Audit artifacts: [docs/audit_artifacts/REQUIREMENTS_MATRIX.md](docs/audit_artifacts/REQUIREMENTS_MATRIX.md).
 
-## Live on Sakura VPS (Docker)
+## Unlock LIVE + Sakura VPS
 
 ```bash
 cp .env.example .env
 # set BITBANK_API_KEY / BITBANK_API_SECRET
-bash scripts/enable_live.sh          # writes DRY_RUN=false LIVE_TRADING=true TRADING_MODE=LIVE
-PYTHONPATH=src python3 -m bitbank_bot --check-config   # MODE=LIVE LIVE_ALLOWED=True
-docker compose up -d --build
-docker compose logs -f bitbank-bot
-
-# verification agent (purpose vs package; no orders)
-docker compose --profile verify up -d --build verify-agent gap-agent
-docker compose logs -f verify-agent
+bash scripts/enable_live.sh          # DRY_RUN=false LIVE_TRADING=true TRADING_MODE=LIVE
+PYTHONPATH=src python3 -m bitbank_bot --check-config   # expect LIVE_ALLOWED=true
+bash scripts/vps_deploy.sh           # docker compose + verify agents (on VPS)
+# or: ENABLE_LIVE=1 bash scripts/vps_deploy.sh
 ```
+
+Shadow/guard timers become **active** only while `run_forever` is looping. Private API / LIVE order flags become YES only with keys + dual confirm — they are not forced YES in DRY_RUN.
 
 Live trading stays **off** unless `.env` has `DRY_RUN=false` **and** `LIVE_TRADING=true` **and** both API keys (or `TRADING_MODE=LIVE` with keys when the dual flags are unset).
 

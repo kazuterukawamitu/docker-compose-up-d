@@ -126,7 +126,9 @@ class Buy4Machine:
 
     def update(self, close: Decimal, ma: Decimal, trend: Trend) -> bool:
         fired = False
-        if trend != Trend.DOWN:
+        # DOWN or FLAT: FLAT-only markets were starving BUY (no_buy_setup streaks).
+        # UP trend uses BUY2 pullbacks instead; reset the dip machine there.
+        if trend == Trend.UP:
             self.phase = "idle"
             self.low = None
             self.prev_close = close
@@ -372,7 +374,7 @@ class Strategy:
                 "BUY4",
                 "buy",
                 self.cfg.buy4_tp,
-                f"downtrend MA, price >={dip_pct}% below, then rising",
+                f"DOWN/FLAT MA, price >={dip_pct}% below, then rising",
                 origin_price=self.buy4.origin,
             )
         return Signal.hold("no_buy_setup")
