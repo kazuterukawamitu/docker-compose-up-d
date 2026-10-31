@@ -1342,7 +1342,7 @@ class Engine:
             MODE=mode["MODE"],
             DRY_RUN=mode["DRY_RUN"],
             LIVE_ALLOWED=mode["LIVE_ALLOWED"],
-            BLOCK_REASON=mode["BLOCK_REASON"] or self.last_block_reason or "-",
+            BLOCK_REASON=mode["BLOCK_REASON"],
         )
         slog(
             "DUAL_RUN",
