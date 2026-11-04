@@ -1,0 +1,12 @@
+# DRY_RUN pytest runner. Secrets stay out of the image. No live orders.
+services:
+  pytest:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.audit
+    environment:
+      DRY_RUN: "true"
+      LIVE_TRADING: "false"
+      AUDIT_LOOP_SEC: "0"
+    command: ["python3", "/app/scripts/quality_pipeline.py"]
+    restart: "no"

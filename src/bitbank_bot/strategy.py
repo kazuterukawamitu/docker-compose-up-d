@@ -367,11 +367,12 @@ class Strategy:
                 origin_price=self.buy3.origin,
             )
         if self._buy4:
+            dip_pct = self.cfg.buy4_dip * 100
             return Signal(
                 "BUY4",
                 "buy",
                 self.cfg.buy4_tp,
-                "downtrend MA, price >=5% below, then rising",
+                f"downtrend MA, price >={dip_pct}% below, then rising",
                 origin_price=self.buy4.origin,
             )
         return Signal.hold("no_buy_setup")

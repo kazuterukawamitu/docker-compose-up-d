@@ -7,7 +7,9 @@ runnable bot lives in `src/bitbank_bot/`. This branch is Bitbank `btc_jpy` only.
 
 | Area | Where | Role |
 | --- | --- | --- |
-| Config / dual live flags | `config.py` | `DRY_RUN` default; live needs `DRY_RUN=false` and `LIVE_TRADING=true` and keys |
+| Config / dual live flags | `config.py` | `DRY_RUN` default; live needs `DRY_RUN=false` and `LIVE_TRADING=true` and keys (or `TRADING_MODE=LIVE`) |
+| V31 + OOS dual | `dual_run.py`, `v31.py`, `oos.py` | Production + shadow evaluators; OOS never orders |
+| Evidence / timers | `evidence.py`, `loop_timers.py` | LIVE/private/order/OOS flags; shadow+guard active only while looping |
 | Public + private REST | `rest_client.py` | HMAC `ACCESS-TIME-WINDOW`; `create_order` requires `live_confirmed` |
 | README MA rules | `strategy.py`, `docs/STRATEGY.md` | BUY1–4 / SELL1–4; HOLD always has a reason |
 | Size | `amounts.py` | Only place that sets quantity; TARGET vs PLANNED; ACTUAL unset until fill |
@@ -91,6 +93,23 @@ bitFlyer, Coincheck, and GMO are not imported and are not executed.
     They never bypass risk or force a trade.
 19. **Optional Sentry.** `SENTRY_DSN` only. Initialize from Python / `.env`,
     never by pasting `import` into zsh.
+20. **V31 + OOS dual run.** `v31.py` feeds production signals; `oos.py` is
+    shadow-only (`execute=false`, no `create_order`). Shadow/guard timers are
+    evidence-based (`loop_timers.py`) and stay inactive until `run_forever`
+    cycles — `--check-config` alone never fakes YES.
+21. **BUY scarcity.** Default `BUY3_EXTEND` / `BUY4_DIP` are `0.01` (was 5%) so
+    pullback setups fire more often. Position size still uses
+    `MAX_BALANCE_USAGE=0.95` (buyable max %), not a 5% wallet slice.
+22. **HTF fail-open.** Missing 4h/1d data allows BUY with reason
+    `htf_unavailable_fail_open`. Dual DOWN still hard-blocks.
+23. **Reconcile sell fee.** Adopting a partially filled live sell estimates
+    taker fee so startup PnL matches the fill path.
+24. **Screen note.** `no_buy_setup` under DRY_RUN explains that cycles are
+    polls, not missed hourly entries.
+
+「ちゃんプロ」 (https://chanpro.jp/) is a kids Python course with a browser AI
+error helper. This repo’s analogue is `scripts/bug_scan.py` (one finding per
+anti-pattern hit) plus `scripts/gap_agent.py` — not an install of chanpro itself.
 
 ## What this bot does not do
 

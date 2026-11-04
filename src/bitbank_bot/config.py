@@ -33,8 +33,9 @@ DEFAULT_BUY2_TP = "0.05"
 DEFAULT_BUY2_GOLDEN_TP = "0.08"
 DEFAULT_BUY3_TP = "0.04"
 DEFAULT_BUY4_TP = "0.05"
-DEFAULT_BUY3_EXTEND = "0.05"
-DEFAULT_BUY4_DIP = "0.05"
+# Lower dip/extend → more Granville BUY3/BUY4 setups (fee edge still gates).
+DEFAULT_BUY3_EXTEND = "0.01"
+DEFAULT_BUY4_DIP = "0.01"
 DEFAULT_SELL1_EXTEND = "0.04"
 DEFAULT_SELL4_DIP = "0.04"
 DEFAULT_MAX_BALANCE_USAGE = "0.95"
@@ -195,7 +196,34 @@ class Config:
     def may_place_live_orders(self) -> bool:
         return (not self.dry_run) and self.live_trading and self.has_keys
 
+    def mode_status(self) -> dict[str, object]:
+        """Operator-facing gate summary (no secrets)."""
+        if self.may_place_live_orders:
+            block = ""
+            mode = "LIVE"
+        elif self.dry_run:
+            block = "dry_run"
+            mode = "DRY_RUN"
+        elif not self.live_trading:
+            block = "live_trading_false"
+            mode = "BLOCKED"
+        elif not self.has_keys:
+            block = "missing_api_keys"
+            mode = "BLOCKED"
+        else:
+            block = "unknown"
+            mode = "BLOCKED"
+        return {
+            "MODE": mode,
+            "DRY_RUN": self.dry_run,
+            "LIVE_TRADING": self.live_trading,
+            "LIVE_ALLOWED": self.may_place_live_orders,
+            "BLOCK_REASON": block,
+            "has_keys": self.has_keys,
+        }
+
     def safe_dict(self) -> dict[str, object]:
+        mode = self.mode_status()
         return {
             "pair": self.pair,
             "has_api_key": bool(self.api_key),
@@ -203,6 +231,9 @@ class Config:
             "dry_run": self.dry_run,
             "live_trading": self.live_trading,
             "may_place_live_orders": self.may_place_live_orders,
+            "MODE": mode["MODE"],
+            "LIVE_ALLOWED": mode["LIVE_ALLOWED"],
+            "BLOCK_REASON": mode["BLOCK_REASON"],
             "simulate_fill": self.simulate_fill,
             "candle_type": self.candle_type,
             "ma_period": self.ma_period,
@@ -225,6 +256,8 @@ class Config:
             "stop_loss_pct": str(self.stop_loss_pct),
             "enable_protective_exits": self.enable_protective_exits,
             "sell_unfilled_sec": self.sell_unfilled_sec,
+            "buy3_extend": str(self.buy3_extend),
+            "buy4_dip": str(self.buy4_dip),
         }
 
 
@@ -244,8 +277,33 @@ def load_config(
     if pair != PAIR:
         raise ConfigError("This bot executes Bitbank btc_jpy only")
 
-    dry_run = _bool(env, "DRY_RUN", True)
-    live_trading = _bool(env, "LIVE_TRADING", False)
+    # TRADING_MODE / MODE aliases (iTerm / Sakura .env often set these).
+    # LIVE → DRY_RUN=false + LIVE_TRADING=true (still needs API keys).
+    # DRY_RUN → paper mode. Explicit DRY_RUN / LIVE_TRADING win when set.
+    trading_mode = (
+        _env(env, "TRADING_MODE") or _env(env, "MODE") or ""
+    ).strip().upper()
+    dry_run_raw = _env(env, "DRY_RUN")
+    live_raw = _env(env, "LIVE_TRADING")
+    if dry_run_raw is None and live_raw is None and trading_mode in {
+        "LIVE",
+        "LIVE_TRADING",
+        "PRODUCTION",
+        "PROD",
+    }:
+        dry_run = False
+        live_trading = True
+    elif dry_run_raw is None and live_raw is None and trading_mode in {
+        "DRY_RUN",
+        "DRY",
+        "PAPER",
+        "SIM",
+    }:
+        dry_run = True
+        live_trading = False
+    else:
+        dry_run = _bool(env, "DRY_RUN", True)
+        live_trading = _bool(env, "LIVE_TRADING", False)
     if dry_run and live_trading:
         raise ConfigError("LIVE_TRADING and DRY_RUN cannot both be true")
     if not live_trading and not dry_run:

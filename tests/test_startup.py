@@ -52,8 +52,9 @@ def test_start_sh_is_venv_loop_launcher() -> None:
     assert ".env.example" in text
     assert "python3.12" in text
     assert "python3" in text
-    assert 'BOT_BRANCH="cursor/bitbank-audit-unify-f5fd"' in text
+    assert "cursor/live-v31-oos-complete-638a" in text
     assert "run.py" in text
+    assert "src/bitbank_bot/main.py" in text
 
 
 def test_loop_cli_exits_after_max_cycles(tmp_path, monkeypatch) -> None:

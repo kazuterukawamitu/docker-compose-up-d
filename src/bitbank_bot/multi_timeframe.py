@@ -85,8 +85,15 @@ def evaluate_htf(client: RestClient, cfg: Config) -> HtfVerdict:
     label_4h = trend_4h.value if trend_4h is not None else "unknown"
     label_1d = trend_1d.value if trend_1d is not None else "unknown"
     if trend_4h is None or trend_1d is None:
-        slog("STRATEGY", "htf unavailable; blocking BUY", trend_4h=label_4h, trend_1d=label_1d)
-        return HtfVerdict(False, "htf_unavailable", label_4h, label_1d)
+        # Fail-open on missing HTF data so a transient candle fetch does not
+        # burn a once-per-day Granville setup. Dual DOWN still blocks.
+        slog(
+            "STRATEGY",
+            "htf unavailable; allowing BUY (fail-open)",
+            trend_4h=label_4h,
+            trend_1d=label_1d,
+        )
+        return HtfVerdict(True, "htf_unavailable_fail_open", label_4h, label_1d)
     if trend_4h == Trend.DOWN and trend_1d == Trend.DOWN:
         slog("STRATEGY", "htf downtrend; blocking BUY", trend_4h=label_4h, trend_1d=label_1d)
         return HtfVerdict(False, "htf_downtrend", label_4h, label_1d)
