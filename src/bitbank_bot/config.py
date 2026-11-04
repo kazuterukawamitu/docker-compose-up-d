@@ -277,19 +277,17 @@ def load_config(
     if pair != PAIR:
         raise ConfigError("This bot executes Bitbank btc_jpy only")
 
-    # TRADING_MODE / MODE aliases (iTerm / Sakura .env often set these).
+    # TRADING_MODE alias (iTerm / Sakura .env often set these).
     # LIVE → DRY_RUN=false + LIVE_TRADING=true (still needs API keys).
     # DRY_RUN → paper mode. Explicit DRY_RUN / LIVE_TRADING win when set.
     trading_mode = (
-        _env(env, "TRADING_MODE") or _env(env, "MODE") or ""
+        _env(env, "TRADING_MODE") or ""
     ).strip().upper()
     dry_run_raw = _env(env, "DRY_RUN")
     live_raw = _env(env, "LIVE_TRADING")
     if dry_run_raw is None and live_raw is None and trading_mode in {
         "LIVE",
         "LIVE_TRADING",
-        "PRODUCTION",
-        "PROD",
     }:
         dry_run = False
         live_trading = True

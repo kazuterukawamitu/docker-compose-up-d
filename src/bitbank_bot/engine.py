@@ -963,6 +963,7 @@ class Engine:
                 if side == "sell":
                     if state.pending is None and start_amount > self.cfg.amount_precision:
                         # Apply already-filled portion to position/PnL before tracking remainder
+                        sell_fee = ZERO
                         if executed > ZERO and average > ZERO and state.position:
                             pos_amt = state.position.amount
                             if pos_amt > ZERO and executed <= pos_amt:
@@ -991,6 +992,7 @@ class Engine:
                             amount=start_amount,
                             filled_amount=executed,
                             filled_notional=(executed * average) if average > ZERO else ZERO,
+                            fee_jpy=sell_fee,
                             placed_at_ms=int(time.time() * 1000),
                         )
                         slog(
