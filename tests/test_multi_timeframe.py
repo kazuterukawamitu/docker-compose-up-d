@@ -67,8 +67,8 @@ def test_mixed_trends_allow_buy() -> None:
     assert verdict.reason == "htf_ok"
 
 
-def test_missing_htf_blocks_buy() -> None:
+def test_missing_htf_fail_open_allows_buy() -> None:
     c = cfg(ma_period=5)
     verdict = evaluate_htf(HtfRest([], []), c)  # type: ignore[arg-type]
-    assert verdict.allow_buy is False
-    assert verdict.reason == "htf_unavailable"
+    assert verdict.allow_buy is True
+    assert verdict.reason == "htf_unavailable_fail_open"

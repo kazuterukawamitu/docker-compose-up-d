@@ -58,7 +58,26 @@ class ScreenView:
     daily_pnl: str = "0"
     unrealized_jpy: str = "0"
     entropy: str = "0"
-    note: str = "HOLD/待機は正常です。Ctrl-C で停止"
+    note: str = ""
+    bar_phase: str = "poll"
+
+
+def screen_note(*, signal_reason: str, live_orders: bool, watchdog: str) -> str:
+    """Operator-facing note. Cycles ≫ closed bars; HOLD is usually healthy wait."""
+    if not live_orders:
+        dry = "DRY_RUNのため取引所へ注文しません。"
+    else:
+        dry = "LIVE: 条件成立時のみ実注文します。"
+    if signal_reason == "no_buy_setup":
+        return (
+            f"{dry} Granville BUY未成立（cycle≠足）。"
+            f"監視={watchdog}。Ctrl-C で停止"
+        )
+    if signal_reason.startswith("htf_"):
+        return f"{dry} 上位足フィルター: {signal_reason}。Ctrl-C で停止"
+    if signal_reason in {"fee_exceeds_edge", "pending_order", "stale_websocket"}:
+        return f"{dry} ブロック={signal_reason}。Ctrl-C で停止"
+    return f"{dry} HOLD/待機は正常です。Ctrl-C で停止"
 
 
 def format_screen(view: ScreenView) -> str:
@@ -72,6 +91,11 @@ def format_screen(view: ScreenView) -> str:
     ws = "接続" if view.ws_ok else "未接続（RESTで継続）"
     err = view.error or "なし"
     block = view.block_reason or "なし"
+    note = view.note or screen_note(
+        signal_reason=view.signal_reason,
+        live_orders=view.live_orders,
+        watchdog=view.watchdog,
+    )
     jst = datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S JST")
     bar = "═" * WIDTH
     lines = [
@@ -90,7 +114,7 @@ def format_screen(view: ScreenView) -> str:
         f"  ブロック     {block}",
         f"  エラー       {err}",
         bar,
-        f"  {view.note}",
+        f"  {note}",
         f"  {jst}",
         "  詳細ログは logs/bot.log（API秘密は出さない）",
         bar,
@@ -159,7 +183,9 @@ def view_from_engine(
     daily_pnl: object = "0",
     unrealized_jpy: object = "0",
     entropy: object = "0",
+    note: str = "",
 ) -> ScreenView:
+    wd = watchdog or "NORMAL WAIT"
     return ScreenView(
         pair=pair,
         mode="DRY_RUN" if dry_run else "LIVE",
@@ -174,7 +200,7 @@ def view_from_engine(
         position_amount=str(position_amount),
         position_avg=str(position_avg),
         position_tp=str(position_tp),
-        watchdog=watchdog or "NORMAL WAIT",
+        watchdog=wd,
         ws_ok=ws_ok,
         cycles=cycles,
         uptime_sec=uptime_sec,
@@ -184,6 +210,12 @@ def view_from_engine(
         daily_pnl=str(daily_pnl),
         unrealized_jpy=str(unrealized_jpy),
         entropy=str(entropy),
+        note=note
+        or screen_note(
+            signal_reason=signal_reason,
+            live_orders=live_orders,
+            watchdog=wd,
+        ),
     )
 
 

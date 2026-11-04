@@ -105,6 +105,18 @@ def main(argv: list[str] | None = None) -> int:
     )
     if args.check_config:
         slog("BOOT", "config ok", **cfg.safe_dict())
+        from bitbank_bot.dual_run import DualRun
+        from bitbank_bot.evidence import report_flags
+        from bitbank_bot.loop_timers import LoopEvidence, ShadowGuardTimers
+
+        dual = DualRun.discover()
+        dual.probe(cfg)
+        loop = LoopEvidence()
+        timers = ShadowGuardTimers(loop)
+        slog("DUAL_RUN", "check", **dual.safe_status())
+        slog("EVIDENCE", "flags", **report_flags(cfg, dual=dual, loop=loop, timers=timers))
+        slog("TIMERS", "shadow/guard", **timers.status_dict())
+        slog("MODE", "gates", **cfg.mode_status())
         rest.close()
         return 0
     if args.backtest:

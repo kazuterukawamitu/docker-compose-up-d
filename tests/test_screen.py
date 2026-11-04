@@ -42,6 +42,8 @@ def test_format_screen_is_trading_dashboard() -> None:
     assert "実注文なし" in text
     assert "HOLD" in text
     assert "12,288,796" in text
+    assert "Granville BUY未成立" in text
+    assert "注文しません" in text
 
 
 def test_should_use_screen_tty_default() -> None:
