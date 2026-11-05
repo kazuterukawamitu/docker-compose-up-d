@@ -66,6 +66,7 @@ class BotState:
     pending: PendingOrder | None = None
     paper_jpy: Decimal = ZERO
     paper_btc: Decimal = ZERO
+    deferred_sell: dict[str, Any] | None = None
 
 
 def load_state(path: str | Path, cfg: Config) -> BotState:
@@ -75,6 +76,7 @@ def load_state(path: str | Path, cfg: Config) -> BotState:
     pending: PendingOrder | None = None
     paper_jpy = cfg.dry_run_free_jpy
     paper_btc = cfg.dry_run_free_btc
+    deferred_sell: dict[str, Any] | None = None
     p = Path(path)
     if p.exists():
         raw = json.loads(p.read_text(encoding="utf-8"))
@@ -125,8 +127,9 @@ def load_state(path: str | Path, cfg: Config) -> BotState:
             paper_jpy = D(raw.get("paper_jpy"))
         if raw.get("paper_btc") not in (None, ""):
             paper_btc = D(raw.get("paper_btc"))
+        deferred_sell = raw.get("deferred_sell")
     return BotState(
-        position, risk, last_ts, time.monotonic(), pending, paper_jpy, paper_btc
+        position, risk, last_ts, time.monotonic(), pending, paper_jpy, paper_btc, deferred_sell
     )
 
 
@@ -142,6 +145,7 @@ def save_state(path: str | Path, state: BotState) -> None:
         "paper_btc": str(state.paper_btc),
         "position": None,
         "pending": None,
+        "deferred_sell": state.deferred_sell,
     }
     if state.pending:
         avg_price = ZERO
@@ -303,6 +307,16 @@ class Engine:
         # Pattern sells on missed closed bars must not vanish: defer to the
         # current bar (BUY still stays observe-only on historical bars).
         deferred_sell: Signal | None = None
+        if state.deferred_sell is not None:
+            ds = state.deferred_sell
+            tp_val = ds.get("tp_pct")
+            deferred_sell = Signal(
+                kind=str(ds.get("kind") or "SELL"),
+                side=str(ds.get("side") or "sell"),
+                tp_pct=D(tp_val) if tp_val not in (None, "") else None,
+                reason=str(ds.get("reason") or "deferred_catchup"),
+            )
+            state.deferred_sell = None
         for i, snap in enumerate(snaps):
             is_last = i == len(snaps) - 1
             is_new = state.last_candle_ts > 0 and snap.timestamp_ms > state.last_candle_ts
@@ -386,6 +400,7 @@ class Engine:
                     reason=deferred_sell.reason,
                 )
                 signal = deferred_sell
+                deferred_sell = None
             if not execute or heartbeat:
                 if heartbeat:
                     slog("STRATEGY", "candle already processed", candle_ts=snap.timestamp_ms)
@@ -394,6 +409,12 @@ class Engine:
                 if not is_last:
                     if signal.side == "sell" and state.position is not None:
                         deferred_sell = signal
+                        state.deferred_sell = {
+                            "kind": signal.kind,
+                            "side": signal.side,
+                            "tp_pct": str(signal.tp_pct) if signal.tp_pct is not None else None,
+                            "reason": signal.reason,
+                        }
                         slog(
                             "STRATEGY",
                             "catchup sell deferred to current bar",
@@ -615,11 +636,8 @@ class Engine:
             )
             state.pending = None
             return
-        if pending.filled_amount > ZERO and pending.filled_notional <= ZERO:
-            if not self._repair_pending_basis(pending, result, executor):
-                return
-        if result.executed_amount <= pending.filled_amount:
-            if result.reason == "canceled_partial":
+        if result.reason == "canceled_partial":
+            if result.executed_amount <= pending.filled_amount:
                 slog(
                     "ORDER_STATUS",
                     "canceled remainder; pending cleared",
@@ -627,6 +645,17 @@ class Engine:
                 )
                 state.pending = None
                 return
+        if pending.filled_amount > ZERO and pending.filled_notional <= ZERO:
+            if not self._repair_pending_basis(pending, result, executor):
+                if result.reason == "canceled_partial":
+                    slog(
+                        "ORDER_STATUS",
+                        "canceled with unrecoverable basis; pending cleared",
+                        order_id=pending.order_id,
+                    )
+                    state.pending = None
+                return
+        if result.executed_amount <= pending.filled_amount:
             if result.reason == "fill":
                 slog(
                     "ORDER_STATUS",
@@ -1256,8 +1285,10 @@ class Engine:
                 RiskManager(self.cfg),
                 0,
                 time.monotonic(),
-                paper_jpy=self.cfg.dry_run_free_jpy,
-                paper_btc=self.cfg.dry_run_free_btc,
+                None,
+                self.cfg.dry_run_free_jpy,
+                self.cfg.dry_run_free_btc,
+                None,
             )
         else:
             candles = self.cache.merge(candles)
