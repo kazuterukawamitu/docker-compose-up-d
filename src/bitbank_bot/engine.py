@@ -300,6 +300,9 @@ class Engine:
         )
         signal = Signal.hold("no_eval")
         oos_signal = Signal.hold("oos_no_eval")
+        # Pattern sells on missed closed bars must not vanish: defer to the
+        # current bar (BUY still stays observe-only on historical bars).
+        deferred_sell: Signal | None = None
         for i, snap in enumerate(snaps):
             is_last = i == len(snaps) - 1
             is_new = state.last_candle_ts > 0 and snap.timestamp_ms > state.last_candle_ts
@@ -369,17 +372,40 @@ class Engine:
                             save_state(self.cfg.state_path, state)
                         self.last_signal = signal
                         continue
+            if (
+                execute
+                and is_last
+                and deferred_sell is not None
+                and state.position is not None
+                and signal.side != "sell"
+            ):
+                slog(
+                    "STRATEGY",
+                    "applying deferred catchup sell",
+                    kind=deferred_sell.kind,
+                    reason=deferred_sell.reason,
+                )
+                signal = deferred_sell
             if not execute or heartbeat:
                 if heartbeat:
                     slog("STRATEGY", "candle already processed", candle_ts=snap.timestamp_ms)
                 continue
             if signal.side in {"buy", "sell"}:
                 if not is_last:
-                    slog(
-                        "STRATEGY",
-                        "catchup observe only; no order on historical bar",
-                        candle_ts=snap.timestamp_ms,
-                    )
+                    if signal.side == "sell" and state.position is not None:
+                        deferred_sell = signal
+                        slog(
+                            "STRATEGY",
+                            "catchup sell deferred to current bar",
+                            candle_ts=snap.timestamp_ms,
+                            kind=signal.kind,
+                        )
+                    else:
+                        slog(
+                            "STRATEGY",
+                            "catchup observe only; no order on historical bar",
+                            candle_ts=snap.timestamp_ms,
+                        )
                     state.last_candle_ts = snap.timestamp_ms
                     if persist:
                         save_state(self.cfg.state_path, state)

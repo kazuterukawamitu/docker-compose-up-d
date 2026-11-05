@@ -183,6 +183,63 @@ def test_engine_catchup_evaluates_missed_closed_bars(tmp_path) -> None:
     assert state.last_candle_ts == snaps[-3].timestamp_ms
 
 
+def test_engine_catchup_defers_pattern_sell_to_current_bar(tmp_path) -> None:
+    """A sell on a missed closed bar must still flatten on the live bar."""
+    from bitbank_bot.engine import BotState
+    from bitbank_bot.money import D
+    from bitbank_bot.risk import RiskManager
+    from bitbank_bot.strategy import Position, build_snapshots
+
+    c = cfg(
+        state_path=str(tmp_path / "state.json"),
+        lock_path=str(tmp_path / "bot.lock"),
+        log_dir=str(tmp_path / "logs"),
+        enable_websocket=False,
+        enable_htf_filter=False,
+        enable_protective_exits=False,
+        dry_run=True,
+        live_trading=False,
+        simulate_fill=True,
+        ma_period=3,
+        short_ma_period=3,
+        long_ma_period=5,
+    )
+    engine = Engine(c, client=FakeRest())  # type: ignore[arg-type]
+    candles = synthetic_candles(40)
+    snaps = build_snapshots([x.close for x in candles], [x.timestamp_ms for x in candles], c)
+    assert len(snaps) >= 4
+    missed = snaps[-2]
+    current = snaps[-1]
+    state = BotState(
+        Position(
+            amount=D("0.001"),
+            average_price=D("10000000"),
+            tp_pct=D("0.03"),
+            entry_candle_index=missed.index - 5,
+            entry_candle_ts=1,
+            actual_execution_jpy=D("10000"),
+            kind="BUY1",
+        ),
+        RiskManager(c),
+        snaps[-3].timestamp_ms,
+        0.0,
+        paper_jpy=D("90000"),
+        paper_btc=D("0.001"),
+    )
+
+    def fake_evaluate(self, snap, position, _missed=missed):  # type: ignore[no-untyped-def]
+        if position is not None and snap.timestamp_ms == _missed.timestamp_ms:
+            return Signal("SELL1", "sell", None, "catchup_sell")
+        return Signal.hold("no_setup")
+
+    with patch("bitbank_bot.strategy.Strategy.evaluate", new=fake_evaluate):
+        signal = engine.process_candles(candles, state, execute=True, persist=False)
+    assert signal.side == "sell"
+    assert signal.kind == "SELL1"
+    assert state.position is None
+    assert state.last_candle_ts == current.timestamp_ms
+
+
 def test_engine_skips_order_when_balance_fetch_fails(tmp_path) -> None:
     c = cfg(
         state_path=str(tmp_path / "state.json"),

@@ -45,6 +45,18 @@ def c_sell_intrabar() -> tuple[bool, str]:
     return ok, "price_exit + Engine._protective_signal" if ok else "missing ticker exit path"
 
 
+@check("CATCHUP_SELL", "Missed closed-bar pattern sells must defer to the current bar")
+def c_catchup_sell() -> tuple[bool, str]:
+    engine = _read("engine.py")
+    ok = _has(
+        engine,
+        "deferred_sell",
+        "catchup sell deferred to current bar",
+        "applying deferred catchup sell",
+    )
+    return ok, "deferred catchup sell" if ok else "catchup still drops pattern sells"
+
+
 @check("STOP_MARKET", "Independent stop / emergency flatten path must exist")
 def c_stop() -> tuple[bool, str]:
     decision = _read("decision.py")
