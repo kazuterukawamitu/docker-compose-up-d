@@ -60,6 +60,75 @@ def incremental_notional(
     return cumulative, delta
 
 
+def trade_rows_for_order(
+    trades: list[dict[str, Any]],
+    order_id: str,
+    *,
+    side: str | None = None,
+    pair: str | None = None,
+) -> list[dict[str, Any]] | None:
+    """Return validated trades for ``order_id``, or ``None`` on mismatch."""
+    if not isinstance(trades, list):
+        return None
+    matched: list[dict[str, Any]] = []
+    want_side = (side or "").strip().lower()
+    want_pair = (pair or "").strip().lower()
+    for row in trades:
+        if str(row.get("order_id")) != str(order_id):
+            continue
+        if want_side:
+            row_side = str(row.get("side") or "").strip().lower()
+            if row_side and row_side != want_side:
+                return None
+        if want_pair:
+            row_pair = str(row.get("pair") or "").strip().lower()
+            if row_pair and row_pair != want_pair:
+                return None
+        amount = D(row.get("amount") or 0)
+        price = D(row.get("price") or 0)
+        if amount <= ZERO or price <= ZERO:
+            return None
+        matched.append(row)
+    if not matched:
+        return None
+    matched.sort(key=lambda row: int(row.get("executed_at") or row.get("created_at") or 0))
+    return matched
+
+
+def basis_from_trade_rows(
+    rows: list[dict[str, Any]],
+    target_amount: Decimal,
+) -> tuple[Decimal, Decimal, Decimal, Decimal] | None:
+    """Accumulate exact ``target_amount`` of fills into notional + fees.
+
+    Incomplete or ambiguous history returns ``None`` so the engine can halt
+    without guessing averages.
+    """
+    target = D(target_amount)
+    if target <= ZERO:
+        return None
+    taken = ZERO
+    notional = ZERO
+    fee_jpy = ZERO
+    fee_btc = ZERO
+    for row in rows:
+        amount = D(row.get("amount") or 0)
+        price = D(row.get("price") or 0)
+        remaining = target - taken
+        if remaining <= ZERO:
+            break
+        if amount > remaining:
+            # Partial last trade would require guessing; refuse.
+            return None
+        taken += amount
+        notional += amount * price
+        fee_jpy += D(row.get("fee_amount_quote") or 0) + D(row.get("fee_occurred_amount") or 0)
+        fee_btc += D(row.get("fee_amount_base") or 0)
+    if taken != target:
+        return None
+    return taken, notional, fee_jpy, fee_btc
+
+
 class OrderClient(Protocol):
     def get_active_orders(self, pair: str) -> list[dict[str, Any]]: ...
 
@@ -124,7 +193,7 @@ class OrderExecutor:
         slog("ORDER_STATUS", "refreshed from GET /user/spot/order", order_id=order_id)
         return data
 
-    def _trade_fees(self, order_id: str) -> tuple[Decimal, Decimal] | None:
+    def _trade_rows(self, order_id: str, *, side: str | None = None) -> list[dict[str, Any]] | None:
         getter = getattr(self.client, "get_trade_history", None)
         if not callable(getter):
             return None
@@ -133,15 +202,39 @@ class OrderExecutor:
         except Exception as exc:
             slog("ERROR", "trade_history failed", error=type(exc).__name__)
             return None
-        if not isinstance(trades, list):
-            return None
-        matched = [row for row in trades if str(row.get("order_id")) == str(order_id)]
+        return trade_rows_for_order(
+            trades if isinstance(trades, list) else [],
+            order_id,
+            side=side,
+            pair=self.cfg.pair,
+        )
+
+    def _trade_fees(self, order_id: str) -> tuple[Decimal, Decimal] | None:
+        matched = self._trade_rows(order_id)
         if not matched:
             return None
-        fee_jpy = sum((D(row.get("fee_amount_quote") or 0) for row in matched), ZERO)
+        fee_jpy = sum(
+            (
+                D(row.get("fee_amount_quote") or 0) + D(row.get("fee_occurred_amount") or 0)
+                for row in matched
+            ),
+            ZERO,
+        )
         fee_btc = sum((D(row.get("fee_amount_base") or 0) for row in matched), ZERO)
-        occurred = sum((D(row.get("fee_occurred_amount") or 0) for row in matched), ZERO)
-        return fee_jpy + occurred, fee_btc
+        return fee_jpy, fee_btc
+
+    def trade_fill_basis(
+        self,
+        order_id: str,
+        target_amount: Decimal,
+        *,
+        side: str | None = None,
+    ) -> tuple[Decimal, Decimal, Decimal, Decimal] | None:
+        """Restore filled size/notional/fees for an order from trade history."""
+        rows = self._trade_rows(order_id, side=side)
+        if not rows:
+            return None
+        return basis_from_trade_rows(rows, target_amount)
 
     def _fees(
         self,

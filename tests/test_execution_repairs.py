@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 from bitbank_bot.engine import BotState, Engine, PendingOrder
 from bitbank_bot.market_data import synthetic_candles
-from bitbank_bot.money import D
+from bitbank_bot.money import D, ZERO
 from bitbank_bot.orders import OrderResult
 from bitbank_bot.risk import RiskManager
 from bitbank_bot.strategy import Position, Signal
@@ -106,6 +106,269 @@ def test_canceled_pending_does_not_block_the_next_decision(tmp_path) -> None:
         engine.process_candles(synthetic_candles(40), state, execute=True, persist=False)
     assert state.pending is None
     rest.create_order.assert_not_called()
+
+
+def test_missing_pending_notional_restored_from_trade_history(tmp_path) -> None:
+    """Restart with filled_amount but no notional must not double-book the next slice."""
+    engine = _engine(
+        tmp_path,
+        dry_run=False,
+        live_trading=True,
+        api_key="k",
+        api_secret="s",
+    )
+    rest = engine.client
+    rest.free_amount.side_effect = lambda asset: D("100000") if asset == "jpy" else D("0.0008")
+    rest.get_order.return_value = {
+        "order_id": "99",
+        "status": "PARTIALLY_FILLED",
+        "executed_amount": "0.0008",
+        "average_price": "11000000",
+        "start_amount": "0.001",
+        "fee_amount_quote": "0",
+    }
+    rest.get_trade_history.return_value = [
+        {
+            "order_id": "99",
+            "side": "buy",
+            "pair": "btc_jpy",
+            "amount": "0.0004",
+            "price": "10000000",
+            "fee_amount_quote": "4.8",
+            "executed_at": 1,
+        },
+        {
+            "order_id": "99",
+            "side": "buy",
+            "pair": "btc_jpy",
+            "amount": "0.0004",
+            "price": "12000000",
+            "fee_amount_quote": "5.76",
+            "executed_at": 2,
+        },
+    ]
+    candles = synthetic_candles(40)
+    state = BotState(
+        Position(
+            amount=D("0.0004"),
+            average_price=D("10000000"),
+            tp_pct=D("0.03"),
+            entry_candle_index=1,
+            entry_candle_ts=1,
+            actual_execution_jpy=D("4000"),
+            kind="BUY1",
+            fee_jpy=D("4.8"),
+        ),
+        RiskManager(engine.cfg),
+        candles[-1].timestamp_ms,
+        0.0,
+        pending=PendingOrder(
+            order_id="99",
+            side="buy",
+            kind="BUY1",
+            tp_pct=D("0.03"),
+            index=1,
+            timestamp_ms=1,
+            amount=D("0.001"),
+            filled_amount=D("0.0004"),
+            filled_notional=ZERO,
+        ),
+    )
+    with patch(
+        "bitbank_bot.strategy.Strategy.evaluate",
+        return_value=Signal.hold("pending_fill"),
+    ):
+        engine.process_candles(candles, state, execute=True, persist=False)
+    assert state.position is not None
+    assert state.position.amount == D("0.0008")
+    # Prior 4000 + new slice 4800 (0.0004 * 12_000_000), not 8800 misbooked.
+    assert state.position.actual_execution_jpy == D("8800")
+    assert state.pending is not None
+    assert state.pending.filled_amount == D("0.0008")
+    assert state.pending.filled_notional == D("8800")
+
+
+def test_missing_pending_notional_blocks_when_history_incomplete(tmp_path) -> None:
+    engine = _engine(
+        tmp_path,
+        dry_run=False,
+        live_trading=True,
+        api_key="k",
+        api_secret="s",
+    )
+    rest = engine.client
+    rest.free_amount.side_effect = lambda asset: D("100000") if asset == "jpy" else D("0.0004")
+    rest.get_order.return_value = {
+        "order_id": "99",
+        "status": "PARTIALLY_FILLED",
+        "executed_amount": "0.0008",
+        "average_price": "11000000",
+        "start_amount": "0.001",
+    }
+    rest.get_trade_history.return_value = []
+    candles = synthetic_candles(40)
+    state = BotState(
+        Position(
+            amount=D("0.0004"),
+            average_price=D("10000000"),
+            tp_pct=D("0.03"),
+            entry_candle_index=1,
+            entry_candle_ts=1,
+            actual_execution_jpy=D("4000"),
+            kind="BUY1",
+        ),
+        RiskManager(engine.cfg),
+        candles[-1].timestamp_ms,
+        0.0,
+        pending=PendingOrder(
+            order_id="99",
+            side="buy",
+            kind="BUY1",
+            tp_pct=D("0.03"),
+            index=1,
+            timestamp_ms=1,
+            amount=D("0.001"),
+            filled_amount=D("0.0004"),
+            filled_notional=ZERO,
+        ),
+    )
+    with patch(
+        "bitbank_bot.strategy.Strategy.evaluate",
+        return_value=Signal.hold("pending_fill"),
+    ):
+        engine.process_candles(candles, state, execute=True, persist=False)
+    assert state.position is not None
+    assert state.position.amount == D("0.0004")
+    assert state.pending is not None
+    assert state.pending.filled_amount == D("0.0004")
+    assert state.pending.filled_notional == ZERO
+
+
+def test_venue_snapshot_repairs_notional_when_amounts_unchanged(tmp_path) -> None:
+    engine = _engine(
+        tmp_path,
+        dry_run=False,
+        live_trading=True,
+        api_key="k",
+        api_secret="s",
+    )
+    rest = engine.client
+    rest.get_order.return_value = {
+        "order_id": "55",
+        "status": "PARTIALLY_FILLED",
+        "executed_amount": "0.0004",
+        "average_price": "10000000",
+        "start_amount": "0.001",
+        "fee_amount_quote": "4.8",
+    }
+    state = BotState(
+        None,
+        RiskManager(engine.cfg),
+        0,
+        0.0,
+        pending=PendingOrder(
+            order_id="55",
+            side="buy",
+            kind="BUY1",
+            tp_pct=D("0.03"),
+            index=1,
+            timestamp_ms=1,
+            amount=D("0.001"),
+            filled_amount=D("0.0004"),
+            filled_notional=ZERO,
+        ),
+    )
+    engine._poll_pending(state)
+    assert state.pending is not None
+    assert state.pending.filled_notional == D("4000")
+    assert state.pending.fee_jpy == D("4.8")
+
+
+def test_canceled_partially_filled_books_delta_then_clears(tmp_path) -> None:
+    engine = _engine(
+        tmp_path,
+        dry_run=False,
+        live_trading=True,
+        api_key="k",
+        api_secret="s",
+    )
+    rest = engine.client
+    rest.free_amount.side_effect = lambda asset: D("100000") if asset == "jpy" else D("0.0008")
+    rest.get_order.return_value = {
+        "order_id": "77",
+        "status": "CANCELED_PARTIALLY_FILLED",
+        "executed_amount": "0.0008",
+        "average_price": "11000000",
+        "start_amount": "0.001",
+        "fee_amount_quote": "10.56",
+    }
+    candles = synthetic_candles(40)
+    state = BotState(
+        Position(
+            amount=D("0.0004"),
+            average_price=D("10000000"),
+            tp_pct=D("0.03"),
+            entry_candle_index=1,
+            entry_candle_ts=1,
+            actual_execution_jpy=D("4000"),
+            kind="BUY1",
+        ),
+        RiskManager(engine.cfg),
+        candles[-1].timestamp_ms,
+        0.0,
+        pending=PendingOrder(
+            order_id="77",
+            side="buy",
+            kind="BUY1",
+            tp_pct=D("0.03"),
+            index=1,
+            timestamp_ms=1,
+            amount=D("0.001"),
+            filled_amount=D("0.0004"),
+            filled_notional=D("4000"),
+            fee_jpy=D("4.8"),
+        ),
+    )
+    with patch(
+        "bitbank_bot.strategy.Strategy.evaluate",
+        return_value=Signal.hold("pending_fill"),
+    ):
+        engine.process_candles(candles, state, execute=True, persist=False)
+    assert state.position is not None
+    assert state.position.amount == D("0.0008")
+    assert state.pending is None
+
+
+def test_apply_fill_rejects_zero_execution_jpy(tmp_path) -> None:
+    engine = _engine(tmp_path)
+    state = BotState(None, RiskManager(engine.cfg), 0, 0.0)
+    result = OrderResult(
+        True,
+        "fill",
+        False,
+        False,
+        "1",
+        "FULLY_FILLED",
+        D("0.001"),
+        D("0"),
+        D("0"),
+        None,
+    )
+    engine._apply_fill(
+        Signal("BUY1", "buy", D("0.03"), "t"),
+        MagicMock(
+            amount=D("0.001"),
+            target_jpy=D("10000"),
+            planned_order_jpy=D("10000"),
+        ),
+        result,
+        1,
+        1,
+        state,
+        D("100000"),
+        D("0"),
+    )
+    assert state.position is None
 
 
 def test_second_partial_uses_incremental_notional(tmp_path) -> None:

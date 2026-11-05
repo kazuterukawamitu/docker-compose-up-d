@@ -30,3 +30,5 @@
 | R25 | Patches 0002 / 0005 | Locate external patch files | Not in this git history | Names are V53-sandbox external | Do not claim applied; use in-tree five patches | N/A |
 | R26 | VPS identity 2026-11-05 | Canonical vs running | systemd dead; dry-run transfer PID | Not LIVE | VPS_STATE_20261105.md + ONE_LINERS | PARTIAL |
 | R27 | V31/OOS order authority | OOS never orders | dual_run shadow_has_order_authority=False | — | Confirmed in audit | DONE |
+| R28 | pending notional missing | Restore from venue/history or block | Was PARTIAL (avg_price only) | Double-book risk on next slice | `_repair_pending_basis` + trade_fill_basis | DONE |
+| R29 | Zero execution JPY fill | Reject ledger write | Accepted `actual_jpy==0` | Phantom zero-cost size | `_apply_fill` rejects <=0 | DONE |

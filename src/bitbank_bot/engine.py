@@ -533,6 +533,65 @@ class Engine:
         )
         self._apply_fill(signal, plan, result, index, ts, state, jpy, btc)
 
+    def _repair_pending_basis(
+        self,
+        pending: PendingOrder,
+        result: OrderResult,
+        executor: OrderExecutor,
+    ) -> bool:
+        """Ensure prior fill notional/fees are known before booking a new slice.
+
+        Guessing from a later cumulative average is unsafe. Prefer an exact
+        venue snapshot when sizes match, else order-scoped trade history.
+        """
+        if pending.filled_amount <= ZERO:
+            return True
+        if pending.filled_notional > ZERO:
+            return True
+        if (
+            result.executed_amount == pending.filled_amount
+            and result.average_price > ZERO
+        ):
+            pending.filled_notional = pending.filled_amount * result.average_price
+            if pending.fee_jpy <= ZERO and pending.fee_btc <= ZERO:
+                pending.fee_jpy = result.fee_jpy
+                pending.fee_btc = result.fee_btc
+            slog(
+                "ORDER_STATUS",
+                "pending notional restored from venue snapshot",
+                order_id=pending.order_id,
+                filled_amount=str(pending.filled_amount),
+                filled_notional=str(pending.filled_notional),
+            )
+            return True
+        basis = executor.trade_fill_basis(
+            pending.order_id,
+            pending.filled_amount,
+            side=pending.side,
+        )
+        if basis is None:
+            slog(
+                "ERROR",
+                "pending_execution_notional_missing",
+                order_id=pending.order_id,
+                filled_amount=str(pending.filled_amount),
+                venue_executed=str(result.executed_amount),
+            )
+            return False
+        _amt, notional, fee_jpy, fee_btc = basis
+        pending.filled_notional = notional
+        if pending.fee_jpy <= ZERO and pending.fee_btc <= ZERO:
+            pending.fee_jpy = fee_jpy
+            pending.fee_btc = fee_btc
+        slog(
+            "ORDER_STATUS",
+            "pending notional restored from trade history",
+            order_id=pending.order_id,
+            filled_amount=str(pending.filled_amount),
+            filled_notional=str(pending.filled_notional),
+        )
+        return True
+
     def _poll_pending(self, state: BotState) -> None:
         pending = state.pending
         if pending is None:
@@ -556,6 +615,9 @@ class Engine:
             )
             state.pending = None
             return
+        if pending.filled_amount > ZERO and pending.filled_notional <= ZERO:
+            if not self._repair_pending_basis(pending, result, executor):
+                return
         if result.executed_amount <= pending.filled_amount:
             if result.reason == "canceled_partial":
                 slog(
@@ -584,6 +646,15 @@ class Engine:
             pending.filled_notional, result.executed_amount, result.average_price
         )
         incr_avg = (delta_notional / delta) if delta > ZERO else result.average_price
+        # When venue fees are estimated on the full cumulative notional, seed
+        # the prior slice fee so the delta does not charge the whole order.
+        if (
+            result.fee_estimated
+            and pending.filled_amount > ZERO
+            and pending.fee_jpy <= ZERO
+            and pending.filled_notional > ZERO
+        ):
+            pending.fee_jpy = pending.filled_notional * D(self.cfg.taker_fee_rate)
         delta_fee = result.fee_jpy - pending.fee_jpy
         if delta_fee < ZERO:
             delta_fee = ZERO
@@ -690,8 +761,12 @@ class Engine:
         if not result.ok or result.executed_amount <= ZERO:
             return
         actual_jpy = result.actual_execution_jpy
-        if actual_jpy is None:
-            slog("ERROR", "fill missing actual_execution_jpy; ignoring TARGET/PLANNED")
+        if actual_jpy is None or actual_jpy <= ZERO:
+            slog(
+                "ERROR",
+                "fill missing or zero actual_execution_jpy; ignoring TARGET/PLANNED",
+                executed_amount=str(result.executed_amount),
+            )
             return
         stage = "SIMULATED_FILL" if result.simulated or self.cfg.dry_run else "FILL"
         slog(

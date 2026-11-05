@@ -85,6 +85,22 @@ def c_partial() -> tuple[bool, str]:
     return ok and not bad, "incremental_notional used" if ok else "cum-avg × delta risk"
 
 
+@check(
+    "PENDING_NOTIONAL_RESTORE",
+    "Missing pending fill notional must restore from venue/history or halt",
+)
+def c_pending_notional() -> tuple[bool, str]:
+    engine = _read("engine.py")
+    orders = _read("orders.py")
+    ok = _has(
+        engine,
+        "_repair_pending_basis",
+        "pending_execution_notional_missing",
+        "trade_fill_basis",
+    ) and _has(orders, "trade_fill_basis", "basis_from_trade_rows")
+    return ok, "venue/history restore + halt" if ok else "missing notional restore"
+
+
 @check("FEE_PNL", "Realized PnL must deduct quote fees")
 def c_fee() -> tuple[bool, str]:
     engine = _read("engine.py")
