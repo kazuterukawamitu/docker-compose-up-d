@@ -45,6 +45,18 @@ def c_sell_intrabar() -> tuple[bool, str]:
     return ok, "price_exit + Engine._protective_signal" if ok else "missing ticker exit path"
 
 
+@check("CATCHUP_SELL", "Missed closed-bar pattern sells must defer to the current bar")
+def c_catchup_sell() -> tuple[bool, str]:
+    engine = _read("engine.py")
+    ok = _has(
+        engine,
+        "deferred_sell",
+        "catchup sell deferred to current bar",
+        "applying deferred catchup sell",
+    )
+    return ok, "deferred catchup sell" if ok else "catchup still drops pattern sells"
+
+
 @check("STOP_MARKET", "Independent stop / emergency flatten path must exist")
 def c_stop() -> tuple[bool, str]:
     decision = _read("decision.py")
@@ -71,6 +83,22 @@ def c_partial() -> tuple[bool, str]:
     ok = _has(engine, "incremental_notional", "filled_notional")
     bad = "delta * avg" in engine and "incremental_notional" not in engine
     return ok and not bad, "incremental_notional used" if ok else "cum-avg × delta risk"
+
+
+@check(
+    "PENDING_NOTIONAL_RESTORE",
+    "Missing pending fill notional must restore from venue/history or halt",
+)
+def c_pending_notional() -> tuple[bool, str]:
+    engine = _read("engine.py")
+    orders = _read("orders.py")
+    ok = _has(
+        engine,
+        "_repair_pending_basis",
+        "pending_execution_notional_missing",
+        "trade_fill_basis",
+    ) and _has(orders, "trade_fill_basis", "basis_from_trade_rows")
+    return ok, "venue/history restore + halt" if ok else "missing notional restore"
 
 
 @check("FEE_PNL", "Realized PnL must deduct quote fees")

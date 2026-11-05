@@ -66,6 +66,7 @@ class BotState:
     pending: PendingOrder | None = None
     paper_jpy: Decimal = ZERO
     paper_btc: Decimal = ZERO
+    deferred_sell: dict[str, Any] | None = None
 
 
 def load_state(path: str | Path, cfg: Config) -> BotState:
@@ -75,6 +76,7 @@ def load_state(path: str | Path, cfg: Config) -> BotState:
     pending: PendingOrder | None = None
     paper_jpy = cfg.dry_run_free_jpy
     paper_btc = cfg.dry_run_free_btc
+    deferred_sell: dict[str, Any] | None = None
     p = Path(path)
     if p.exists():
         raw = json.loads(p.read_text(encoding="utf-8"))
@@ -125,8 +127,9 @@ def load_state(path: str | Path, cfg: Config) -> BotState:
             paper_jpy = D(raw.get("paper_jpy"))
         if raw.get("paper_btc") not in (None, ""):
             paper_btc = D(raw.get("paper_btc"))
+        deferred_sell = raw.get("deferred_sell")
     return BotState(
-        position, risk, last_ts, time.monotonic(), pending, paper_jpy, paper_btc
+        position, risk, last_ts, time.monotonic(), pending, paper_jpy, paper_btc, deferred_sell
     )
 
 
@@ -142,6 +145,7 @@ def save_state(path: str | Path, state: BotState) -> None:
         "paper_btc": str(state.paper_btc),
         "position": None,
         "pending": None,
+        "deferred_sell": state.deferred_sell,
     }
     if state.pending:
         avg_price = ZERO
@@ -300,6 +304,19 @@ class Engine:
         )
         signal = Signal.hold("no_eval")
         oos_signal = Signal.hold("oos_no_eval")
+        # Pattern sells on missed closed bars must not vanish: defer to the
+        # current bar (BUY still stays observe-only on historical bars).
+        deferred_sell: Signal | None = None
+        if state.deferred_sell is not None:
+            ds = state.deferred_sell
+            tp_val = ds.get("tp_pct")
+            deferred_sell = Signal(
+                kind=str(ds.get("kind") or "SELL"),
+                side=str(ds.get("side") or "sell"),
+                tp_pct=D(tp_val) if tp_val not in (None, "") else None,
+                reason=str(ds.get("reason") or "deferred_catchup"),
+            )
+            state.deferred_sell = None
         for i, snap in enumerate(snaps):
             is_last = i == len(snaps) - 1
             is_new = state.last_candle_ts > 0 and snap.timestamp_ms > state.last_candle_ts
@@ -369,17 +386,47 @@ class Engine:
                             save_state(self.cfg.state_path, state)
                         self.last_signal = signal
                         continue
+            if (
+                execute
+                and is_last
+                and deferred_sell is not None
+                and state.position is not None
+                and signal.side != "sell"
+            ):
+                slog(
+                    "STRATEGY",
+                    "applying deferred catchup sell",
+                    kind=deferred_sell.kind,
+                    reason=deferred_sell.reason,
+                )
+                signal = deferred_sell
+                deferred_sell = None
             if not execute or heartbeat:
                 if heartbeat:
                     slog("STRATEGY", "candle already processed", candle_ts=snap.timestamp_ms)
                 continue
             if signal.side in {"buy", "sell"}:
                 if not is_last:
-                    slog(
-                        "STRATEGY",
-                        "catchup observe only; no order on historical bar",
-                        candle_ts=snap.timestamp_ms,
-                    )
+                    if signal.side == "sell" and state.position is not None:
+                        deferred_sell = signal
+                        state.deferred_sell = {
+                            "kind": signal.kind,
+                            "side": signal.side,
+                            "tp_pct": str(signal.tp_pct) if signal.tp_pct is not None else None,
+                            "reason": signal.reason,
+                        }
+                        slog(
+                            "STRATEGY",
+                            "catchup sell deferred to current bar",
+                            candle_ts=snap.timestamp_ms,
+                            kind=signal.kind,
+                        )
+                    else:
+                        slog(
+                            "STRATEGY",
+                            "catchup observe only; no order on historical bar",
+                            candle_ts=snap.timestamp_ms,
+                        )
                     state.last_candle_ts = snap.timestamp_ms
                     if persist:
                         save_state(self.cfg.state_path, state)
@@ -507,6 +554,65 @@ class Engine:
         )
         self._apply_fill(signal, plan, result, index, ts, state, jpy, btc)
 
+    def _repair_pending_basis(
+        self,
+        pending: PendingOrder,
+        result: OrderResult,
+        executor: OrderExecutor,
+    ) -> bool:
+        """Ensure prior fill notional/fees are known before booking a new slice.
+
+        Guessing from a later cumulative average is unsafe. Prefer an exact
+        venue snapshot when sizes match, else order-scoped trade history.
+        """
+        if pending.filled_amount <= ZERO:
+            return True
+        if pending.filled_notional > ZERO:
+            return True
+        if (
+            result.executed_amount == pending.filled_amount
+            and result.average_price > ZERO
+        ):
+            pending.filled_notional = pending.filled_amount * result.average_price
+            if pending.fee_jpy <= ZERO and pending.fee_btc <= ZERO:
+                pending.fee_jpy = result.fee_jpy
+                pending.fee_btc = result.fee_btc
+            slog(
+                "ORDER_STATUS",
+                "pending notional restored from venue snapshot",
+                order_id=pending.order_id,
+                filled_amount=str(pending.filled_amount),
+                filled_notional=str(pending.filled_notional),
+            )
+            return True
+        basis = executor.trade_fill_basis(
+            pending.order_id,
+            pending.filled_amount,
+            side=pending.side,
+        )
+        if basis is None:
+            slog(
+                "ERROR",
+                "pending_execution_notional_missing",
+                order_id=pending.order_id,
+                filled_amount=str(pending.filled_amount),
+                venue_executed=str(result.executed_amount),
+            )
+            return False
+        _amt, notional, fee_jpy, fee_btc = basis
+        pending.filled_notional = notional
+        if pending.fee_jpy <= ZERO and pending.fee_btc <= ZERO:
+            pending.fee_jpy = fee_jpy
+            pending.fee_btc = fee_btc
+        slog(
+            "ORDER_STATUS",
+            "pending notional restored from trade history",
+            order_id=pending.order_id,
+            filled_amount=str(pending.filled_amount),
+            filled_notional=str(pending.filled_notional),
+        )
+        return True
+
     def _poll_pending(self, state: BotState) -> None:
         pending = state.pending
         if pending is None:
@@ -530,8 +636,8 @@ class Engine:
             )
             state.pending = None
             return
-        if result.executed_amount <= pending.filled_amount:
-            if result.reason == "canceled_partial":
+        if result.reason == "canceled_partial":
+            if result.executed_amount <= pending.filled_amount:
                 slog(
                     "ORDER_STATUS",
                     "canceled remainder; pending cleared",
@@ -539,6 +645,17 @@ class Engine:
                 )
                 state.pending = None
                 return
+        if pending.filled_amount > ZERO and pending.filled_notional <= ZERO:
+            if not self._repair_pending_basis(pending, result, executor):
+                if result.reason == "canceled_partial":
+                    slog(
+                        "ORDER_STATUS",
+                        "canceled with unrecoverable basis; pending cleared",
+                        order_id=pending.order_id,
+                    )
+                    state.pending = None
+                return
+        if result.executed_amount <= pending.filled_amount:
             if result.reason == "fill":
                 slog(
                     "ORDER_STATUS",
@@ -558,6 +675,15 @@ class Engine:
             pending.filled_notional, result.executed_amount, result.average_price
         )
         incr_avg = (delta_notional / delta) if delta > ZERO else result.average_price
+        # When venue fees are estimated on the full cumulative notional, seed
+        # the prior slice fee so the delta does not charge the whole order.
+        if (
+            result.fee_estimated
+            and pending.filled_amount > ZERO
+            and pending.fee_jpy <= ZERO
+            and pending.filled_notional > ZERO
+        ):
+            pending.fee_jpy = pending.filled_notional * D(self.cfg.taker_fee_rate)
         delta_fee = result.fee_jpy - pending.fee_jpy
         if delta_fee < ZERO:
             delta_fee = ZERO
@@ -664,8 +790,12 @@ class Engine:
         if not result.ok or result.executed_amount <= ZERO:
             return
         actual_jpy = result.actual_execution_jpy
-        if actual_jpy is None:
-            slog("ERROR", "fill missing actual_execution_jpy; ignoring TARGET/PLANNED")
+        if actual_jpy is None or actual_jpy <= ZERO:
+            slog(
+                "ERROR",
+                "fill missing or zero actual_execution_jpy; ignoring TARGET/PLANNED",
+                executed_amount=str(result.executed_amount),
+            )
             return
         stage = "SIMULATED_FILL" if result.simulated or self.cfg.dry_run else "FILL"
         slog(
@@ -1155,8 +1285,10 @@ class Engine:
                 RiskManager(self.cfg),
                 0,
                 time.monotonic(),
-                paper_jpy=self.cfg.dry_run_free_jpy,
-                paper_btc=self.cfg.dry_run_free_btc,
+                None,
+                self.cfg.dry_run_free_jpy,
+                self.cfg.dry_run_free_btc,
+                None,
             )
         else:
             candles = self.cache.merge(candles)

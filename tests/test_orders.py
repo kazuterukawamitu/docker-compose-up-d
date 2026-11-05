@@ -214,6 +214,67 @@ def test_incremental_notional_uses_the_new_slice() -> None:
     assert delta == Decimal("12")
 
 
+def test_trade_fill_basis_matches_exact_prior_amount() -> None:
+    from bitbank_bot.orders import basis_from_trade_rows, trade_rows_for_order
+
+    rows = trade_rows_for_order(
+        [
+            {
+                "order_id": "9",
+                "side": "buy",
+                "pair": "btc_jpy",
+                "amount": "0.0004",
+                "price": "10000000",
+                "fee_amount_quote": "4.8",
+                "executed_at": 1,
+            },
+            {
+                "order_id": "9",
+                "side": "buy",
+                "pair": "btc_jpy",
+                "amount": "0.0004",
+                "price": "12000000",
+                "fee_amount_quote": "5.76",
+                "executed_at": 2,
+            },
+        ],
+        "9",
+        side="buy",
+        pair="btc_jpy",
+    )
+    assert rows is not None
+    basis = basis_from_trade_rows(rows, Decimal("0.0004"))
+    assert basis is not None
+    amount, notional, fee_jpy, fee_btc = basis
+    assert amount == Decimal("0.0004")
+    assert notional == Decimal("4000")
+    assert fee_jpy == Decimal("4.8")
+    assert fee_btc == Decimal("0")
+
+
+def test_trade_rows_reject_side_mismatch() -> None:
+    from bitbank_bot.orders import trade_rows_for_order
+
+    assert (
+        trade_rows_for_order(
+            [
+                {
+                    "order_id": "9",
+                    "side": "sell",
+                    "pair": "btc_jpy",
+                    "amount": "0.001",
+                    "price": "10000000",
+                    "executed_at": 1,
+                }
+            ],
+            "9",
+            side="buy",
+            pair="btc_jpy",
+        )
+        is None
+    )
+
+
 def test_protective_sell_can_be_market() -> None:
     client = MagicMock()
     client.get_active_orders.return_value = []
